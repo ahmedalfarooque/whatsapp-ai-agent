@@ -1,0 +1,31 @@
+node_modules/
+dist/
+coverage/
+
+# Runtime data — never commit
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+!data/.gitkeep
+
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+secrets/*.json
+!secrets/.gitkeep
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Caddy runtime state
+caddy_data/
+caddy_config/

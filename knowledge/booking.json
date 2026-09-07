@@ -1,0 +1,5 @@
+{
+  "_comment": "EXAMPLE / PLACEHOLDER — informational only. Actual booking duration/buffer/hours enforced by the app come from environment variables (BOOKING_DURATION_MINUTES, BOOKING_BUFFER_MINUTES, BUSINESS_HOURS_START/END, BUSINESS_DAYS).",
+  "servicesRequiringBooking": ["Example Consultation", "Example Deep Dive"],
+  "howToBook": "Customers can ask to book an appointment directly in WhatsApp. The assistant will ask which service, then a preferred date, check real availability, and confirm before booking."
+}

@@ -1,0 +1,20 @@
+# Replace with your real domain (must already point at this VPS's IP via a
+# DNS A/AAAA record before Caddy can obtain an HTTPS certificate).
+{$DOMAIN:whatsapp-agent.example.com} {
+	reverse_proxy app:3000
+
+	encode gzip
+
+	# Basic security headers. Adjust if a specific client needs something
+	# different (e.g. embedding in an iframe).
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer-when-downgrade"
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
