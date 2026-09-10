@@ -1,0 +1,1034 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WhatsApp AI Agent — Complete Project Documentation</title>
+<style>
+  @page { size: A4; }
+
+  :root{
+    --navy:#0b1220; --navy2:#12213b; --teal:#0fb98a; --teal-dk:#0a8f6a;
+    --blue:#2563eb; --blue-dk:#1d4ed8; --amber:#d97706; --red:#dc2626;
+    --ink:#1e293b; --sub:#475569; --line:#e2e8f0; --bg:#f8fafc;
+    --kid:#fff7ed; --kid-bd:#fdba74; --dev:#eff6ff; --dev-bd:#93c5fd;
+    --warn:#fef2f2; --warn-bd:#fca5a5; --ok:#ecfdf5; --ok-bd:#6ee7b7;
+    --plan:#fefce8; --plan-bd:#fde047;
+  }
+  *{ box-sizing:border-box; }
+  body{ font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color:var(--ink); font-size:10.3pt; line-height:1.55; margin:0; }
+  h1,h2,h3,h4{ font-family: 'Segoe UI Semibold','Segoe UI', Arial, sans-serif; color:var(--navy2); margin:0 0 3mm 0; }
+  h1{ font-size:20pt; border-bottom:3px solid var(--teal); padding-bottom:2mm; }
+  h2{ font-size:14pt; color:var(--blue-dk); margin-top:6mm;}
+  h3{ font-size:11.5pt; color:var(--navy2); margin-top:4mm; }
+  p{ margin:2mm 0; }
+  ul,ol{ margin:2mm 0; padding-left:5mm; }
+  li{ margin:1mm 0; }
+  code, .mono{ font-family:'Consolas','Courier New',monospace; font-size:9pt; }
+  .small{ font-size:8.5pt; color:var(--sub); }
+  a{ color:var(--blue-dk); }
+
+  /* ---- COVER ---- */
+  /* Chrome's print engine reserves the page margin as a hard boundary — content
+     cannot bleed into it even with negative CSS margins — so this is sized to
+     exactly fill the printable content box (297mm - 10mm - 12mm = 275mm tall). */
+  .cover-page{ page-break-after: always; height:273mm; width:100%;
+    background: linear-gradient(160deg,#071026 0%, #0b1220 45%, #123a5e 100%);
+    color:#e6edf7; position:relative; overflow:hidden; border-radius:6px; }
+  .cover-inner{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20mm; }
+  .cover-kicker{ letter-spacing:4px; font-size:11pt; color:#5eead4; font-weight:600; margin-bottom:8mm;}
+  .cover-title{ font-size:40pt; font-weight:800; color:#ffffff; line-height:1.05; margin:0; }
+  .cover-sub{ font-size:13pt; color:#a8c5e8; max-width:140mm; margin-top:8mm; line-height:1.5; }
+  .cover-badge-row{ display:flex; gap:6mm; margin-top:16mm; flex-wrap:wrap; justify-content:center; }
+  .cover-badge{ background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18); border-radius:8px; padding:4mm 6mm; font-size:9pt; color:#dbeafe; display:flex; flex-direction:column; align-items:center; width:28mm;}
+  .cover-badge .ic{ font-size:20pt; margin-bottom:2mm; }
+  .cover-footer{ position:absolute; bottom:14mm; left:0; right:0; text-align:center; font-size:9pt; color:#7f9cc4; }
+
+  /* ---- SECTION DIVIDER ---- */
+  .divider{ page-break-before: always; height:273mm; width:100%; display:flex; flex-direction:column; justify-content:center;
+    background: linear-gradient(135deg,#0b1220,#123a5e); color:white; padding:20mm 14mm; box-sizing:border-box; border-radius:6px; }
+  .divider .num{ font-size:13pt; color:#5eead4; letter-spacing:3px; font-weight:700; }
+  .divider h1{ color:white; border:none; font-size:30pt; margin-top:4mm; }
+  .divider p{ color:#b9d1ef; font-size:12pt; max-width:150mm; }
+
+  .chapter{ page-break-before: always; }
+  .noBreakBefore{ page-break-before: avoid; }
+
+  /* ---- BOXES ---- */
+  .box{ border-radius:8px; padding:4mm 5mm; margin:4mm 0; border:1px solid var(--line); }
+  .kid{ background:var(--kid); border-color:var(--kid-bd); }
+  .kid .tag{ color:#c2410c; font-weight:700; font-size:9pt; letter-spacing:1px; }
+  .dev{ background:var(--dev); border-color:var(--dev-bd); }
+  .dev .tag{ color:#1d4ed8; font-weight:700; font-size:9pt; letter-spacing:1px; }
+  .warn{ background:var(--warn); border-color:var(--warn-bd); }
+  .warn .tag{ color:#b91c1c; font-weight:700; font-size:9pt; letter-spacing:1px; }
+  .ok{ background:var(--ok); border-color:var(--ok-bd); }
+  .ok .tag{ color:#047857; font-weight:700; font-size:9pt; letter-spacing:1px; }
+  .plan{ background:var(--plan); border-color:var(--plan-bd); }
+  .plan .tag{ color:#a16207; font-weight:700; font-size:9pt; letter-spacing:1px; }
+  .box p:first-child{ margin-top:0; } .box p:last-child{ margin-bottom:0; }
+
+  /* ---- FLOW DIAGRAM ---- */
+  .flow{ display:flex; flex-direction:column; align-items:center; margin:5mm 0; }
+  .flow .step{ background:white; border:1.5px solid var(--blue); color:var(--navy2); border-radius:8px;
+    padding:2.5mm 6mm; font-weight:600; font-size:9.5pt; text-align:center; min-width:70mm; }
+  .flow .step.acc{ border-color:var(--teal); background:#f0fdfa; }
+  .flow .step.warn{ border-color:var(--red); background:#fef2f2; }
+  .flow .arrow{ color:var(--sub); font-size:11pt; margin:0.5mm 0; }
+  .flow-row{ display:flex; align-items:center; justify-content:center; gap:4mm; margin:5mm 0; flex-wrap:wrap;}
+  .flow-row .step{ min-width:34mm; }
+  .flow-row .arrowh{ color:var(--sub); font-size:13pt; }
+
+  table{ width:100%; border-collapse:collapse; margin:4mm 0; font-size:9pt; }
+  th{ background:var(--navy2); color:white; text-align:left; padding:2mm 3mm; }
+  td{ border-bottom:1px solid var(--line); padding:2mm 3mm; vertical-align:top; }
+  tr:nth-child(even) td{ background:#f8fafc; }
+
+  .codebox{ background:#0f172a; color:#d1e8ff; border-radius:6px; padding:3mm 4mm; font-size:8.6pt; overflow-x:auto; white-space:pre-wrap; margin:3mm 0;}
+  .codebox .c1{ color:#7dd3fc;} .codebox .c2{ color:#86efac;} .codebox .c3{ color:#fca5a5;}
+
+  .toc-item{ display:flex; justify-content:space-between; border-bottom:1px dotted var(--line); padding:1.6mm 0; font-size:10pt;}
+  .toc-item .n{ color:var(--sub); }
+  .toc-section{ font-weight:700; color:var(--navy2); margin-top:4mm; }
+
+  .status-table td.s-ok{ color:#047857; font-weight:700;}
+  .status-table td.s-cfg{ color:#a16207; font-weight:700;}
+  .status-table td.s-no{ color:#b91c1c; font-weight:700;}
+
+  .grid2{ display:flex; gap:4mm; }
+  .grid2 > div{ flex:1; }
+  .kv{ display:flex; gap:2mm; font-size:9pt; margin:1mm 0;}
+  .kv b{ min-width:38mm; display:inline-block; color:var(--navy2);}
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<div class="cover-page"><div class="cover-inner">
+  <div class="cover-kicker">COMPLETE PROJECT DOCUMENTATION</div>
+  <div class="cover-title">WhatsApp<br>AI Agent</div>
+  <div class="cover-sub">From WhatsApp message to AI conversation, memory, calendar booking,<br>and production deployment.</div>
+  <div class="cover-badge-row">
+    <div class="cover-badge"><div class="ic">&#128172;</div>WhatsApp</div>
+    <div class="cover-badge"><div class="ic">&#129504;</div>AI Brain</div>
+    <div class="cover-badge"><div class="ic">&#128190;</div>Memory</div>
+    <div class="cover-badge"><div class="ic">&#128197;</div>Calendar</div>
+    <div class="cover-badge"><div class="ic">&#9729;</div>Cloud / VPS</div>
+  </div>
+  <div class="cover-footer">Generated from the actual project source code &middot; C:\Websites\WhatsApp AI Agent</div>
+</div></div>
+
+<!-- ============ TABLE OF CONTENTS ============ -->
+<div class="chapter noBreakBefore" id="toc">
+<h1>Table of Contents</h1>
+<div class="toc-section">Part 1 — Understanding the Project</div>
+<div class="toc-item"><span>1. Executive Summary — What Is This Project?</span><span class="n" data-toc="ch1">5</span></div>
+<div class="toc-item"><span>2. Complete System Architecture</span><span class="n" data-toc="ch2">7</span></div>
+<div class="toc-item"><span>3. Every Connection Explained (A–L)</span><span class="n" data-toc="ch3">10</span></div>
+<div class="toc-item"><span>4. Message Lifecycle (Step by Step)</span><span class="n" data-toc="ch4">14</span></div>
+<div class="toc-item"><span>5. Real Conversation Examples</span><span class="n" data-toc="ch5">16</span></div>
+
+<div class="toc-section">Part 2 — How It Works Inside</div>
+<div class="toc-item"><span>6. Security</span><span class="n" data-toc="ch6">19</span></div>
+<div class="toc-item"><span>7. Error Handling</span><span class="n" data-toc="ch7">21</span></div>
+<div class="toc-item"><span>8. The Database (SQLite Memory)</span><span class="n" data-toc="ch8">22</span></div>
+<div class="toc-item"><span>9. The AI Agent Loop</span><span class="n" data-toc="ch9">24</span></div>
+<div class="toc-item"><span>10. The Booking System</span><span class="n" data-toc="ch10">26</span></div>
+<div class="toc-item"><span>11. Configuration Reference (Environment Variables)</span><span class="n" data-toc="ch11">28</span></div>
+<div class="toc-item"><span>12. Testing</span><span class="n" data-toc="ch12">31</span></div>
+
+<div class="toc-section">Part 3 — Running &amp; Deploying</div>
+<div class="toc-item"><span>13. Running It Locally</span><span class="n" data-toc="ch13">34</span></div>
+<div class="toc-item"><span>14. Deploying to a VPS</span><span class="n" data-toc="ch14">35</span></div>
+<div class="toc-item"><span>15. Setting Up Meta WhatsApp Cloud API</span><span class="n" data-toc="ch15">37</span></div>
+<div class="toc-item"><span>16. Setting Up OpenRouter</span><span class="n" data-toc="ch16">38</span></div>
+<div class="toc-item"><span>17. Setting Up Google Calendar</span><span class="n" data-toc="ch17">39</span></div>
+<div class="toc-item"><span>18. Managing Business Knowledge</span><span class="n" data-toc="ch18">40</span></div>
+<div class="toc-item"><span>19. Project File &amp; Folder Map</span><span class="n" data-toc="ch19">41</span></div>
+<div class="toc-item"><span>20. Monitoring &amp; Maintenance</span><span class="n" data-toc="ch20">42</span></div>
+
+<div class="toc-section">Part 4 — Status &amp; Reference</div>
+<div class="toc-item"><span>21. Current Project Status Dashboard</span><span class="n" data-toc="ch21">44</span></div>
+<div class="toc-item"><span>22. Limitations &amp; Risks</span><span class="n" data-toc="ch22">45</span></div>
+<div class="toc-item"><span>23. Explain This Project to a 10-Year-Old</span><span class="n" data-toc="ch23">46</span></div>
+<div class="toc-item"><span>24. Glossary</span><span class="n" data-toc="ch24">48</span></div>
+<div class="toc-item"><span>25. Final Master Diagram</span><span class="n" data-toc="ch25">50</span></div>
+<div class="toc-item"><span>26. Source of Truth &amp; Generation Record</span><span class="n" data-toc="ch26">52</span></div>
+</div>
+
+<div class="divider"><div class="num">PART 1</div><h1>Understanding the Project</h1><p>What this system is, how the pieces connect, and what happens from the moment a customer types a message.</p></div>
+
+<div class="chapter noBreakBefore" id="ch1">
+<h1>1. Executive Summary</h1>
+
+<h2>What is this project?</h2>
+<p>The <b>WhatsApp AI Agent</b> is a computer program that lets a business talk to its customers on WhatsApp automatically. A customer sends a normal WhatsApp message, and this program reads it, thinks about it using an AI model, remembers earlier parts of the conversation, answers questions using the business's own information, and — if the customer wants — checks a real calendar and books a real appointment. All of this happens without a human typing the reply.</p>
+
+<h2>What problem does it solve?</h2>
+<p>Many small businesses cannot answer every WhatsApp message instantly, especially outside office hours. Customers ask the same questions repeatedly ("what do you charge?", "are you open Saturday?", "can I book Tuesday at 3?"). This project answers those automatically, using only facts the business owner has approved, and hands off to a human when it doesn't know something.</p>
+
+<h2>What happens when a customer sends a message?</h2>
+<div class="box dev"><span class="tag">EXAMPLE</span>
+<p>Customer sends: <i>"Hello, I want to book an appointment tomorrow."</i></p>
+</div>
+
+<div class="flow">
+  <div class="step">Customer types a message in WhatsApp</div><div class="arrow">&darr;</div>
+  <div class="step">WhatsApp (the app on their phone)</div><div class="arrow">&darr;</div>
+  <div class="step">Meta WhatsApp Cloud API (Meta's servers)</div><div class="arrow">&darr;</div>
+  <div class="step acc">Secure Webhook (our server's "doorbell")</div><div class="arrow">&darr;</div>
+  <div class="step acc">Our Node.js application</div><div class="arrow">&darr;</div>
+  <div class="step">Customer memory (SQLite database)</div><div class="arrow">&darr;</div>
+  <div class="step">AI / OpenRouter reads the message + memory + business knowledge</div><div class="arrow">&darr;</div>
+  <div class="step">AI decides: "Do I need a tool?" (e.g. check the calendar)</div><div class="arrow">&darr;</div>
+  <div class="step">Google Calendar (only if a tool was needed)</div><div class="arrow">&darr;</div>
+  <div class="step acc">AI writes the final reply</div><div class="arrow">&darr;</div>
+  <div class="step">WhatsApp sends it back to the customer</div>
+</div>
+
+<h2>The Smart Receptionist analogy</h2>
+<div class="box kid"><span class="tag">EXPLAIN LIKE I'M 10</span>
+<p>Imagine this whole system is <b>a smart receptionist working at a front desk</b>:</p>
+<ul>
+<li><b>WhatsApp</b> = the telephone the customer calls on</li>
+<li><b>AI (OpenRouter)</b> = the receptionist's brain, doing the thinking</li>
+<li><b>SQLite</b> = the notebook where the receptionist writes down who called and what was said</li>
+<li><b>Google Calendar</b> = the appointment diary on the desk</li>
+<li><b>Webhook</b> = the doorbell that tells the receptionist "someone is here!"</li>
+<li><b>Knowledge files</b> = the instruction binder listing prices, services and rules</li>
+<li><b>Docker</b> = the box that lets the whole desk be moved to any building and still work the same way</li>
+<li><b>Caddy</b> = the security guard at the door who checks IDs (HTTPS) before anyone gets in</li>
+</ul>
+</div>
+
+<div class="box dev"><span class="tag">FOR THE TECHNICAL READER</span>
+<p>This is a Node.js/TypeScript Express server that receives Meta WhatsApp Cloud API webhook events, resolves a customer by their WhatsApp number, loads/persists conversation state in SQLite, builds an OpenRouter chat-completion request with a tool-calling loop (<code>check_availability</code>, <code>book_appointment</code>), and calls the Google Calendar API (service account auth) for real availability and booking. It runs as a Docker container behind Caddy for automatic HTTPS, intended for a single VPS.</p>
+</div>
+</div>
+<div class="chapter" id="ch2">
+<h1>2. Complete System Architecture</h1>
+<p>This diagram matches the real source code layout in <code>src/</code>. Every box below corresponds to actual files, not a plan.</p>
+
+<div class="flow">
+  <div class="step">CUSTOMER</div><div class="arrow">&darr;</div>
+  <div class="step">WHATSAPP APP</div><div class="arrow">&darr;</div>
+  <div class="step">META WHATSAPP CLOUD API</div><div class="arrow">&darr;</div>
+  <div class="step warn">HTTPS (encrypted tunnel over the internet)</div><div class="arrow">&darr;</div>
+  <div class="step warn">CADDY — reverse proxy, automatic HTTPS certificate</div><div class="arrow">&darr;</div>
+  <div class="step acc">NODE.JS / EXPRESS — <code>src/app.ts</code></div><div class="arrow">&darr;</div>
+  <div class="step acc">WEBHOOK — signature check, verify handshake — <code>src/webhook/</code></div><div class="arrow">&darr;</div>
+  <div class="step acc">MESSAGE PROCESSING PIPELINE — <code>src/pipeline/processInboundMessage.ts</code></div><div class="arrow">&darr;</div>
+  <div class="step">CUSTOMER IDENTITY — resolved from WhatsApp number — <code>src/memory/customerRepo.ts</code></div><div class="arrow">&darr;</div>
+  <div class="step">SQLITE MEMORY — <code>src/memory/*</code></div><div class="arrow">&darr;</div>
+  <div class="step">BUSINESS KNOWLEDGE FILES — <code>knowledge/*.md, *.json</code></div><div class="arrow">&darr;</div>
+  <div class="step acc">OPENROUTER / AI — <code>src/llm/*</code></div><div class="arrow">&darr;</div>
+  <div class="step acc">TOOL CALLING — <code>src/tools/*</code></div><div class="arrow">&darr;</div>
+  <div class="step">GOOGLE CALENDAR — <code>src/calendar/*</code></div><div class="arrow">&darr;</div>
+  <div class="step">WHATSAPP RESPONSE — <code>src/whatsapp/client.ts</code></div>
+</div>
+
+<h2>Cross-cutting concerns (present at every step)</h2>
+<table>
+<tr><th>Concern</th><th>Where it lives</th><th>What it does</th></tr>
+<tr><td>Webhook signature verification</td><td><code>src/webhook/verifySignature.ts</code></td><td>Confirms the request really came from Meta (HMAC-SHA256), not an impostor.</td></tr>
+<tr><td>Idempotency / duplicate protection</td><td><code>src/memory/webhookEventRepo.ts</code></td><td>Meta's message ID is stored once; a repeat delivery is silently ignored.</td></tr>
+<tr><td>Per-customer concurrency lock</td><td><code>src/pipeline/idempotency.ts</code> (<code>withCustomerLock</code>)</td><td>Two messages from the same customer never get processed at the same time.</td></tr>
+<tr><td>Retry / timeout handling</td><td><code>src/utils/retry.ts</code></td><td>Retries WhatsApp/OpenRouter/Calendar calls with backoff on transient errors; gives up immediately on permanent (4xx) errors.</td></tr>
+<tr><td>Structured logging + secret redaction</td><td><code>src/logger.ts</code></td><td>Every log line is JSON; tokens/keys/signatures are automatically redacted; WhatsApp numbers are masked.</td></tr>
+<tr><td>Rate limiting</td><td><code>src/app.ts</code> (<code>express-rate-limit</code>)</td><td>Caps requests per minute per IP on <code>/webhook</code>.</td></tr>
+<tr><td>Security headers (Helmet)</td><td><code>src/app.ts</code></td><td>Standard hardening headers on every response.</td></tr>
+<tr><td>Health endpoint</td><td><code>src/health/router.ts</code> — <code>GET /health</code></td><td>"Is the process alive?" — used by Docker's HEALTHCHECK.</td></tr>
+<tr><td>Readiness endpoint</td><td><code>src/health/router.ts</code> — <code>GET /readiness</code></td><td>"Can it actually reach the database?"</td></tr>
+<tr><td>Graceful shutdown</td><td><code>src/index.ts</code></td><td>On SIGTERM/SIGINT, stops accepting new requests, closes the DB, then exits (forced after 10s if stuck).</td></tr>
+</table>
+
+<h2>Simplified architecture for a beginner</h2>
+<div class="box kid"><span class="tag">SIMPLE VERSION</span>
+<div class="flow" style="margin-top:2mm;">
+  <div class="step">Customer sends a WhatsApp message</div><div class="arrow">&darr;</div>
+  <div class="step acc">Our program reads it and remembers who is asking</div><div class="arrow">&darr;</div>
+  <div class="step acc">The AI brain thinks about the best answer, checking the calendar if needed</div><div class="arrow">&darr;</div>
+  <div class="step">The answer is sent back on WhatsApp</div>
+</div>
+</div>
+</div>
+<div class="chapter" id="ch3">
+<h1>3. Every Connection Explained</h1>
+
+<h2>A. Customer &rarr; WhatsApp</h2>
+<p>The customer opens WhatsApp on their phone and types <i>"Hi"</i>. WhatsApp packages this as a message and sends it to Meta's servers over the internet — nothing our code does yet; this step happens entirely inside the WhatsApp app and Meta's network.</p>
+
+<h2>B. WhatsApp &rarr; Meta Cloud API</h2>
+<p>Meta owns WhatsApp and runs the "Cloud API" — a set of servers that receive every message sent to a business's WhatsApp number and can send messages back on the business's behalf. Our application never talks to the customer's phone directly; it always talks to Meta, and Meta relays the message.</p>
+
+<h2>C. Meta &rarr; Webhook (<code>POST /webhook</code>)</h2>
+<div class="box kid"><span class="tag">WHAT IS A WEBHOOK?</span>
+<p>A webhook is like a doorbell. Instead of our program constantly walking to the door and asking "did anyone arrive yet?" (which wastes effort), we give Meta our doorbell number (a URL) and Meta rings it themselves the instant a new message shows up. Our code (<code>src/webhook/router.ts</code>) is always listening for that ring.</p>
+</div>
+<p class="small">Real endpoint in this project: <code>POST https://&lt;your-domain&gt;/webhook</code>, implemented in <code>src/webhook/router.ts</code>.</p>
+
+<h2>D. Webhook Security</h2>
+<table>
+<tr><th>Layer</th><th>Purpose</th><th>Source file</th></tr>
+<tr><td>GET verification (one-time handshake)</td><td>When you first register the webhook URL with Meta, Meta sends a GET request with a secret <code>hub.verify_token</code>. We check it matches our own <code>WHATSAPP_VERIFY_TOKEN</code> before confirming.</td><td><code>src/webhook/verifyToken.ts</code></td></tr>
+<tr><td>POST signature (every single message)</td><td>Meta signs every webhook POST with <code>X-Hub-Signature-256</code>, computed from the exact request body and our <code>META_APP_SECRET</code>. We recompute the same signature and compare.</td><td><code>src/webhook/verifySignature.ts</code></td></tr>
+<tr><td>Timing-safe comparison</td><td>We compare signatures with <code>crypto.timingSafeEqual</code>, not <code>===</code>, so an attacker can't guess the correct signature one character at a time by measuring how fast the comparison fails.</td><td>same file</td></tr>
+</table>
+<div class="box kid"><span class="tag">WHY THIS MATTERS</span>
+<p>Without this check, anyone on the internet could send a fake message to our webhook pretending to be a real customer — for example, pretending someone confirmed a booking they never made. The signature proves the message truly came from Meta.</p>
+</div>
+
+<h2>E. Node.js / Express — the central controller</h2>
+<p>Express is the framework that receives every HTTP request and decides which piece of code should handle it. In this project, it's the single front door: it applies security headers (Helmet), logging, rate limiting, and JSON parsing, then routes <code>/health</code>, <code>/readiness</code>, and <code>/webhook</code> to their handlers. It's "central" because every request — and only requests that came in this way — reach the rest of the system.</p>
+
+<h2>F. SQLite — where the receptionist writes things down</h2>
+<p>SQLite is a database that lives in a single file (<code>data/app.db</code>) rather than a separate server. This project stores:</p>
+<ul>
+<li><b>customers</b> — one row per WhatsApp number that has ever messaged</li>
+<li><b>conversations</b> — a "session" of memory for a customer; a new one starts on restart</li>
+<li><b>conversation_messages</b> — every message, in order, so the AI has real context</li>
+<li><b>booking_sessions</b> — partial booking details being collected across turns</li>
+<li><b>webhook_events</b> — Meta's message IDs, so the same message is never processed twice</li>
+</ul>
+<p>See Chapter 8 for the full schema diagram and an explanation of every table.</p>
+
+<h2>G. Knowledge files — the instruction binder</h2>
+<div class="codebox">knowledge/
+<span class="c1">├── business.md</span>
+<span class="c1">├── services.md</span>
+<span class="c1">├── policies.md</span>
+<span class="c1">├── faq.md</span>
+<span class="c1">└── booking.json</span></div>
+<p>These are plain Markdown/JSON files, loaded once at startup by <code>src/knowledge/loader.ts</code> and pasted into the AI's system prompt. Business facts (prices, hours, policies) live here — <b>not</b> hard-coded in the TypeScript source — so a non-developer can edit a text file to change what the AI says, without touching code. The system prompt (<code>src/llm/buildSystemPrompt.ts</code>) explicitly instructs the AI to answer only from these files and never invent facts.</p>
+<div class="box plan"><span class="tag">PLANNED / NOT YET CONFIGURED</span>
+<p>The knowledge files shipped in this repository contain example/placeholder content only (clearly marked as such inside each file). They must be replaced with the real business's information before going live — see Chapter 18.</p>
+</div>
+
+<h2>H. OpenRouter — the connection to the AI model</h2>
+<div class="flow-row">
+  <div class="step">Our application</div><span class="arrowh">&rarr;</span>
+  <div class="step acc">OpenRouter</div><span class="arrowh">&rarr;</span>
+  <div class="step">AI model</div><span class="arrowh">&rarr;</span>
+  <div class="step">Response / Tool call</div><span class="arrowh">&rarr;</span>
+  <div class="step">Our application</div>
+</div>
+<p>OpenRouter is a single API that can talk to many different AI models. The model actually used is set by the <code>OPENROUTER_MODEL</code> environment variable (<code>src/config/env.ts</code> defaults it to <code>openai/gpt-4o-mini</code> if not overridden) — changing models means changing one environment variable, not rewriting code.</p>
+<div class="box plan"><span class="tag">NOTE</span><p>This documentation does not claim a specific model is "live" in production — that depends entirely on what value is placed in the deployed <code>.env</code> file for <code>OPENROUTER_MODEL</code>.</p></div>
+
+<h2>I. Tool calling — the receptionist's special abilities</h2>
+<div class="box kid"><span class="tag">RECEPTIONIST ANALOGY</span>
+<p>A good receptionist doesn't just talk — sometimes they need to walk over to the appointment diary and actually check it. "Tool calling" is the AI doing exactly that: it can pause mid-thought and say "I need to actually look this up," run a real function in our code, get a real answer back, and then continue.</p>
+</div>
+<div class="flow">
+  <div class="step">AI: "Do I need a tool for this?"</div><div class="arrow">&darr;</div>
+  <div class="step acc">check_availability &nbsp;or&nbsp; book_appointment</div><div class="arrow">&darr;</div>
+  <div class="step">Real result comes back (e.g. real free time slots)</div><div class="arrow">&darr;</div>
+  <div class="step">AI reads the result and writes the final reply</div><div class="arrow">&darr;</div>
+  <div class="step">Customer receives the answer</div>
+</div>
+<p class="small">Implemented in <code>src/tools/checkAvailability.ts</code>, <code>src/tools/bookAppointment.ts</code>, registered in <code>src/tools/index.ts</code>, and driven by the loop in <code>src/llm/agentLoop.ts</code>.</p>
+
+<h2>J. Google Calendar</h2>
+<div class="flow-row">
+  <div class="step">AI</div><span class="arrowh">&rarr;</span><div class="step">check availability</div><span class="arrowh">&rarr;</span><div class="step acc">Google Calendar</div><span class="arrowh">&rarr;</span><div class="step">available / not available</div>
+</div>
+<div class="flow-row">
+  <div class="step">AI</div><span class="arrowh">&rarr;</span><div class="step">book appointment</div><span class="arrowh">&rarr;</span><div class="step warn">RE-CHECK availability</div><span class="arrowh">&rarr;</span><div class="step acc">create event</div><span class="arrowh">&rarr;</span><div class="step">confirmation</div>
+</div>
+<p><b>Why check availability twice?</b> Between the moment the AI shows a customer a free slot and the moment they say "yes, book it," a few seconds (or longer) pass. In that window, someone else could book that exact slot. <code>src/calendar/booking.ts</code> re-queries Google Calendar's free/busy data immediately before creating the event, and only proceeds if the slot is still free — this closes that race window instead of trusting a stale answer.</p>
+
+<h2>K. Docker</h2>
+<div class="box kid"><span class="tag">EXPLAIN LIKE I'M 10</span>
+<p>Imagine packing the entire application — the code, the exact version of Node.js it needs, all its tools — into one sealed box. Wherever you ship that box (any computer, any VPS), it opens up and runs <i>exactly</i> the same way. That box is called a <b>container</b>, and Docker is the tool that builds and runs it.</p>
+</div>
+<table>
+<tr><th>File</th><th>Purpose</th></tr>
+<tr><td><code>Dockerfile</code></td><td>Recipe for building the application "box": compiles the TypeScript, installs only production dependencies, runs as a non-root user, includes a healthcheck.</td></tr>
+<tr><td><code>docker-compose.yml</code></td><td>Runs two boxes together: the app, and Caddy (the HTTPS security guard) in front of it.</td></tr>
+<tr><td>Volumes (<code>./data</code>, <code>./secrets</code>)</td><td>Folders on the real VPS disk that are shared into the container, so the SQLite database survives even if the container is rebuilt or restarted.</td></tr>
+</table>
+
+<h2>L. Caddy — the security guard at the door</h2>
+<div class="flow-row">
+  <div class="step">Internet</div><span class="arrowh">&rarr;</span><div class="step warn">HTTPS</div><span class="arrowh">&rarr;</span><div class="step acc">Caddy</div><span class="arrowh">&rarr;</span><div class="step">Our application</div>
+</div>
+<p>Caddy is a web server placed in front of the application. Its job in <code>docker-compose.yml</code>/<code>nginx/Caddyfile</code> is to automatically obtain and renew a free HTTPS certificate (via Let's Encrypt) for the domain configured in <code>DOMAIN</code>, and forward traffic to the app container over plain HTTP internally. Meta refuses to send webhooks to a non-HTTPS URL, so this step is required before the webhook can be registered.</p>
+</div>
+<div class="chapter" id="ch4">
+<h1>4. Message Lifecycle — Step by Step</h1>
+<p>Every single inbound WhatsApp message goes through exactly this sequence (source: <code>src/webhook/router.ts</code> + <code>src/pipeline/processInboundMessage.ts</code>):</p>
+<table>
+<tr><th>#</th><th>Step</th><th>In simple words</th></tr>
+<tr><td>1</td><td>Customer sends a message</td><td>They type in WhatsApp and hit send.</td></tr>
+<tr><td>2</td><td>Meta receives it</td><td>Meta's servers get the message first.</td></tr>
+<tr><td>3</td><td>Meta calls our webhook</td><td>Meta rings our doorbell with the message attached.</td></tr>
+<tr><td>4</td><td>Server verifies the request</td><td>We check the signature is really from Meta.</td></tr>
+<tr><td>5</td><td>Server replies <code>200 OK</code> immediately</td><td>We tell Meta "got it" right away, before doing any AI work, so Meta doesn't think we're broken and retry.</td></tr>
+<tr><td>6</td><td>Message ID is checked</td><td>Have we seen this exact message before?</td></tr>
+<tr><td>7</td><td>Duplicate messages are ignored</td><td>If yes — stop here, do nothing else.</td></tr>
+<tr><td>8</td><td>Customer is identified by <code>wa_id</code></td><td>Their WhatsApp number becomes their ID automatically.</td></tr>
+<tr><td>9</td><td>Customer lock is acquired</td><td>Make sure no other message from this same customer runs at the same time.</td></tr>
+<tr><td>10</td><td>Conversation is loaded</td><td>Pull up their notebook page from SQLite.</td></tr>
+<tr><td>11</td><td>Restart command checked</td><td>Did they just say "restart" or "reset"?</td></tr>
+<tr><td>12</td><td>Knowledge is used</td><td>Business facts are added to what the AI can see.</td></tr>
+<tr><td>13</td><td>AI receives full context</td><td>System instructions + history + knowledge, sent to OpenRouter.</td></tr>
+<tr><td>14</td><td>AI answers OR requests a tool</td><td>Either a plain reply, or "let me check the calendar first."</td></tr>
+<tr><td>15</td><td>Tool executes</td><td>Our code actually calls Google Calendar (if needed).</td></tr>
+<tr><td>16</td><td>Tool result goes back to the AI</td><td>The AI sees the real answer, not a guess.</td></tr>
+<tr><td>17</td><td>AI generates the final response</td><td>Now it writes the message the customer will actually see.</td></tr>
+<tr><td>18</td><td>WhatsApp API sends the response</td><td>Our code calls Meta's API to deliver the reply.</td></tr>
+<tr><td>19</td><td>Conversation is stored</td><td>Every turn is saved to SQLite for next time.</td></tr>
+<tr><td>20</td><td>Lock released</td><td>The next message from this customer (or anyone) can now be processed.</td></tr>
+</table>
+<div class="box dev"><span class="tag">SOURCE MAPPING</span>
+<p>Steps 4–7 &rarr; <code>src/webhook/router.ts</code>. Steps 8–11 &rarr; <code>src/pipeline/processInboundMessage.ts</code> + <code>src/restart/isRestartCommand.ts</code>. Steps 12–17 &rarr; <code>src/llm/agentLoop.ts</code> + <code>src/tools/*</code>. Step 18 &rarr; <code>src/whatsapp/client.ts</code>. Steps 19–20 &rarr; <code>src/memory/conversationRepo.ts</code> + <code>src/pipeline/idempotency.ts</code>.</p>
+</div>
+</div>
+<div class="chapter" id="ch5">
+<h1>5. Real Conversation Examples</h1>
+<p>These examples reflect the actual behavior verified by the test suite (<code>tests/integration/conversationFlow.e2e.test.ts</code>), not hypothetical behavior.</p>
+
+<h3>Example 1 — First contact</h3>
+<div class="box ok"><b>Customer:</b> "Hi"<br><b>Agent:</b> "Hello! How can I help you today?"</div>
+<p>A brand-new customer is automatically created in the <code>customers</code> table using their WhatsApp number — no signup form, no manual step.</p>
+
+<h3>Example 2 — Question answered from knowledge</h3>
+<div class="box ok"><b>Customer:</b> "What services do you provide?"<br><b>Agent:</b> answers using only what's written in <code>knowledge/services.md</code> — it cannot invent a service that isn't listed there.</div>
+
+<h3>Example 3 — Checking availability</h3>
+<div class="box ok"><b>Customer:</b> "I want an appointment tomorrow."</div>
+<div class="flow-row"><div class="step">AI</div><span class="arrowh">&rarr;</span><div class="step acc">check_availability</div><span class="arrowh">&rarr;</span><div class="step">Google Calendar</div><span class="arrowh">&rarr;</span><div class="step">real free slots</div><span class="arrowh">&rarr;</span><div class="step">AI's reply</div></div>
+
+<h3>Example 4 — Booking it</h3>
+<div class="box ok"><b>Customer:</b> "Book it for me."</div>
+<div class="flow-row"><div class="step">AI</div><span class="arrowh">&rarr;</span><div class="step acc">book_appointment</div><span class="arrowh">&rarr;</span><div class="step warn">re-check</div><span class="arrowh">&rarr;</span><div class="step">create event</div><span class="arrowh">&rarr;</span><div class="step">confirmation</div></div>
+<p>The agent never says "you're booked" unless <code>book_appointment</code> actually returned success.</p>
+
+<h3>Example 5 — Two messages arrive together</h3>
+<p>If the same customer sends two messages almost simultaneously (or Meta redelivers one while the first is still processing), <code>withCustomerLock</code> (<code>src/pipeline/idempotency.ts</code>) makes the second one wait until the first fully finishes — they are processed one at a time, in order, never in parallel. This is proven by the concurrency test in <code>tests/integration/conversationFlow.e2e.test.ts</code>, which fires three simultaneous messages and confirms all three land in the database without corruption.</p>
+
+<h3>Example 6 — Duplicate delivery</h3>
+<p>If Meta delivers the exact same message ID twice (a normal retry behavior on their side), <code>src/memory/webhookEventRepo.ts</code>'s <code>INSERT OR IGNORE</code> means the second attempt is recognized as already-seen and silently skipped — no second AI call, no second reply.</p>
+
+<h3>Example 7 — "restart"</h3>
+<div class="box ok"><b>Customer:</b> "restart"<br><b>Agent:</b> "Done — I've started a fresh conversation. How can I help you?"</div>
+<p>The current conversation row is marked <code>ended</code>, any in-progress booking session is cleared, and a brand-new conversation begins — but nothing is deleted; the old conversation and its messages remain in the database for history/audit.</p>
+
+<h3>Example 8 — AI or provider failure</h3>
+<p>If OpenRouter (or any step in the agent loop) throws an error, the customer is never shown a stack trace or technical detail. They receive a plain, safe message ("Sorry, something went wrong on our end...") while the real error is logged internally for the developer to see.</p>
+</div>
+<div class="divider"><div class="num">PART 2</div><h1>How It Works Inside</h1><p>Security, error handling, the database, the AI loop, and the booking system — the internals a developer or maintainer needs.</p></div>
+
+<div class="chapter noBreakBefore" id="ch6">
+<h1>6. Security</h1>
+<div class="flow">
+  <div class="step warn">UNTRUSTED INTERNET</div><div class="arrow">&darr;</div>
+  <div class="step warn">HTTPS (Caddy, automatic certificate)</div><div class="arrow">&darr;</div>
+  <div class="step">Webhook GET verification (setup only)</div><div class="arrow">&darr;</div>
+  <div class="step acc">HMAC-SHA256 signature verification (every POST)</div><div class="arrow">&darr;</div>
+  <div class="step">Rate limiting (per IP, per minute)</div><div class="arrow">&darr;</div>
+  <div class="step acc">Application (Express + Helmet + validation)</div><div class="arrow">&darr;</div>
+  <div class="step">Database / external APIs</div>
+</div>
+<p>Every layer exists to stop a different kind of attacker: HTTPS stops eavesdropping, the signature stops impersonation, rate limiting stops flooding, and validation stops malformed/malicious payloads reaching business logic.</p>
+
+<table>
+<tr><th>Protection</th><th>Simple explanation</th><th>Technical detail</th></tr>
+<tr><td>HTTPS</td><td>Locks the message in a tunnel only our server can open.</td><td>Caddy auto-provisions a Let's Encrypt certificate for <code>DOMAIN</code>.</td></tr>
+<tr><td>Webhook signature (HMAC-SHA256)</td><td>Proves a message really came from Meta.</td><td><code>src/webhook/verifySignature.ts</code> — HMAC over the raw request body using <code>META_APP_SECRET</code>.</td></tr>
+<tr><td>Timing-safe comparison</td><td>Stops attackers guessing the signature bit by bit.</td><td><code>crypto.timingSafeEqual</code> instead of string equality.</td></tr>
+<tr><td>Rate limiting</td><td>Stops one source from flooding the doorbell.</td><td><code>express-rate-limit</code>, <code>RATE_LIMIT_PER_MINUTE</code> (default 120/min) on <code>/webhook</code>.</td></tr>
+<tr><td>Helmet security headers</td><td>Standard browser-facing hardening.</td><td><code>helmet()</code> in <code>src/app.ts</code>; removes <code>X-Powered-By</code>, sets <code>X-Content-Type-Options: nosniff</code>, etc.</td></tr>
+<tr><td>Request body size limit</td><td>Stops someone sending a huge payload to overload the server.</td><td><code>MAX_BODY_SIZE</code> (default <code>1mb</code>) enforced by <code>express.json()</code>.</td></tr>
+<tr><td>Parameterized SQL</td><td>Stops "SQL injection" tricks in messages.</td><td>All queries use <code>better-sqlite3</code> prepared statements with bound parameters — user text is never concatenated into SQL.</td></tr>
+<tr><td>Secret redaction in logs</td><td>Keys and tokens never appear in log files.</td><td><code>src/logger.ts</code> pino <code>redact</code> config masks <code>Authorization</code>, signature headers, and any field named token/key/secret.</td></tr>
+<tr><td>Masked WhatsApp numbers in logs</td><td>Customer phone numbers aren't fully exposed in logs.</td><td><code>maskWaId()</code> shows only the last 4 digits.</td></tr>
+<tr><td>Malformed JSON handling</td><td>A broken message doesn't crash the server.</td><td>Central error handler returns <code>400 invalid_json</code>, not a raw 500.</td></tr>
+<tr><td>Generic error responses</td><td>Customers/attackers never see internal details.</td><td>Any unhandled error returns a generic <code>500 internal_server_error</code> with no stack trace.</td></tr>
+<tr><td>Environment variables / <code>.env</code></td><td>Secrets never live in the code.</td><td><code>.env</code> is gitignored; all secrets loaded via <code>process.env</code>, validated at startup by <code>src/config/env.ts</code>.</td></tr>
+</table>
+</div>
+
+<div class="chapter" id="ch7">
+<h1>7. Error Handling</h1>
+<p>This table shows the <b>actual</b> behavior implemented in the source code for each failure — nothing here is aspirational.</p>
+<table>
+<tr><th>Situation</th><th>What actually happens</th></tr>
+<tr><td>Malformed JSON body</td><td><code>src/app.ts</code> central error handler catches <code>entity.parse.failed</code> and returns <code>400 {"error":"invalid_json"}</code>.</td></tr>
+<tr><td>Oversized request body</td><td>Returns <code>413 {"error":"payload_too_large"}</code> (over <code>MAX_BODY_SIZE</code>).</td></tr>
+<tr><td>Invalid webhook signature</td><td><code>src/webhook/verifySignature.ts</code> returns <code>401</code> before any processing happens.</td></tr>
+<tr><td>Invalid GET verification token</td><td><code>src/webhook/verifyToken.ts</code> returns <code>403</code>.</td></tr>
+<tr><td>Duplicate webhook (same message id)</td><td><code>src/memory/webhookEventRepo.ts</code>'s <code>claimWebhookEvent()</code> returns false; the router logs "duplicate webhook delivery ignored" and does nothing further.</td></tr>
+<tr><td>AI (OpenRouter) call fails</td><td>Caught in <code>src/pipeline/processInboundMessage.ts</code>; the customer receives <code>GENERIC_ERROR_REPLY</code> ("Sorry, something went wrong...") and the real error is logged.</td></tr>
+<tr><td>AI requests an unknown tool name</td><td><code>src/llm/agentLoop.ts</code> returns <code>{"error":"unknown tool: ..."}</code> as the tool result instead of crashing, so the AI can recover gracefully.</td></tr>
+<tr><td>Malformed tool call arguments</td><td>JSON parsing of the model's tool arguments is wrapped in try/catch (<code>safeParseArgs</code>); a parse failure yields an empty args object rather than throwing.</td></tr>
+<tr><td>Google Calendar API failure</td><td><code>src/tools/checkAvailability.ts</code>/<code>bookAppointment.ts</code> catch the error and return a structured <code>{"error": "..."}</code> result to the AI, which can then tell the customer honestly rather than guessing.</td></tr>
+<tr><td>WhatsApp send failure</td><td>Logged with the error detail; does not crash the request — the pipeline has already acknowledged Meta's webhook by this point.</td></tr>
+<tr><td>Database problem</td><td><code>GET /readiness</code> would report <code>503 {"status":"not_ready"}</code> if the DB becomes unreachable; better-sqlite3 is synchronous so most errors surface immediately and are caught by the pipeline's try/catch.</td></tr>
+</table>
+</div>
+<div class="chapter" id="ch8">
+<h1>8. The Database (SQLite Memory)</h1>
+<div class="box kid"><span class="tag">NOTEBOOK ANALOGY</span>
+<p>Think of the database as the receptionist's notebook. Every page is one type of record: one section for "who has called before," one for "what did we talk about," one for "appointments being arranged," and one for "messages we've already dealt with, so we don't answer them twice."</p>
+</div>
+
+<h2>Schema diagram (actual tables, from <code>src/memory/migrations/001_init.sql</code>)</h2>
+<div class="flow">
+  <div class="step">customers <span class="small">(id, wa_id UNIQUE, display_name)</span></div>
+  <div class="arrow">&darr; 1-to-many</div>
+  <div class="step acc">conversations <span class="small">(id, customer_id, status, started_at, ended_at)</span></div>
+  <div class="arrow">&darr; 1-to-many &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &darr; 1-to-1</div>
+</div>
+<div class="grid2">
+  <div class="box dev" style="text-align:center;">conversation_messages<br><span class="small">(conversation_id, role, content, tool_call_id, tool_name, whatsapp_message_id, direction, created_at)</span></div>
+  <div class="box dev" style="text-align:center;">booking_sessions<br><span class="small">(conversation_id UNIQUE, status, service_type, preferred_date, preferred_time, duration_minutes, customer_name, calendar_event_id)</span></div>
+</div>
+<div class="box dev" style="text-align:center; margin-top:3mm;">webhook_events (independent table)<br><span class="small">(message_id PRIMARY KEY, received_at, processed_at, error)</span></div>
+
+<h2>Table-by-table explanation</h2>
+<table>
+<tr><th>Table</th><th>Purpose</th><th>Why it exists</th></tr>
+<tr><td><code>customers</code></td><td>One row per WhatsApp number that has ever messaged.</td><td>Gives every customer a stable identity without any signup — the phone number <i>is</i> the identity.</td></tr>
+<tr><td><code>conversations</code></td><td>One row per "session" of memory. <code>status</code> is <code>active</code> or <code>ended</code>.</td><td>Lets "restart" cleanly start a new memory session without deleting the old one — a customer can have many conversations over time, but only one <code>active</code> at once.</td></tr>
+<tr><td><code>conversation_messages</code></td><td>Every user/assistant/tool message, in order.</td><td>This is what actually gets sent back to the AI as "conversation history" on the next turn — it's the AI's real memory.</td></tr>
+<tr><td><code>booking_sessions</code></td><td>Partial appointment details (service, date, time, name) collected across several messages.</td><td>A booking often can't be completed in one message; this lets the system remember "we already know the service and date, we just need the time" between turns.</td></tr>
+<tr><td><code>webhook_events</code></td><td>Every WhatsApp message ID Meta has sent us.</td><td>The primary key is the message ID itself, with <code>INSERT OR IGNORE</code> — this is the exact mechanism that makes duplicate delivery impossible to process twice.</td></tr>
+</table>
+
+<h2>Persistence &amp; duplicate protection</h2>
+<ul>
+<li>The database is a single file (<code>data/app.db</code>), stored outside the Docker container on the VPS disk (a bind-mounted volume) — restarting or rebuilding the container does not lose data.</li>
+<li><code>PRAGMA journal_mode = WAL</code> and <code>PRAGMA foreign_keys = ON</code> are set at connection time (<code>src/memory/db.ts</code>) for durability and referential integrity.</li>
+<li>Restart ("reset") never deletes rows — it flips <code>conversations.status</code> to <code>ended</code> and starts a new row. Nothing is destroyed.</li>
+</ul>
+</div>
+<div class="chapter" id="ch9">
+<h1>9. The AI Agent Loop</h1>
+<div class="flow">
+  <div class="step">User message</div><div class="arrow">&darr;</div>
+  <div class="step">System instructions (<code>src/llm/buildSystemPrompt.ts</code>)</div><div class="arrow">&darr;</div>
+  <div class="step">Conversation history (from SQLite)</div><div class="arrow">&darr;</div>
+  <div class="step">Business knowledge (from <code>knowledge/</code>)</div><div class="arrow">&darr;</div>
+  <div class="step acc">OpenRouter</div><div class="arrow">&darr;</div>
+  <div class="step">AI decision: plain answer, or tool call?</div><div class="arrow">&darr;</div>
+  <div class="step acc">Tool call if required (check_availability / book_appointment)</div><div class="arrow">&darr;</div>
+  <div class="step">Tool result fed back to the AI</div><div class="arrow">&darr;</div>
+  <div class="step">AI</div><div class="arrow">&darr;</div>
+  <div class="step">Final answer</div>
+</div>
+
+<h2>The bounded tool loop</h2>
+<p>The loop in <code>src/llm/agentLoop.ts</code> can repeat — the AI can call a tool, look at the result, and decide it needs to call <i>another</i> tool before answering. To stop this from running forever (a malfunctioning model looping endlessly, burning cost), the loop is capped at <code>MAX_TOOL_ROUNDS</code>, which defaults to <b>4</b> (confirmed in <code>src/config/env.ts</code>). If the cap is reached without a final plain-text answer, the loop returns a safe fallback message ("I need a moment to look into that properly...") rather than leaving the customer without any reply.</p>
+
+<h2>Safe fallback behavior</h2>
+<ul>
+<li>Unknown tool name requested by the model &rarr; returns a structured error to the model, not a crash.</li>
+<li>Malformed tool-call JSON arguments &rarr; parsed defensively; falls back to an empty object rather than throwing.</li>
+<li>A tool handler throws an exception &rarr; caught, logged, and reported back to the model as <code>{"error":"tool_execution_failed"}</code> so the conversation can continue.</li>
+<li>OpenRouter itself is unreachable/errors &rarr; caught one level up in the pipeline; customer gets the generic error reply (Chapter 7).</li>
+</ul>
+<p class="small">All of this is exercised by <code>tests/unit/llm/agentLoop.test.ts</code> with a mocked OpenRouter client.</p>
+</div>
+<div class="chapter" id="ch10">
+<h1>10. The Booking System</h1>
+
+<h2>Booking sequence diagram</h2>
+<div class="flow">
+  <div class="step">Customer: "Book tomorrow at 3 PM"</div><div class="arrow">&darr;</div>
+  <div class="step">AI</div><div class="arrow">&darr;</div>
+  <div class="step acc">check_availability</div><div class="arrow">&darr;</div>
+  <div class="step">Google Calendar</div><div class="arrow">&darr;</div>
+  <div class="step">Available</div><div class="arrow">&darr;</div>
+  <div class="step acc">book_appointment</div><div class="arrow">&darr;</div>
+  <div class="step warn">RE-CHECK availability</div><div class="arrow">&darr;</div>
+  <div class="step">Create event in Google Calendar</div><div class="arrow">&darr;</div>
+  <div class="step">Confirmation sent to customer</div>
+</div>
+
+<h2>What happens if the slot becomes unavailable?</h2>
+<p>If the re-check (immediately before <code>events.insert</code>) finds the slot is no longer free, <code>src/calendar/booking.ts</code> returns <code>{"success": false, "conflict": true}</code> instead of creating anything. The AI is instructed (system prompt) to apologize and offer alternative times rather than claiming success — it is structurally impossible for the code to report a booking succeeded when Google Calendar didn't actually confirm it.</p>
+
+<h2>Configuration that shapes booking behavior</h2>
+<table>
+<tr><th>Setting</th><th>Meaning</th><th>Default (if unset)</th></tr>
+<tr><td><code>BUSINESS_TIMEZONE</code></td><td>IANA timezone name used for all availability/booking math.</td><td><code>UTC</code></td></tr>
+<tr><td><code>BUSINESS_HOURS_START</code> / <code>_END</code></td><td>Daily working hours considered for free slots.</td><td><code>09:00</code> / <code>18:00</code></td></tr>
+<tr><td><code>BUSINESS_DAYS</code></td><td>Which weekdays (1=Mon..7=Sun) the business is open.</td><td><code>1,2,3,4,5,6</code> (Mon–Sat)</td></tr>
+<tr><td><code>BOOKING_DURATION_MINUTES</code></td><td>Default appointment length if the AI/customer doesn't specify one.</td><td><code>30</code></td></tr>
+<tr><td><code>BOOKING_BUFFER_MINUTES</code></td><td>Extra padding kept around existing events when computing free slots.</td><td><code>0</code></td></tr>
+<tr><td><code>GOOGLE_CALENDAR_ID</code></td><td>Which calendar is checked/booked.</td><td><code>primary</code></td></tr>
+</table>
+
+<h2>Google Calendar access requirements</h2>
+<ul>
+<li>A Google Cloud <b>service account</b> is used (server-to-server auth, no interactive login).</li>
+<li>The target calendar must be explicitly <b>shared</b> with that service account's email, with <b>"Make changes to events"</b> permission — otherwise every calendar call will fail with a permissions error.</li>
+<li>Availability is computed via <code>freebusy.query</code> (the current, non-deprecated Calendar API v3 endpoint) — see <code>src/calendar/availability.ts</code>.</li>
+</ul>
+<div class="box plan"><span class="tag">REQUIRES CONFIGURATION</span>
+<p>The calendar integration is fully implemented and unit-tested with a mocked Google API, but it has not been exercised against a real Google Calendar in this environment — that requires real <code>GOOGLE_CLIENT_EMAIL</code>/<code>GOOGLE_PRIVATE_KEY</code>/<code>GOOGLE_CALENDAR_ID</code> credentials, which were not available during development.</p>
+</div>
+</div>
+<div class="chapter" id="ch11">
+<h1>11. Configuration Reference</h1>
+<p>Every variable below exists in <code>.env.example</code> and is validated at startup by <code>src/config/env.ts</code> — the app refuses to start if a required one is missing. No real secret values are shown anywhere in this document.</p>
+
+<h2>WhatsApp</h2>
+<table>
+<tr><th>Variable</th><th>Purpose</th><th>Example</th><th>Required</th></tr>
+<tr><td><code>WHATSAPP_ACCESS_TOKEN</code></td><td>Graph API auth token</td><td><code>********</code></td><td>Yes</td></tr>
+<tr><td><code>WHATSAPP_PHONE_NUMBER_ID</code></td><td>Which business phone number to send/receive as</td><td><code>********</code></td><td>Yes</td></tr>
+<tr><td><code>WHATSAPP_VERIFY_TOKEN</code></td><td>Chosen by you; must match the Meta webhook config screen</td><td><code>********</code></td><td>Yes</td></tr>
+<tr><td><code>META_APP_SECRET</code></td><td>Used to validate <code>X-Hub-Signature-256</code></td><td><code>********</code></td><td>Yes</td></tr>
+<tr><td><code>WHATSAPP_API_VERSION</code></td><td>Graph API version string</td><td><code>v21.0</code></td><td>No — default shown</td></tr>
+</table>
+
+<h2>AI (OpenRouter)</h2>
+<table>
+<tr><th>Variable</th><th>Purpose</th><th>Example</th><th>Required</th></tr>
+<tr><td><code>OPENROUTER_API_KEY</code></td><td>Auth key for OpenRouter</td><td><code>********</code></td><td>Yes</td></tr>
+<tr><td><code>OPENROUTER_MODEL</code></td><td>Which AI model to use — swappable, no code change</td><td><code>openai/gpt-4o-mini</code></td><td>No — default shown</td></tr>
+<tr><td><code>OPENROUTER_SITE_URL</code></td><td>Sent as <code>HTTP-Referer</code>; optional attribution</td><td><code>https://example.com</code></td><td>No</td></tr>
+<tr><td><code>OPENROUTER_APP_NAME</code></td><td>Sent as <code>X-Title</code></td><td>WhatsApp AI Agent</td><td>No</td></tr>
+<tr><td><code>OPENROUTER_TIMEOUT_MS</code></td><td>Max wait time for a completion call</td><td><code>30000</code></td><td>No — default shown</td></tr>
+</table>
+
+<h2>Google Calendar</h2>
+<table>
+<tr><th>Variable</th><th>Purpose</th><th>Example</th><th>Required</th></tr>
+<tr><td><code>GOOGLE_CLIENT_EMAIL</code></td><td>Service account email</td><td><code>********</code></td><td>Yes</td></tr>
+<tr><td><code>GOOGLE_PRIVATE_KEY</code></td><td>Service account private key (PEM)</td><td><code>********</code></td><td>Yes</td></tr>
+<tr><td><code>GOOGLE_CALENDAR_ID</code></td><td>Which calendar to check/book against</td><td><code>primary</code></td><td>No — default shown</td></tr>
+<tr><td><code>GOOGLE_PROJECT_ID</code></td><td>GCP project id (informational)</td><td><code>********</code></td><td>No</td></tr>
+<tr><td><code>GOOGLE_TIMEOUT_MS</code></td><td>Max wait time for a Calendar API call</td><td><code>15000</code></td><td>No — default shown</td></tr>
+</table>
+
+<h2>Business</h2>
+<table>
+<tr><th>Variable</th><th>Purpose</th><th>Example</th><th>Required</th></tr>
+<tr><td><code>BUSINESS_NAME</code></td><td>Used in the AI's system prompt</td><td>Example Business</td><td>No — default shown</td></tr>
+<tr><td><code>BUSINESS_TIMEZONE</code></td><td>IANA timezone for all booking math</td><td>UTC</td><td>No — default shown</td></tr>
+<tr><td><code>BUSINESS_PHONE</code> / <code>BUSINESS_EMAIL</code></td><td>Given to customers who need a human</td><td>+10000000000</td><td>No</td></tr>
+<tr><td><code>BUSINESS_HOURS_START</code> / <code>_END</code></td><td>Daily open hours</td><td>09:00 / 18:00</td><td>No — default shown</td></tr>
+<tr><td><code>BUSINESS_DAYS</code></td><td>Open weekdays, 1(Mon)–7(Sun)</td><td>1,2,3,4,5,6</td><td>No — default shown</td></tr>
+</table>
+
+<h2>Booking</h2>
+<table>
+<tr><th>Variable</th><th>Purpose</th><th>Example</th><th>Required</th></tr>
+<tr><td><code>BOOKING_DURATION_MINUTES</code></td><td>Default appointment length</td><td>30</td><td>No — default shown</td></tr>
+<tr><td><code>BOOKING_BUFFER_MINUTES</code></td><td>Padding around existing events</td><td>0</td><td>No — default shown</td></tr>
+</table>
+
+<h2>Agent behavior</h2>
+<table>
+<tr><th>Variable</th><th>Purpose</th><th>Example</th><th>Required</th></tr>
+<tr><td><code>RESTART_KEYWORDS</code></td><td>Words that reset a conversation</td><td>restart,reset,start over</td><td>No — default shown</td></tr>
+<tr><td><code>CONVERSATION_HISTORY_LIMIT</code></td><td>How many past messages are sent to the AI as context</td><td>20</td><td>No — default shown</td></tr>
+<tr><td><code>MAX_TOOL_ROUNDS</code></td><td>Cap on the tool-calling loop</td><td>4</td><td>No — default shown</td></tr>
+<tr><td><code>WHATSAPP_TIMEOUT_MS</code></td><td>Max wait time for a WhatsApp send</td><td>15000</td><td>No — default shown</td></tr>
+</table>
+
+<h2>Security &amp; Deployment</h2>
+<table>
+<tr><th>Variable</th><th>Purpose</th><th>Example</th><th>Required</th></tr>
+<tr><td><code>MAX_BODY_SIZE</code></td><td>Max accepted webhook payload size</td><td>1mb</td><td>No — default shown</td></tr>
+<tr><td><code>RATE_LIMIT_PER_MINUTE</code></td><td>Requests/min per IP on <code>/webhook</code></td><td>120</td><td>No — default shown</td></tr>
+<tr><td><code>DATABASE_PATH</code></td><td>Where the SQLite file lives</td><td>./data/app.db</td><td>No — default shown</td></tr>
+<tr><td><code>DOMAIN</code></td><td>Real domain, used by Caddy for HTTPS</td><td>whatsapp-agent.example.com</td><td>Yes for deployment</td></tr>
+<tr><td><code>PORT</code>, <code>NODE_ENV</code>, <code>LOG_LEVEL</code></td><td>Standard server configuration</td><td>3000 / production / info</td><td>No — defaults shown</td></tr>
+</table>
+</div>
+<div class="chapter" id="ch12">
+<h1>12. Testing</h1>
+<div class="box kid"><span class="tag">EXPLAIN LIKE I'M 10</span>
+<p>Tests are like a teacher checking every part of a machine before it's allowed into an exam. Each test builds one tiny, controlled situation (a fake message, a fake calendar answer) and checks that the code reacts exactly the right way — before any real customer ever sees it.</p>
+</div>
+
+<h2>Verified result (re-run for this documentation)</h2>
+<div class="box ok"><span class="tag">VERIFIED &middot; RE-RUN JUST NOW</span>
+<p><b>19 test files, 87 tests, 87 passed, 0 failed.</b> Command: <code>npx vitest run</code>.</p>
+</div>
+
+<h2>Test categories</h2>
+<table>
+<tr><th>Category</th><th>Files</th><th>What it proves</th></tr>
+<tr><td>Environment validation</td><td><code>tests/unit/config/env.test.ts</code></td><td>Missing required variables fail startup with a clear error.</td></tr>
+<tr><td>Calendar</td><td><code>tests/unit/calendar/availability.test.ts</code>, <code>timezone.test.ts</code></td><td>Free-slot computation, business hours/day filtering, buffer logic.</td></tr>
+<tr><td>Knowledge</td><td><code>tests/unit/knowledge/loader.test.ts</code></td><td>Markdown/JSON files load correctly into the prompt text.</td></tr>
+<tr><td>Memory</td><td><code>tests/unit/memory/*.test.ts</code> (4 files)</td><td>Customers, conversations, messages, booking sessions, and webhook-event idempotency all behave correctly against a real (in-memory) SQLite database.</td></tr>
+<tr><td>Restart</td><td><code>tests/unit/restart/isRestartCommand.test.ts</code></td><td>Keyword matching is precise — doesn't misfire mid-sentence.</td></tr>
+<tr><td>Tools</td><td><code>tests/unit/tools/*.test.ts</code> (2 files)</td><td><code>check_availability</code> / <code>book_appointment</code> handle success, conflict, invalid args, and thrown errors — with the real calendar module mocked.</td></tr>
+<tr><td>LLM agent loop</td><td><code>tests/unit/llm/agentLoop.test.ts</code></td><td>Plain answers, tool calls, unknown tools, thrown handlers, and the max-rounds fallback — all with OpenRouter mocked.</td></tr>
+<tr><td>Webhook</td><td><code>tests/unit/webhook/*.test.ts</code> (3 files)</td><td>Signature verification, GET handshake, and payload parsing in isolation.</td></tr>
+<tr><td>Security (integration)</td><td><code>tests/integration/security.e2e.test.ts</code></td><td>Helmet headers present, malformed JSON &rarr; 400 not 500, no secret leakage, rate-limit headers present.</td></tr>
+<tr><td>Webhook (integration)</td><td><code>tests/integration/webhook.e2e.test.ts</code></td><td>Full HTTP round-trip: GET verify, unsigned 401, signed 200, async reply delivery, duplicate no-op.</td></tr>
+<tr><td>Conversation flow (integration)</td><td><code>tests/integration/conversationFlow.e2e.test.ts</code></td><td>Greeting &rarr; knowledge answer &rarr; booking &rarr; confirmation, booking conflict, restart, concurrent-message locking, and agent-loop failure handling — end to end with all external services mocked.</td></tr>
+<tr><td>Utilities</td><td><code>tests/unit/utils/retry.test.ts</code></td><td>Retry/backoff logic and permanent-vs-transient error classification.</td></tr>
+</table>
+<p class="small">All external services (WhatsApp Graph API, OpenRouter, Google Calendar) are mocked in every test — the suite runs with no real credentials and makes no real network calls.</p>
+</div>
+<div class="divider"><div class="num">PART 3</div><h1>Running &amp; Deploying</h1><p>From a developer's laptop to a live VPS answering real WhatsApp messages.</p></div>
+
+<div class="chapter noBreakBefore" id="ch13">
+<h1>13. Running It Locally</h1>
+<table>
+<tr><th>Command</th><th>What it does</th></tr>
+<tr><td><code>npm install</code></td><td>Downloads all the code libraries the project depends on.</td></tr>
+<tr><td><code>copy .env.example .env</code></td><td>Creates your own configuration file from the template. Fill in real or test values.</td></tr>
+<tr><td><code>npm test</code></td><td>Runs all 87 automated tests. All external services are mocked, so this works without real credentials.</td></tr>
+<tr><td><code>npm run typecheck</code></td><td>Asks the TypeScript compiler to check every file for type errors, without producing output files.</td></tr>
+<tr><td><code>npm run lint</code></td><td>Runs ESLint to catch style/correctness issues.</td></tr>
+<tr><td><code>npm run build</code></td><td>Compiles TypeScript into plain JavaScript in <code>dist/</code>, and copies the SQL migration files alongside it.</td></tr>
+<tr><td><code>npm run dev</code></td><td>Starts the server directly from the TypeScript source, restarting automatically on file changes.</td></tr>
+</table>
+
+<h2>Confirming it's alive</h2>
+<div class="grid2">
+<div class="box ok"><b>GET /health</b><br><span class="small">Liveness — "is the process running?" Returns <code>{"status":"ok"}</code>.</span></div>
+<div class="box ok"><b>GET /readiness</b><br><span class="small">Readiness — "can it reach the database?" Returns <code>{"status":"ready"}</code>.</span></div>
+</div>
+
+<div class="box ok"><span class="tag">VERIFIED &middot; ACTUAL TERMINAL OUTPUT (previous validation run)</span>
+<div class="codebox">$ curl http://localhost:3000/health
+<span class="c2">{"status":"ok"}</span>
+$ curl http://localhost:3000/readiness
+<span class="c2">{"status":"ready"}</span></div>
+</div>
+</div>
+
+<div class="chapter" id="ch14">
+<h1>14. Deploying to a VPS</h1>
+<div class="flow">
+  <div class="step">Developer's PC</div><div class="arrow">&darr;</div>
+  <div class="step">Git repository</div><div class="arrow">&darr;</div>
+  <div class="step">VPS (rented Linux server)</div><div class="arrow">&darr;</div>
+  <div class="step acc">Docker Compose</div><div class="arrow">&darr;</div>
+  <div class="step acc">Application container</div><div class="arrow">&darr;</div>
+  <div class="step">Caddy (HTTPS)</div><div class="arrow">&darr;</div>
+  <div class="step">Your domain</div><div class="arrow">&darr;</div>
+  <div class="step">Meta WhatsApp Cloud API</div>
+</div>
+
+<table>
+<tr><th>Step</th><th>Status</th></tr>
+<tr><td>1. Domain purchased</td><td class="s-cfg">REQUIRES CONFIGURATION (yours to buy)</td></tr>
+<tr><td>2. DNS A/AAAA record pointed at VPS</td><td class="s-cfg">REQUIRES CONFIGURATION</td></tr>
+<tr><td>3. VPS provisioned with Docker installed</td><td class="s-cfg">REQUIRES CONFIGURATION</td></tr>
+<tr><td>4. <code>.env</code> filled with real production values</td><td class="s-cfg">REQUIRES CONFIGURATION</td></tr>
+<tr><td>5. <code>docker compose build</code></td><td class="s-no">NOT VERIFIED IN THIS ENVIRONMENT — see Chapter 21</td></tr>
+<tr><td>6. <code>docker compose up -d</code></td><td class="s-no">NOT VERIFIED IN THIS ENVIRONMENT</td></tr>
+<tr><td>7. Health check reachable over HTTPS</td><td class="s-cfg">Depends on steps above</td></tr>
+<tr><td>8. Readiness check reachable over HTTPS</td><td class="s-cfg">Depends on steps above</td></tr>
+<tr><td>9. Meta webhook configured with the live URL</td><td class="s-cfg">REQUIRES CONFIGURATION</td></tr>
+<tr><td>10. OpenRouter key configured</td><td class="s-cfg">REQUIRES CONFIGURATION</td></tr>
+<tr><td>11. Google Calendar configured &amp; shared</td><td class="s-cfg">REQUIRES CONFIGURATION</td></tr>
+<tr><td>12. Real WhatsApp end-to-end test</td><td class="s-cfg">REQUIRES CONFIGURATION</td></tr>
+</table>
+
+<div class="box ok"><span class="tag">IMPLEMENTED</span>
+<p>The Dockerfile, docker-compose.yml, and Caddyfile are all written and code-reviewed. The application itself (running directly under Node, outside Docker) has been smoke-tested end-to-end with a real signed HTTP request.</p>
+</div>
+<div class="box warn"><span class="tag">NOT YET TESTED</span>
+<p><code>docker compose build</code> / <code>docker compose up</code> could not be executed in the development sandbox used to build this project (see Chapter 21/22 for details). Run these yourself on the real VPS before the first live deployment.</p>
+</div>
+</div>
+<div class="chapter" id="ch15">
+<h1>15. Setting Up Meta WhatsApp Cloud API</h1>
+<div class="flow">
+  <div class="step">Create a Meta developer account</div><div class="arrow">&darr;</div>
+  <div class="step">Create an app, add the "WhatsApp" product</div><div class="arrow">&darr;</div>
+  <div class="step">Get a test (or real) phone number</div><div class="arrow">&darr;</div>
+  <div class="step">Copy the Phone Number ID</div><div class="arrow">&darr;</div>
+  <div class="step">Generate an Access Token (system user for production)</div><div class="arrow">&darr;</div>
+  <div class="step">Copy the App Secret</div><div class="arrow">&darr;</div>
+  <div class="step">Choose your own Verify Token</div><div class="arrow">&darr;</div>
+  <div class="step acc">Register the Webhook URL (https://your-domain/webhook)</div><div class="arrow">&darr;</div>
+  <div class="step">Subscribe to the "messages" field</div>
+</div>
+<table>
+<tr><th>Term</th><th>Plain explanation</th></tr>
+<tr><td>Phone Number ID</td><td>An internal ID Meta uses to identify which business number is sending/receiving — not the phone number itself.</td></tr>
+<tr><td>Access Token</td><td>A password-like string that proves our app is allowed to act as that phone number. Use a permanent "system user" token, not the 24-hour test token, for production.</td></tr>
+<tr><td>App Secret</td><td>A shared secret used to prove webhook messages really came from Meta (Chapter 6).</td></tr>
+<tr><td>Verify Token</td><td>A string you invent yourself, entered in both your <code>.env</code> and Meta's webhook config screen, used only for the one-time setup handshake.</td></tr>
+<tr><td>Webhook URL</td><td>Must be <code>https://&lt;your-domain&gt;/webhook</code> — Meta will not accept a plain HTTP URL.</td></tr>
+</table>
+<div class="box warn"><span class="tag">DO NOT INCLUDE REAL CREDENTIALS</span><p>None of the values above are shown anywhere in this document — only their names and purpose.</p></div>
+</div>
+
+<div class="chapter" id="ch16">
+<h1>16. Setting Up OpenRouter</h1>
+<div class="flow-row">
+  <div class="step">Create an account</div><span class="arrowh">&rarr;</span>
+  <div class="step">Generate an API key</div><span class="arrowh">&rarr;</span>
+  <div class="step acc">Put it in <code>OPENROUTER_API_KEY</code></div><span class="arrowh">&rarr;</span>
+  <div class="step">Choose a model in <code>OPENROUTER_MODEL</code></div><span class="arrowh">&rarr;</span>
+  <div class="step">The app uses it automatically</div>
+</div>
+<p>Create an account and key at <b>openrouter.ai/keys</b>. The model is set purely by an environment variable — swapping to a different model (e.g. a different provider entirely) never requires touching application code, only redeploying with a new <code>OPENROUTER_MODEL</code> value. No API key is shown in this document.</p>
+</div>
+
+<div class="chapter" id="ch17">
+<h1>17. Setting Up Google Calendar</h1>
+<div class="flow">
+  <div class="step">Create/select a Google Cloud project</div><div class="arrow">&darr;</div>
+  <div class="step">Enable the Calendar API</div><div class="arrow">&darr;</div>
+  <div class="step">Create a Service Account</div><div class="arrow">&darr;</div>
+  <div class="step">Download its JSON key (client_email + private_key)</div><div class="arrow">&darr;</div>
+  <div class="step acc">Open the target calendar's sharing settings</div><div class="arrow">&darr;</div>
+  <div class="step acc">Share it with the service account's email — "Make changes to events"</div><div class="arrow">&darr;</div>
+  <div class="step">Set GOOGLE_CALENDAR_ID</div><div class="arrow">&darr;</div>
+  <div class="step">Application can now check/book real appointments</div>
+</div>
+<div class="box kid"><span class="tag">WHY A SERVICE ACCOUNT?</span>
+<p>A service account is like giving the receptionist their own staff badge to the appointment diary — it doesn't need a real person to log in every time; it's a permanent, dedicated identity just for this program.</p>
+</div>
+<div class="box plan"><span class="tag">REQUIRES CONFIGURATION</span><p>This project ships with no real Google credentials — the integration is fully coded and unit-tested with a mocked API, but has not been exercised against a live calendar.</p></div>
+</div>
+<div class="chapter" id="ch18">
+<h1>18. Managing Business Knowledge</h1>
+<p>A business owner (no coding needed) can edit these files directly:</p>
+<table>
+<tr><th>File</th><th>What to put in it</th></tr>
+<tr><td><code>knowledge/business.md</code></td><td>Name, address, contact details, hours.</td></tr>
+<tr><td><code>knowledge/services.md</code></td><td>Services and prices.</td></tr>
+<tr><td><code>knowledge/policies.md</code></td><td>Cancellation, payment, and other rules.</td></tr>
+<tr><td><code>knowledge/faq.md</code></td><td>Common questions and answers.</td></tr>
+<tr><td><code>knowledge/booking.json</code></td><td>Which services require booking.</td></tr>
+</table>
+
+<h2>Common questions</h2>
+<div class="box dev"><b>"What happens if I change my opening hours in <code>business.md</code>?"</b>
+<p>The <i>text</i> the AI talks about updates immediately after a restart/redeploy — but the actual <b>booking math</b> (which hours count as available) is driven separately by the <code>BUSINESS_HOURS_START</code>/<code>_END</code> environment variables, not by this file. Change both together, or the AI's description and the real calendar behavior will disagree.</p></div>
+<div class="box dev"><b>"What happens if I add a new service to <code>services.md</code>?"</b>
+<p>The AI can immediately describe and quote it after the next restart (knowledge files are loaded once at boot, per <code>src/knowledge/loader.ts</code>) — no code change needed. There is no code-level list of "valid services"; the AI relies entirely on this file.</p></div>
+<div class="box dev"><b>"What happens if I change a policy?"</b>
+<p>Same as above — edit <code>policies.md</code>, restart/redeploy the app, and the new wording is what the AI will use going forward.</p></div>
+<div class="box warn"><span class="tag">RESTART REQUIRED</span><p>Because knowledge files are only read once at process startup, any edit requires restarting the app (or a fresh deploy) to take effect — simply saving the file while the app is already running has no immediate effect.</p></div>
+</div>
+
+<div class="chapter" id="ch19">
+<h1>19. Project File &amp; Folder Map</h1>
+<div class="codebox">src/
+  config/       <span class="c1">env.ts, constants.ts — configuration &amp; validated env vars</span>
+  webhook/      <span class="c1">router.ts, verifySignature.ts, verifyToken.ts, parseInboundPayload.ts</span>
+  whatsapp/     <span class="c1">client.ts, types.ts — Graph API send calls</span>
+  pipeline/     <span class="c1">processInboundMessage.ts, idempotency.ts — orchestration + locking</span>
+  memory/       <span class="c1">db.ts, migrations/, customerRepo.ts, conversationRepo.ts,
+                 bookingSessionRepo.ts, webhookEventRepo.ts, runMigrations.ts</span>
+  llm/          <span class="c1">openRouterClient.ts, buildSystemPrompt.ts, agentLoop.ts, types.ts</span>
+  tools/        <span class="c1">checkAvailability.ts, bookAppointment.ts, index.ts (registry)</span>
+  calendar/     <span class="c1">googleClient.ts, availability.ts, booking.ts, timezone.ts</span>
+  knowledge/    <span class="c1">loader.ts — reads knowledge/*.md,*.json into the system prompt</span>
+  restart/      <span class="c1">isRestartCommand.ts</span>
+  health/       <span class="c1">router.ts — /health, /readiness</span>
+  utils/        <span class="c1">retry.ts — backoff + timeout helpers</span>
+  app.ts, index.ts, logger.ts
+tests/
+  unit/         <span class="c1">calendar/, config/, knowledge/, llm/, memory/, restart/, tools/, utils/, webhook/</span>
+  integration/  <span class="c1">webhook.e2e.test.ts, conversationFlow.e2e.test.ts, security.e2e.test.ts</span>
+  fixtures/knowledge/
+knowledge/      <span class="c1">business.md, services.md, policies.md, faq.md, booking.json</span>
+nginx/          <span class="c1">Caddyfile</span>
+scripts/        <span class="c1">copyAssets.js — copies .sql migrations into dist/ at build time</span>
+data/           <span class="c1">.gitkeep (SQLite file lives here at runtime, gitignored)</span>
+secrets/        <span class="c1">.gitkeep (mount point for a Google key file, if used that way)</span>
+Dockerfile, docker-compose.yml, .dockerignore
+package.json, package-lock.json, tsconfig.json, vitest.config.ts, .eslintrc.json
+.env.example, .gitignore
+README.md, FINAL_STATUS.md, PRODUCTION_CHECKLIST.md</div>
+<p class="small">This tree is taken directly from <code>git ls-files</code> in the actual repository — nothing here is invented.</p>
+</div>
+
+<div class="chapter" id="ch20">
+<h1>20. Monitoring &amp; Maintenance</h1>
+<table>
+<tr><th>Task</th><th>How</th></tr>
+<tr><td>View logs</td><td><code>docker compose logs -f app</code> — structured JSON, secrets redacted.</td></tr>
+<tr><td>Check health</td><td><code>curl https://&lt;domain&gt;/health</code></td></tr>
+<tr><td>Check readiness</td><td><code>curl https://&lt;domain&gt;/readiness</code></td></tr>
+<tr><td>Backup the database</td><td>Copy <code>./data/app.db</code> from the host (it's bind-mounted, always on disk).</td></tr>
+<tr><td>Restart the service</td><td><code>docker compose restart app</code></td></tr>
+<tr><td>Update the application</td><td><code>git pull &amp;&amp; docker compose build app &amp;&amp; docker compose up -d app</code></td></tr>
+<tr><td>Dependency/security review</td><td><code>npm audit</code> — see Chapter 22 for the current findings.</td></tr>
+</table>
+<div class="box ok"><span class="tag">MAINTENANCE CHECKLIST</span>
+<ul style="margin:0;">
+<li>[ ] Logs reviewed weekly for repeated errors</li>
+<li>[ ] Database backed up on a schedule</li>
+<li>[ ] <code>npm audit</code> re-run after any dependency change</li>
+<li>[ ] Knowledge files reviewed whenever prices/hours/policies change</li>
+<li>[ ] Health/readiness endpoints checked after every deploy</li>
+</ul>
+</div>
+</div>
+<div class="divider"><div class="num">PART 4</div><h1>Status &amp; Reference</h1><p>Where things really stand today, what's left, and a glossary for every term used in this book.</p></div>
+
+<div class="chapter noBreakBefore" id="ch21">
+<h1>21. Current Project Status Dashboard</h1>
+<p>Every row below was verified again while writing this documentation, not carried over blindly from an earlier report.</p>
+<table class="status-table">
+<tr><th>Area</th><th>Status</th><th>Evidence</th></tr>
+<tr><td>Application code</td><td class="s-ok">&#9989; COMPLETE</td><td>All planned modules implemented (see Chapter 19 file map).</td></tr>
+<tr><td>Tests</td><td class="s-ok">&#9989; COMPLETE</td><td>19 files / 87 tests / 87 passed, re-run just now.</td></tr>
+<tr><td>Typecheck</td><td class="s-ok">&#9989; COMPLETE</td><td><code>npx tsc --noEmit</code> — 0 errors, re-run just now.</td></tr>
+<tr><td>Lint</td><td class="s-ok">&#9989; COMPLETE</td><td><code>npx eslint . --ext .ts</code> — 0 errors/warnings, re-run just now.</td></tr>
+<tr><td>Production build</td><td class="s-ok">&#9989; COMPLETE</td><td><code>npm run build</code> — succeeds, re-run just now.</td></tr>
+<tr><td>Security hardening (code-level)</td><td class="s-ok">&#9989; COMPLETE</td><td>Helmet, rate limiting, signature verification, secret redaction all implemented and tested.</td></tr>
+<tr><td>Docker build/run</td><td class="s-no">&#128308; NOT VERIFIED IN THIS ENVIRONMENT</td><td>Docker Desktop's engine did not come online in this sandbox after repeated attempts. <b>Run <code>docker compose build</code> yourself before first deploy.</b></td></tr>
+<tr><td>Meta WhatsApp Cloud API</td><td class="s-cfg">&#128993; REQUIRES CONFIGURATION</td><td>Code implemented and smoke-tested with a real signed request; no real Meta app/credentials configured.</td></tr>
+<tr><td>OpenRouter</td><td class="s-cfg">&#128993; REQUIRES CONFIGURATION</td><td>Code implemented and unit-tested; no real API key configured.</td></tr>
+<tr><td>Google Calendar</td><td class="s-cfg">&#128993; REQUIRES CONFIGURATION</td><td>Code implemented and unit-tested with a mocked API; no real service account/calendar configured.</td></tr>
+<tr><td>Domain</td><td class="s-cfg">&#128993; REQUIRES CONFIGURATION</td><td>Not yet chosen/pointed at a VPS.</td></tr>
+<tr><td>HTTPS</td><td class="s-cfg">&#128993; REQUIRES CONFIGURATION</td><td>Caddy config is written and ready; depends on Domain + VPS.</td></tr>
+<tr><td>Business knowledge</td><td class="s-cfg">&#128993; REQUIRES CONFIGURATION</td><td>Files exist and load correctly, but contain example/placeholder content only.</td></tr>
+<tr><td>Real WhatsApp end-to-end test</td><td class="s-no">&#128308; NOT COMPLETE</td><td>Cannot happen without a live Meta app and deployment.</td></tr>
+</table>
+</div>
+
+<div class="chapter" id="ch22">
+<h1>22. Limitations &amp; Risks</h1>
+
+<h2><code>npm audit</code> findings (re-run for this documentation)</h2>
+<div class="box warn"><span class="tag">RE-VERIFIED, NOT ASSUMED</span>
+<p><b>12 advisories total: 10 moderate, 1 high, 1 critical.</b></p>
+</div>
+<table>
+<tr><th>Package</th><th>Severity</th><th>Runtime or dev-only?</th><th>Notes</th></tr>
+<tr><td>vitest, @vitest/mocker, vite, vite-node, esbuild</td><td>1 critical, 1 high, 2 moderate</td><td><b>Dev-only</b></td><td>Test-tooling dependency chain. Never included in the production <code>dist/</code>/Docker image. Risk to the running application is effectively zero.</td></tr>
+<tr><td>express, body-parser, qs</td><td>Moderate (x3)</td><td>Runtime (direct: express)</td><td>Relates to a <code>qs</code> parsing edge case (array-limit bypass / DoS via crafted input). <code>npm audit fix</code> (non-breaking) did not fully resolve this without a further version bump.</td></tr>
+<tr><td>googleapis, googleapis-common, gaxios, uuid</td><td>Moderate (x4)</td><td>Runtime (direct: googleapis)</td><td>A fix requires a major <code>googleapis</code> version bump (breaking change per npm's own analysis). Not applied, because there are no real Google Calendar credentials in this environment to verify the calendar integration still works correctly against a new major version.</td></tr>
+</table>
+<div class="box dev"><span class="tag">RECOMMENDATION</span>
+<p>Before going to production: (1) re-run <code>npm audit</code> to confirm nothing has changed, (2) test <code>npm audit fix --force</code> for <code>googleapis</code> in a branch, then <b>manually verify</b> <code>check_availability</code> and <code>book_appointment</code> against a real test calendar before merging, since this is a breaking major-version change. Do not apply it blindly.</p>
+</div>
+
+<h2>Other known limitations</h2>
+<ul>
+<li><b>Docker build was never executed</b> in the environment this project was built in — the Dockerfile/compose files are manually reviewed for correctness but not proven by an actual build.</li>
+<li><b>Graceful shutdown (SIGTERM)</b> was verified by code review, not by a live signal test, because Windows (the development machine) does not deliver POSIX signals the way the Linux Docker container on a real VPS will.</li>
+<li><b>No CI pipeline</b> is configured yet — <code>npm test</code>/<code>typecheck</code>/<code>lint</code>/<code>build</code> are ready to plug into one.</li>
+<li><b>No real external integration has been tested</b> — WhatsApp, OpenRouter, and Google Calendar are all implemented against their documented APIs and unit-tested with mocks, but none has been exercised with real production credentials.</li>
+</ul>
+</div>
+<div class="chapter" id="ch23">
+<h1>23. Explain This Project to a 10-Year-Old</h1>
+<div class="box kid" style="font-size:10.5pt;"><span class="tag">THE RESTAURANT RECEPTIONIST</span>
+<p>Imagine a restaurant with a super-smart receptionist who never sleeps.</p>
+<table style="font-size:9.5pt;">
+<tr><td style="width:45mm;"><b>WhatsApp</b></td><td>the telephone customers call on</td></tr>
+<tr><td><b>Meta</b></td><td>the telephone company that connects the call</td></tr>
+<tr><td><b>Webhook</b></td><td>the doorbell that rings the moment someone calls</td></tr>
+<tr><td><b>Node.js</b></td><td>the receptionist themselves</td></tr>
+<tr><td><b>AI (OpenRouter)</b></td><td>the receptionist's brain</td></tr>
+<tr><td><b>Knowledge files</b></td><td>the instruction book on the desk (prices, hours, rules)</td></tr>
+<tr><td><b>SQLite</b></td><td>the notebook where they write down every caller</td></tr>
+<tr><td><b>Google Calendar</b></td><td>the appointment diary</td></tr>
+<tr><td><b>Tools</b></td><td>the receptionist's special abilities — like actually flipping open the diary</td></tr>
+<tr><td><b>Docker</b></td><td>a travel box that lets the whole desk move to any building and still work the same</td></tr>
+<tr><td><b>Caddy</b></td><td>the security guard checking IDs at the door</td></tr>
+<tr><td><b>HTTPS</b></td><td>a locked tunnel nobody else can peek into</td></tr>
+<tr><td><b>VPS</b></td><td>the building where the receptionist's desk actually sits</td></tr>
+</table>
+</div>
+
+<h2>One full interaction, beginning to end</h2>
+<div class="flow">
+  <div class="step">A customer calls (sends "Hi, can I book tomorrow at 3?")</div><div class="arrow">&darr;</div>
+  <div class="step">The doorbell rings (webhook)</div><div class="arrow">&darr;</div>
+  <div class="step acc">The receptionist checks their notebook — "have we spoken before?"</div><div class="arrow">&darr;</div>
+  <div class="step acc">Their brain thinks about the request, reading the instruction book</div><div class="arrow">&darr;</div>
+  <div class="step">They flip open the real appointment diary to check 3 PM tomorrow</div><div class="arrow">&darr;</div>
+  <div class="step">It's free! They write it down in the diary</div><div class="arrow">&darr;</div>
+  <div class="step">They call the customer back: "You're all set for 3 PM tomorrow!"</div>
+</div>
+</div>
+
+<div class="chapter" id="ch24">
+<h1>24. Glossary</h1>
+<table>
+<tr><th>Term</th><th>Simple meaning</th></tr>
+<tr><td>AI</td><td>A computer program that can understand language and make decisions, like a very fast reader and thinker.</td></tr>
+<tr><td>LLM</td><td>"Large Language Model" — the specific type of AI used here, trained to read and write natural language.</td></tr>
+<tr><td>API</td><td>A way for two computer programs to talk to each other using an agreed set of rules.</td></tr>
+<tr><td>Webhook</td><td>A "doorbell" — a URL another service calls automatically the moment something happens.</td></tr>
+<tr><td>HTTP</td><td>The basic language web browsers and servers use to talk to each other.</td></tr>
+<tr><td>HTTPS</td><td>HTTP, but locked inside an encrypted tunnel so nobody can eavesdrop.</td></tr>
+<tr><td>JSON</td><td>A simple text format for structured data, like <code>{"name":"Alice"}</code>.</td></tr>
+<tr><td>HMAC</td><td>A mathematical way to "sign" a message with a secret key, so the receiver can prove it wasn't tampered with.</td></tr>
+<tr><td>SQLite</td><td>A database that lives in a single file, no separate server needed.</td></tr>
+<tr><td>SQL</td><td>The language used to ask a database questions ("give me all customers named Alice").</td></tr>
+<tr><td>Docker</td><td>A tool that packages an app so it runs the same way on any computer.</td></tr>
+<tr><td>Container</td><td>The "sealed box" Docker creates and runs.</td></tr>
+<tr><td>VPS</td><td>"Virtual Private Server" — a rented computer, always on, somewhere on the internet.</td></tr>
+<tr><td>DNS</td><td>The internet's phonebook — turns a domain name into a computer's real address.</td></tr>
+<tr><td>Domain</td><td>A human-readable website address, like <code>example.com</code>.</td></tr>
+<tr><td>SSL/TLS</td><td>The technology behind HTTPS's encryption.</td></tr>
+<tr><td>OAuth</td><td>A standard way to let one app access another on a user's behalf, without sharing a password directly.</td></tr>
+<tr><td>Service Account</td><td>A permanent, non-human identity a program uses to access another service (used here for Google Calendar).</td></tr>
+<tr><td>OpenRouter</td><td>A single service that connects to many different AI models.</td></tr>
+<tr><td>Meta Cloud API</td><td>The official service from Meta (WhatsApp's parent company) for sending/receiving WhatsApp messages programmatically.</td></tr>
+<tr><td>wa_id</td><td>The unique WhatsApp identifier for a customer (essentially their phone number).</td></tr>
+<tr><td>Idempotency</td><td>Doing the same operation twice has the same effect as doing it once — used here to stop duplicate messages being processed twice.</td></tr>
+<tr><td>Concurrency</td><td>Multiple things happening (or trying to happen) at the same time.</td></tr>
+<tr><td>Rate Limiting</td><td>Capping how many requests a single source can make in a given time window.</td></tr>
+<tr><td>Middleware</td><td>Code that runs on every request before it reaches the final handler (e.g. security headers, logging).</td></tr>
+<tr><td>Endpoint</td><td>A specific URL a server responds to, like <code>/webhook</code> or <code>/health</code>.</td></tr>
+<tr><td>Environment Variable</td><td>A configuration value set outside the code (in <code>.env</code>), so secrets/settings never live in source files.</td></tr>
+<tr><td>Tool Calling</td><td>An AI pausing to run a real function (like checking a calendar) instead of guessing an answer.</td></tr>
+<tr><td>Prompt</td><td>The text given to an AI to tell it what to do or say.</td></tr>
+<tr><td>System Prompt</td><td>The hidden instructions given to the AI before the conversation starts, defining its role and rules.</td></tr>
+<tr><td>Calendar API</td><td>Google's programmatic interface for reading and creating calendar events.</td></tr>
+<tr><td>REST API</td><td>A common style of web API built around standard HTTP verbs (GET, POST, etc.) and URLs.</td></tr>
+</table>
+</div>
+<div class="chapter" id="ch25">
+<h1>25. Final Master Diagram</h1>
+<p>The complete system, top to bottom, in one picture — Docker/VPS wraps the application; everything inside runs in one container.</p>
+<div class="box dev" style="padding:5mm 6mm;">
+<div class="flow" style="margin:0;">
+  <div class="step">CUSTOMER</div><div class="arrow">&darr;</div>
+  <div class="step">WHATSAPP</div><div class="arrow">&darr;</div>
+  <div class="step">META</div><div class="arrow">&darr;</div>
+  <div class="step">INTERNET</div><div class="arrow">&darr;</div>
+  <div class="step">DOMAIN</div><div class="arrow">&darr;</div>
+  <div class="step warn">CADDY / HTTPS</div><div class="arrow">&darr;</div>
+  <div class="step acc">&#9484;&#9472;&#9472;&#9472;&#9472; DOCKER CONTAINER (VPS) &#9472;&#9472;&#9472;&#9472;&#9472;&#9488;</div>
+  <div class="step acc">NODE.JS / EXPRESS</div><div class="arrow">&darr;</div>
+  <div class="step">SECURITY (Helmet, rate limit, signature check)</div><div class="arrow">&darr;</div>
+  <div class="step">WEBHOOK</div><div class="arrow">&darr;</div>
+  <div class="step">CUSTOMER IDENTITY (wa_id)</div><div class="arrow">&darr;</div>
+  <div class="step">SQLITE (persistent volume)</div><div class="arrow">&darr;</div>
+  <div class="step">KNOWLEDGE FILES</div><div class="arrow">&darr;</div>
+  <div class="step acc">OPENROUTER</div><div class="arrow">&darr;</div>
+  <div class="step acc">AI AGENT (bounded tool loop)</div><div class="arrow">&darr;</div>
+  <div class="step acc">TOOLS</div><div class="arrow">&darr;</div>
+  <div class="step">GOOGLE CALENDAR</div><div class="arrow">&darr;</div>
+  <div class="step">RESPONSE</div>
+  <div class="step acc">&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;</div>
+  <div class="arrow">&darr;</div>
+  <div class="step">META</div><div class="arrow">&darr;</div>
+  <div class="step">WHATSAPP</div><div class="arrow">&darr;</div>
+  <div class="step">CUSTOMER</div>
+</div>
+</div>
+</div>
+
+<div class="chapter" id="ch26">
+<h1>26. Source of Truth &amp; Generation Record</h1>
+<div class="box dev">
+<p><b>Documentation generated from the actual project source code</b> at <code>C:\Websites\WhatsApp AI Agent</code>.</p>
+<div class="kv"><b>Generation date:</b> <span>2026-09-10</span></div>
+<div class="kv"><b>Git commit:</b> <span>647193d (2026-09-07) — "fix: remove explicit moduleResolution from tsconfig"</span></div>
+<div class="kv"><b>Test result:</b> <span>19 test files, 87 tests, 87 passed (re-run for this document)</span></div>
+<div class="kv"><b>Typecheck / Lint / Build:</b> <span>All clean (re-run for this document)</span></div>
+<div class="kv"><b>Docker verification:</b> <span>Not verified in this environment (see Chapter 21/22)</span></div>
+<div class="kv"><b>Documentation status:</b> <span>Reflects the codebase as of the commit above; not a certification of production readiness</span></div>
+</div>
+<div class="box warn"><span class="tag">IMPORTANT</span>
+<p>This document is a description of what the code does today, verified against real test runs and a real smoke test. It is <b>not</b> proof of production readiness — the WhatsApp, OpenRouter, and Google Calendar integrations still require real credentials and a real end-to-end test before this system should be trusted with real customers.</p>
+</div>
+</div>
+</body>
+</html>
