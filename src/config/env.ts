@@ -9,49 +9,88 @@ const csvList = (value: string | undefined): string[] =>
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
-const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().positive().default(3000),
-  LOG_LEVEL: z.string().default('info'),
-  DATABASE_PATH: z.string().default('./data/app.db'),
+/**
+ * Credentials required for real external integrations. These are OPTIONAL
+ * at the schema level (so development can start without them) but are
+ * enforced as mandatory by the `.superRefine` below whenever
+ * NODE_ENV=production. They must never be required in development/test —
+ * that's what lets `npm run dev` start with mock providers (see
+ * src/whatsapp/client.ts, src/llm/openRouterClient.ts,
+ * src/calendar/availability.ts / booking.ts) and no real credentials.
+ */
+const PRODUCTION_REQUIRED_KEYS = [
+  'WHATSAPP_ACCESS_TOKEN',
+  'WHATSAPP_PHONE_NUMBER_ID',
+  'WHATSAPP_VERIFY_TOKEN',
+  'META_APP_SECRET',
+  'OPENROUTER_API_KEY',
+  'GOOGLE_CLIENT_EMAIL',
+  'GOOGLE_PRIVATE_KEY',
+] as const;
 
-  WHATSAPP_ACCESS_TOKEN: z.string().min(1, 'WHATSAPP_ACCESS_TOKEN is required'),
-  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1, 'WHATSAPP_PHONE_NUMBER_ID is required'),
-  WHATSAPP_VERIFY_TOKEN: z.string().min(1, 'WHATSAPP_VERIFY_TOKEN is required'),
-  META_APP_SECRET: z.string().min(1, 'META_APP_SECRET is required'),
-  WHATSAPP_API_VERSION: z.string().default('v21.0'),
+const envSchema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    PORT: z.coerce.number().int().positive().default(3000),
+    LOG_LEVEL: z.string().default('info'),
+    DATABASE_PATH: z.string().default('./data/app.db'),
 
-  OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required'),
-  OPENROUTER_MODEL: z.string().default('openai/gpt-4o-mini'),
-  OPENROUTER_SITE_URL: z.string().optional().default(''),
-  OPENROUTER_APP_NAME: z.string().optional().default('WhatsApp AI Agent'),
+    // Optional at the schema level — see PRODUCTION_REQUIRED_KEYS above.
+    WHATSAPP_ACCESS_TOKEN: z.string().optional().default(''),
+    WHATSAPP_PHONE_NUMBER_ID: z.string().optional().default(''),
+    WHATSAPP_VERIFY_TOKEN: z.string().optional().default(''),
+    META_APP_SECRET: z.string().optional().default(''),
+    WHATSAPP_API_VERSION: z.string().default('v21.0'),
 
-  GOOGLE_CLIENT_EMAIL: z.string().min(1, 'GOOGLE_CLIENT_EMAIL is required'),
-  GOOGLE_PRIVATE_KEY: z.string().min(1, 'GOOGLE_PRIVATE_KEY is required'),
-  GOOGLE_CALENDAR_ID: z.string().default('primary'),
-  GOOGLE_PROJECT_ID: z.string().optional().default(''),
+    OPENROUTER_API_KEY: z.string().optional().default(''),
+    OPENROUTER_MODEL: z.string().default('openai/gpt-4o-mini'),
+    OPENROUTER_SITE_URL: z.string().optional().default(''),
+    OPENROUTER_APP_NAME: z.string().optional().default('WhatsApp AI Agent'),
 
-  BUSINESS_NAME: z.string().default('The Business'),
-  BUSINESS_TIMEZONE: z.string().default('UTC'),
-  BUSINESS_PHONE: z.string().optional().default(''),
-  BUSINESS_EMAIL: z.string().optional().default(''),
-  BUSINESS_HOURS_START: z.string().default('09:00'),
-  BUSINESS_HOURS_END: z.string().default('18:00'),
-  BUSINESS_DAYS: z.string().default('1,2,3,4,5,6'),
+    GOOGLE_CLIENT_EMAIL: z.string().optional().default(''),
+    GOOGLE_PRIVATE_KEY: z.string().optional().default(''),
+    GOOGLE_CALENDAR_ID: z.string().default('primary'),
+    GOOGLE_PROJECT_ID: z.string().optional().default(''),
 
-  BOOKING_DURATION_MINUTES: z.coerce.number().int().positive().default(30),
-  BOOKING_BUFFER_MINUTES: z.coerce.number().int().nonnegative().default(0),
+    BUSINESS_NAME: z.string().default('The Business'),
+    BUSINESS_TIMEZONE: z.string().default('UTC'),
+    BUSINESS_PHONE: z.string().optional().default(''),
+    BUSINESS_EMAIL: z.string().optional().default(''),
+    BUSINESS_HOURS_START: z.string().default('09:00'),
+    BUSINESS_HOURS_END: z.string().default('18:00'),
+    BUSINESS_DAYS: z.string().default('1,2,3,4,5,6'),
 
-  RESTART_KEYWORDS: z.string().default('restart,reset,start over'),
-  CONVERSATION_HISTORY_LIMIT: z.coerce.number().int().positive().default(20),
-  MAX_TOOL_ROUNDS: z.coerce.number().int().positive().default(4),
-  OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
-  WHATSAPP_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
-  GOOGLE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+    BOOKING_DURATION_MINUTES: z.coerce.number().int().positive().default(30),
+    BOOKING_BUFFER_MINUTES: z.coerce.number().int().nonnegative().default(0),
 
-  MAX_BODY_SIZE: z.string().default('1mb'),
-  RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(120),
-});
+    RESTART_KEYWORDS: z.string().default('restart,reset,start over'),
+    CONVERSATION_HISTORY_LIMIT: z.coerce.number().int().positive().default(20),
+    MAX_TOOL_ROUNDS: z.coerce.number().int().positive().default(4),
+    OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    WHATSAPP_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+    GOOGLE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+
+    MAX_BODY_SIZE: z.string().default('1mb'),
+    RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(120),
+  })
+  .superRefine((data, ctx) => {
+    // Real credentials are mandatory ONLY in production. Development and
+    // test never require them — this is what makes `npm run dev` safe to
+    // start without Meta/OpenRouter/Google credentials, and is also why
+    // this check must never be loosened to cover 'production' accidentally
+    // matching via string coercion or a typo — it's an exact enum compare.
+    if (data.NODE_ENV !== 'production') return;
+
+    for (const key of PRODUCTION_REQUIRED_KEYS) {
+      if (!data[key]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is required when NODE_ENV=production`,
+        });
+      }
+    }
+  });
 
 export type RawEnv = z.infer<typeof envSchema>;
 
@@ -78,7 +117,19 @@ export const env = {
   // store it with literal \n escape sequences.
   GOOGLE_PRIVATE_KEY: raw.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
   isProduction: raw.NODE_ENV === 'production',
+  isDevelopment: raw.NODE_ENV === 'development',
   isTest: raw.NODE_ENV === 'test',
+  /**
+   * true for every mode except 'production'. Real integration clients
+   * (WhatsApp, OpenRouter, Google Calendar) check this flag and delegate to
+   * their mock implementation instead of making a real network call —
+   * see src/whatsapp/client.ts, src/llm/openRouterClient.ts,
+   * src/calendar/availability.ts, src/calendar/booking.ts.
+   * There is deliberately no way to opt back into real providers from
+   * development/test short of setting NODE_ENV=production, which in turn
+   * requires all real credentials to be present (enforced above).
+   */
+  shouldUseMockProviders: raw.NODE_ENV !== 'production',
 };
 
 export type Env = typeof env;

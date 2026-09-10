@@ -1,6 +1,7 @@
 import { env } from '../config/env';
 import { logger } from '../logger';
 import { fetchWithTimeout, withRetry, HttpError, isRetryableHttpError } from '../utils/retry';
+import { sendTextMessageMock, markMessageAsReadMock } from './mockClient';
 import type { SendTextMessageResponse } from './types';
 
 function graphUrl(pathSegment: string): string {
@@ -45,6 +46,9 @@ export async function sendTextMessage(
   toWaId: string,
   body: string,
 ): Promise<SendTextMessageResponse> {
+  if (env.shouldUseMockProviders) {
+    return sendTextMessageMock(toWaId, body);
+  }
   try {
     const result = await graphRequest<SendTextMessageResponse>(
       `${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
@@ -65,6 +69,9 @@ export async function sendTextMessage(
 
 /** Marks an inbound message as read (best-effort, failures are logged not thrown). */
 export async function markMessageAsRead(messageId: string): Promise<void> {
+  if (env.shouldUseMockProviders) {
+    return markMessageAsReadMock(messageId);
+  }
   try {
     await graphRequest(`${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
       messaging_product: 'whatsapp',

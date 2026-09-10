@@ -1,6 +1,7 @@
 import { env } from '../config/env';
 import { logger } from '../logger';
 import { fetchWithTimeout, withRetry, HttpError, isRetryableHttpError } from '../utils/retry';
+import { chatCompletionMock } from './mockOpenRouterClient';
 import type { ChatCompletionResponse, ChatMessage } from './types';
 import type { ToolDefinition } from '../tools';
 
@@ -15,6 +16,9 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 /** Calls OpenRouter's OpenAI-compatible chat completions endpoint with tool-calling support. */
 export async function chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+  if (env.shouldUseMockProviders) {
+    return chatCompletionMock(request.messages);
+  }
   return withRetry(
     async () => {
       const response = await fetchWithTimeout(

@@ -4,6 +4,7 @@ import { getCalendarClient } from './googleClient';
 import { freeBusyQuery } from './availability';
 import { withRetry } from '../utils/retry';
 import { logger } from '../logger';
+import { createEventMock } from './mockProvider';
 
 export interface CreateEventParams {
   summary: string;
@@ -33,6 +34,10 @@ export interface CreateEventConflict {
 export async function createEvent(
   params: CreateEventParams,
 ): Promise<CreateEventResult | CreateEventConflict> {
+  if (env.shouldUseMockProviders) {
+    return createEventMock(params);
+  }
+
   const busy = await freeBusyQuery(params.startISO, params.endISO);
   const requestedStart = DateTime.fromISO(params.startISO);
   const requestedEnd = DateTime.fromISO(params.endISO);

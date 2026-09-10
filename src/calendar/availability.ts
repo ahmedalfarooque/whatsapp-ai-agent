@@ -4,6 +4,7 @@ import { getCalendarClient } from './googleClient';
 import { businessHoursRangeFor, isBusinessDay } from './timezone';
 import { withRetry } from '../utils/retry';
 import { logger } from '../logger';
+import { freeBusyQueryMock } from './mockProvider';
 
 export interface BusyInterval {
   start: string;
@@ -16,6 +17,10 @@ export interface BusyInterval {
  * intervals — never guesses or fabricates availability.
  */
 export async function freeBusyQuery(startISO: string, endISO: string): Promise<BusyInterval[]> {
+  if (env.shouldUseMockProviders) {
+    return freeBusyQueryMock(startISO, endISO);
+  }
+
   const calendar = getCalendarClient();
 
   const response = await withRetry(
