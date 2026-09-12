@@ -1,6 +1,6 @@
-import express, { Router, type Request, type Response, type NextFunction } from 'express';
+import express, { Router, type Request, type Response } from 'express';
 import path from 'node:path';
-import { env } from '../config/env';
+import rateLimit from 'express-rate-limit';
 import { logger } from '../logger';
 import {
   getDashboardSummary,
@@ -19,6 +19,36 @@ import { listConversations, getConversationById, getConversationMessages } from 
 import { listBookingLocks } from '../memory/bookingLockRepo';
 import { listKnowledgeFiles, readKnowledgeFile, writeKnowledgeFile, KnowledgeFileError } from './knowledgeAdmin';
 import { getProjectSyncView } from './projectSync';
+import { env } from '../config/env';
+import {
+  adminCount,
+  createAdminUser,
+  verifyAdminCredentials,
+  createSession,
+  destroySessionByToken,
+} from './auth';
+import {
+  requireDashboardAuth,
+  readSessionToken,
+  setSessionCookie,
+  clearSessionCookie,
+} from './authMiddleware';
+import {
+  OVERRIDABLE_KEYS,
+  isOverridableKey,
+  setSecret,
+  clearSecret,
+  listConfiguredOverrideKeys,
+  maskSecret,
+  type OverridableKey,
+} from '../config/secretStore';
+import { getEffectiveCredential } from '../config/effectiveConfig';
+import { testConnection } from './credentialTest';
+import { getDb } from '../memory/db';
+import {
+  updateBusinessSettings,
+  BusinessSettingsValidationError,
+} from '../config/businessSettings';
 
 function parsePageParams(req: Request): { limit: number; offset: number } {
   const limit = Number.parseInt(String(req.query.limit ?? '25'), 10);
@@ -29,25 +59,103 @@ function parsePageParams(req: Request): { limit: number; offset: number } {
   };
 }
 
+// Relative to the '/api/dashboard' mount point (see the router.use('/api/dashboard', ...)
+// auth gate below — Express strips the mount prefix from req.path inside it).
+const UNAUTHENTICATED_AUTH_ROUTES = ['/auth/status', '/auth/setup', '/auth/login'];
+
 export function createDashboardRouter(): Router {
   const router = Router();
   const dashboardDir = path.join(__dirname, '..', '..', 'dashboard');
 
-  // The dashboard reads real application data (customer/conversation/booking
-  // history, knowledge file contents) and — for knowledge editing — writes
-  // to a strictly allowlisted set of files. None of this is safe to expose
-  // without authentication, so until real admin auth exists, it is only
-  // ever available outside production.
-  const requireLocalDashboard = (_req: Request, res: Response, next: NextFunction): void => {
-    if (env.isProduction) {
-      res.status(404).json({ error: 'dashboard_not_available_without_admin_authentication' });
+  router.use('/api/dashboard', express.json({ limit: '256kb' }));
+
+  const setupLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
+  const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
+
+  // ---- Auth (reachable unauthenticated, in every environment) ----------------
+  router.get('/api/dashboard/auth/status', (_req, res) => {
+    const hasAdmin = adminCount() > 0;
+    const token = readSessionToken(_req);
+    res.json({ hasAdmin, authenticated: hasAdmin && Boolean(token) });
+  });
+
+  router.post('/api/dashboard/auth/setup', setupLimiter, (req, res) => {
+    const { username, password } = req.body ?? {};
+    if (typeof username !== 'string' || typeof password !== 'string') {
+      res.status(400).json({ error: 'username and password are required' });
       return;
     }
-    next();
-  };
+    if (username.trim().length < 3) {
+      res.status(400).json({ error: 'username must be at least 3 characters' });
+      return;
+    }
+    if (password.length < 12) {
+      res.status(400).json({ error: 'password must be at least 12 characters' });
+      return;
+    }
 
-  router.use(requireLocalDashboard);
-  router.use('/api/dashboard', express.json({ limit: '256kb' }));
+    const db = getDb();
+    const run = db.transaction(() => {
+      if (adminCount() > 0) {
+        throw Object.assign(new Error('admin already exists'), { status: 409 });
+      }
+      return createAdminUser(username.trim(), password);
+    });
+
+    let adminUserId: number;
+    try {
+      adminUserId = run();
+    } catch (error) {
+      const status = (error as { status?: number }).status ?? 500;
+      if (status === 409) {
+        res.status(409).json({ error: 'an admin account already exists' });
+        return;
+      }
+      logger.error({ error }, 'dashboard: admin setup failed');
+      res.status(500).json({ error: 'internal_server_error' });
+      return;
+    }
+
+    const session = createSession(adminUserId);
+    setSessionCookie(res, session.token, session.expiresAt);
+    res.status(201).json({ ok: true });
+  });
+
+  router.post('/api/dashboard/auth/login', loginLimiter, (req, res) => {
+    const { username, password } = req.body ?? {};
+    if (typeof username !== 'string' || typeof password !== 'string') {
+      res.status(400).json({ error: 'username and password are required' });
+      return;
+    }
+    const adminUserId = verifyAdminCredentials(username, password);
+    if (!adminUserId) {
+      res.status(401).json({ error: 'invalid username or password' });
+      return;
+    }
+    const session = createSession(adminUserId);
+    setSessionCookie(res, session.token, session.expiresAt);
+    res.json({ ok: true });
+  });
+
+  router.post('/api/dashboard/auth/logout', (req, res) => {
+    const token = readSessionToken(req);
+    if (token) destroySessionByToken(token);
+    clearSessionCookie(res);
+    res.json({ ok: true });
+  });
+
+  // ---- Every other /api/dashboard/* data route requires a valid session ------
+  // Deliberately scoped to the API surface only — the static SPA shell below
+  // (index.html/app.js/styles.css) must stay reachable unauthenticated, since
+  // the login screen itself is rendered by that same JavaScript bundle after
+  // it calls /api/dashboard/auth/status.
+  router.use('/api/dashboard', (req, res, next) => {
+    if (UNAUTHENTICATED_AUTH_ROUTES.includes(req.path)) {
+      next();
+      return;
+    }
+    requireDashboardAuth(req, res, next);
+  });
 
   // ---- Overview -------------------------------------------------------
   router.get('/api/dashboard/summary', (_req, res) => {
@@ -183,14 +291,80 @@ export function createDashboardRouter(): Router {
     res.json({ integrations: getIntegrations() });
   });
 
+  // ---- Credentials (encrypted dashboard override store) ----------------------
+  router.get('/api/dashboard/credentials', (_req, res) => {
+    const configuredOverrides = new Set(listConfiguredOverrideKeys());
+    const result: Record<string, { source: 'override' | 'env' | 'unset'; masked: string | null }> = {};
+    for (const key of OVERRIDABLE_KEYS) {
+      const effective = getEffectiveCredential(key);
+      const source = configuredOverrides.has(key) ? 'override' : effective ? 'env' : 'unset';
+      result[key] = { source, masked: effective ? maskSecret(effective) : null };
+    }
+    res.json(result);
+  });
+
+  router.put('/api/dashboard/credentials/:key', (req, res) => {
+    const key = req.params.key;
+    if (!isOverridableKey(key)) {
+      res.status(400).json({ error: 'unknown credential key' });
+      return;
+    }
+    const value = req.body?.value;
+    if (typeof value !== 'string' || value.length === 0) {
+      res.status(400).json({ error: 'request body must include a non-empty string "value" field' });
+      return;
+    }
+    setSecret(key as OverridableKey, value, req.adminUserId as number);
+    res.json({ ok: true, masked: maskSecret(value) });
+  });
+
+  router.delete('/api/dashboard/credentials/:key', (req, res) => {
+    const key = req.params.key;
+    if (!isOverridableKey(key)) {
+      res.status(400).json({ error: 'unknown credential key' });
+      return;
+    }
+    clearSecret(key as OverridableKey);
+    res.json({ ok: true });
+  });
+
+  router.post('/api/dashboard/credentials/:key/test', async (req, res) => {
+    const key = req.params.key;
+    if (!isOverridableKey(key)) {
+      res.status(400).json({ error: 'unknown credential key' });
+      return;
+    }
+    try {
+      const result = await testConnection(key as OverridableKey);
+      res.json(result);
+    } catch (error) {
+      logger.error({ error, key }, 'dashboard: credential test threw unexpectedly');
+      res.status(500).json({ ok: false, detail: 'internal_server_error' });
+    }
+  });
+
   // ---- System -----------------------------------------------------------------
   router.get('/api/dashboard/system', (_req, res) => {
     res.json(getSystemInfo());
   });
 
-  // ---- Settings (read-only view of server-controlled configuration) -----------
+  // ---- Settings (business-facing config, dashboard-editable) -------------------
   router.get('/api/dashboard/settings', (_req, res) => {
     res.json(getSettingsView());
+  });
+
+  router.put('/api/dashboard/settings', (req, res) => {
+    try {
+      updateBusinessSettings(req.body ?? {});
+      res.json(getSettingsView());
+    } catch (error) {
+      if (error instanceof BusinessSettingsValidationError) {
+        res.status(error.status).json({ error: 'validation_failed', fields: error.fields });
+        return;
+      }
+      logger.error({ error }, 'dashboard: failed to save settings');
+      res.status(500).json({ error: 'internal_server_error' });
+    }
   });
 
   // ---- Project Sync / AI collaboration (read-only) -----------------------------
@@ -204,7 +378,7 @@ export function createDashboardRouter(): Router {
   // slash before it will serve an index file, which would break this exact URL.
   router.get('/dashboard', (_req, res) => res.sendFile(path.join(dashboardDir, 'index.html')));
   router.use('/dashboard', express.static(dashboardDir));
-  router.get('/', (_req, res) => res.redirect('/dashboard'));
+  router.get('/', (_req, res: Response) => res.redirect('/dashboard'));
 
   return router;
 }

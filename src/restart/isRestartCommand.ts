@@ -1,4 +1,4 @@
-import { env } from '../config/env';
+import { getBusinessSettings } from '../config/businessSettings';
 
 /**
  * Matches a restart/reset command robustly but conservatively: the message
@@ -15,5 +15,5 @@ export function isRestartCommand(text: string | undefined | null): boolean {
     .replace(/[.!?]+$/g, '')
     .trim();
 
-  return env.RESTART_KEYWORDS.includes(normalized);
+  return getBusinessSettings().restartKeywords.includes(normalized);
 }

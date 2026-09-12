@@ -85,9 +85,17 @@ to start with a clear error if any are missing.
 | `BOOKING_DURATION_MINUTES`, `BOOKING_BUFFER_MINUTES` | Default appointment length and buffer around existing events |
 | `RESTART_KEYWORDS` | Comma-separated words that reset a conversation |
 | `DOMAIN` | Your real domain, for Caddy's automatic HTTPS |
+| `DASHBOARD_MASTER_KEY` | Required in **every** environment (dev/test/production) — encrypts the dashboard's credential-override store and gates dashboard sessions. Generate once with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` and never rotate casually (rotating without re-encrypting existing overrides orphans them — clear and re-enter overrides after a rotation). |
 
 **Never commit `.env` or any real credential.** `.gitignore` already
 excludes it.
+
+Business-facing settings (hours, timezone, restart keywords, welcome/
+fallback messages, cancellation policy, etc.) can also be edited live from
+the dashboard's Settings page (§14) without restarting — a dashboard edit
+overrides the `.env` value for that field only; clearing it there reverts
+to `.env`. `BUSINESS_NAME`/`BUSINESS_TIMEZONE`/etc. in `.env` remain the
+fallback and the seed values for a fresh install.
 
 ## 5. Setting up Meta WhatsApp Cloud API
 
@@ -227,6 +235,45 @@ A customer can send `restart` or `reset` (configurable via
 their current conversation and starts a new one — full history is retained
 in the database for audit purposes, it's just no longer used as active
 context for the AI.
+
+## 11a. Admin dashboard
+
+Visit `/dashboard` (root `/` redirects there). On first visit with no admin
+account yet, you'll be prompted to create one (username + a password of at
+least 12 characters) — this is only possible once; every later attempt is
+refused. Logging in sets an httpOnly session cookie (12-hour sliding
+expiry, 7-day hard cap). The dashboard is reachable in every environment,
+including production, but every page and API route behind it requires that
+authenticated session.
+
+From the dashboard you can:
+- View real customers, conversations, and bookings (including `uncertain`
+  bookings that need manual reconciliation — see the booking-reliability
+  notes in `FINAL_STATUS.md`).
+- View and edit the allowlisted knowledge files (with automatic timestamped
+  backups before every save).
+- View and edit business-facing **Settings** (hours, timezone, restart
+  keywords, welcome/fallback messages, cancellation policy, supported
+  languages) — takes effect immediately, no restart, and can be reset
+  per-field back to the `.env` value.
+- View and set **credential overrides** for the WhatsApp/OpenRouter/Google
+  keys under **Integrations**, without touching `.env` or restarting.
+  Entered values are AES-256-GCM encrypted at rest (key derived from
+  `DASHBOARD_MASTER_KEY`) and never returned to the browser — only a masked
+  preview (`sk-t…7890`). Each credential has a real **Test connection**
+  button that makes one bounded, real API call to confirm it actually
+  works (WhatsApp: phone-number metadata; OpenRouter: `/auth/key`; Google:
+  `calendars.get`) — the dashboard never claims "Connected" without one of
+  these succeeding, and opening the page itself never calls any provider.
+
+A dashboard credential override always takes precedence over `.env` for
+that one key; clearing the override reverts to `.env`. Production's
+startup-time required-credential check (`src/config/env.ts`) is
+intentionally untouched by this — it still validates raw `.env` only, so a
+production deployment must ship with valid real credentials in `.env` to
+boot at all. The dashboard's override store is a **runtime rotation
+mechanism on top of an already-valid deployment**, not a way to boot
+production with an empty `.env`.
 
 ## 12. Troubleshooting
 

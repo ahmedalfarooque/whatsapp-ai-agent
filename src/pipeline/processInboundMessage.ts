@@ -1,4 +1,4 @@
-import { env } from '../config/env';
+import { getBusinessSettings } from '../config/businessSettings';
 import { logger, maskWaId } from '../logger';
 import { GENERIC_ERROR_REPLY, MESSAGE_DIRECTION } from '../config/constants';
 import type { InboundMessage } from '../webhook/parseInboundPayload';
@@ -88,7 +88,7 @@ async function processInboundMessageUnlocked(
     messageType: msg.type,
   });
 
-  const history = getRecentMessages(conversation.id, env.CONVERSATION_HISTORY_LIMIT);
+  const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit);
   const systemPrompt = buildSystemPrompt(deps.knowledge);
 
   let finalText: string;

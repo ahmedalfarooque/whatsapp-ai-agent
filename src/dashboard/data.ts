@@ -5,6 +5,8 @@ import { getDb } from '../memory/db';
 import { maskWaId } from '../logger';
 import { listBookingLocks } from '../memory/bookingLockRepo';
 import { listKnowledgeFiles } from './knowledgeAdmin';
+import { getEffectiveCredential } from '../config/effectiveConfig';
+import { getBusinessSettings, getBusinessSettingsOverrides } from '../config/businessSettings';
 
 export interface DashboardSummary {
   customers: number;
@@ -141,7 +143,7 @@ export function getAiConfig(): AiConfigView {
     providerMode: env.shouldUseMockProviders ? 'mock' : 'production',
     model: env.OPENROUTER_MODEL,
     maxToolRounds: env.MAX_TOOL_ROUNDS,
-    conversationHistoryLimit: env.CONVERSATION_HISTORY_LIMIT,
+    conversationHistoryLimit: getBusinessSettings().conversationHistoryLimit,
     toolsEnabled: ['check_availability', 'book_appointment'],
     timeouts: { openRouterMs: env.OPENROUTER_TIMEOUT_MS },
   };
@@ -156,9 +158,13 @@ export interface IntegrationView {
 
 export function getIntegrations(): IntegrationView[] {
   const mock = env.shouldUseMockProviders;
-  const whatsappConfigured = Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID);
-  const openRouterConfigured = Boolean(env.OPENROUTER_API_KEY);
-  const googleConfigured = Boolean(env.GOOGLE_CLIENT_EMAIL && env.GOOGLE_PRIVATE_KEY);
+  const whatsappConfigured = Boolean(
+    getEffectiveCredential('WHATSAPP_ACCESS_TOKEN') && getEffectiveCredential('WHATSAPP_PHONE_NUMBER_ID'),
+  );
+  const openRouterConfigured = Boolean(getEffectiveCredential('OPENROUTER_API_KEY'));
+  const googleConfigured = Boolean(
+    getEffectiveCredential('GOOGLE_CLIENT_EMAIL') && getEffectiveCredential('GOOGLE_PRIVATE_KEY'),
+  );
 
   return [
     {
@@ -224,21 +230,39 @@ export interface SettingsView {
   };
   booking: { durationMinutes: number; bufferMinutes: number };
   agent: { restartKeywords: string[]; conversationHistoryLimit: number };
+  content: {
+    welcomeMessage: string | null;
+    fallbackMessage: string | null;
+    cancellationPolicy: string | null;
+    humanEscalationInfo: string | null;
+    supportedLanguages: string[];
+  };
   security: { rateLimitPerMinute: number; maxBodySize: string };
+  /** Which editable fields are currently a dashboard override vs. an env fallback. */
+  overrides: ReturnType<typeof getBusinessSettingsOverrides>;
 }
 
 export function getSettingsView(): SettingsView {
+  const settings = getBusinessSettings();
   return {
     business: {
-      name: env.BUSINESS_NAME,
-      timezone: env.BUSINESS_TIMEZONE,
-      hoursStart: env.BUSINESS_HOURS_START,
-      hoursEnd: env.BUSINESS_HOURS_END,
-      days: env.BUSINESS_DAYS,
+      name: settings.businessName,
+      timezone: settings.businessTimezone,
+      hoursStart: settings.businessHoursStart,
+      hoursEnd: settings.businessHoursEnd,
+      days: settings.businessDays,
     },
-    booking: { durationMinutes: env.BOOKING_DURATION_MINUTES, bufferMinutes: env.BOOKING_BUFFER_MINUTES },
-    agent: { restartKeywords: env.RESTART_KEYWORDS, conversationHistoryLimit: env.CONVERSATION_HISTORY_LIMIT },
+    booking: { durationMinutes: settings.bookingDurationMinutes, bufferMinutes: settings.bookingBufferMinutes },
+    agent: { restartKeywords: settings.restartKeywords, conversationHistoryLimit: settings.conversationHistoryLimit },
+    content: {
+      welcomeMessage: settings.welcomeMessage,
+      fallbackMessage: settings.fallbackMessage,
+      cancellationPolicy: settings.cancellationPolicy,
+      humanEscalationInfo: settings.humanEscalationInfo,
+      supportedLanguages: settings.supportedLanguages,
+    },
     security: { rateLimitPerMinute: env.RATE_LIMIT_PER_MINUTE, maxBodySize: env.MAX_BODY_SIZE },
+    overrides: getBusinessSettingsOverrides(),
   };
 }
 

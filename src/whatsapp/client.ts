@@ -1,4 +1,5 @@
 import { env } from '../config/env';
+import { getEffectiveCredential } from '../config/effectiveConfig';
 import { logger } from '../logger';
 import {
   fetchWithTimeout,
@@ -26,7 +27,7 @@ async function graphRequest<T>(
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
+            Authorization: `Bearer ${getEffectiveCredential('WHATSAPP_ACCESS_TOKEN')}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(body),
@@ -66,7 +67,7 @@ export async function sendTextMessage(
     // an ambiguous network/timeout error, since the message may have
     // already been delivered before we gave up waiting for the response.
     const result = await graphRequest<SendTextMessageResponse>(
-      `${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      `${getEffectiveCredential('WHATSAPP_PHONE_NUMBER_ID')}/messages`,
       {
         messaging_product: 'whatsapp',
         to: toWaId,
@@ -92,7 +93,7 @@ export async function markMessageAsRead(messageId: string): Promise<void> {
     // Marking a message read is idempotent from the customer's perspective
     // (no visible duplicate effect), so the generic retry policy is fine here.
     await graphRequest(
-      `${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      `${getEffectiveCredential('WHATSAPP_PHONE_NUMBER_ID')}/messages`,
       {
         messaging_product: 'whatsapp',
         status: 'read',

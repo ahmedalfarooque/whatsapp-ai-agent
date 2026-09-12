@@ -1,4 +1,5 @@
 import { env } from '../config/env';
+import { getEffectiveCredential } from '../config/effectiveConfig';
 import { logger } from '../logger';
 import { fetchWithTimeout, withRetry, HttpError, isRetryableHttpError } from '../utils/retry';
 import { chatCompletionMock } from './mockOpenRouterClient';
@@ -26,7 +27,7 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+            Authorization: `Bearer ${getEffectiveCredential('OPENROUTER_API_KEY')}`,
             'Content-Type': 'application/json',
             ...(env.OPENROUTER_SITE_URL ? { 'HTTP-Referer': env.OPENROUTER_SITE_URL } : {}),
             ...(env.OPENROUTER_APP_NAME ? { 'X-Title': env.OPENROUTER_APP_NAME } : {}),

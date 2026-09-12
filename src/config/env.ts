@@ -72,8 +72,29 @@ const envSchema = z
 
     MAX_BODY_SIZE: z.string().default('1mb'),
     RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(120),
+
+    // Encrypts the dashboard's server-side credential-override store
+    // (src/config/secretStore.ts). Required in EVERY environment — unlike
+    // the WhatsApp/OpenRouter/Google keys, dashboard auth/secret storage is
+    // not an optional mock-in-dev feature, so this is validated below
+    // unconditionally, not gated on NODE_ENV=production.
+    DASHBOARD_MASTER_KEY: z.string().optional().default(''),
   })
   .superRefine((data, ctx) => {
+    // The master key must always be present and decode to exactly 32
+    // bytes (base64 or hex), in every environment. This is intentionally
+    // NOT gated on NODE_ENV — a missing/invalid key must fail closed
+    // everywhere, never silently disable auth or fall back to plaintext.
+    const keyBuffer = decodeMasterKeyForValidation(data.DASHBOARD_MASTER_KEY);
+    if (!keyBuffer || keyBuffer.length !== 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['DASHBOARD_MASTER_KEY'],
+        message:
+          'DASHBOARD_MASTER_KEY is required and must decode (base64 or hex) to exactly 32 bytes. Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"',
+      });
+    }
+
     // Real credentials are mandatory ONLY in production. Development and
     // test never require them — this is what makes `npm run dev` safe to
     // start without Meta/OpenRouter/Google credentials, and is also why
@@ -91,6 +112,23 @@ const envSchema = z
       }
     }
   });
+
+function decodeMasterKeyForValidation(value: string): Buffer | null {
+  if (!value) return null;
+  try {
+    if (/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+      const decoded = Buffer.from(value, 'base64');
+      if (decoded.length === 32) return decoded;
+    }
+    if (/^[0-9a-fA-F]+$/.test(value)) {
+      const decoded = Buffer.from(value, 'hex');
+      if (decoded.length === 32) return decoded;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export type RawEnv = z.infer<typeof envSchema>;
 

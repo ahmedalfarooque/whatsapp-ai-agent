@@ -41,6 +41,8 @@ steps behind each item.
 ## Application / infrastructure
 
 - [ ] `.env` created on the VPS with all real production values (never committed to git)
+- [ ] `DASHBOARD_MASTER_KEY` generated (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) and set in `.env` — required in every environment, the app refuses to boot without it
+- [ ] First dashboard admin account created via `/dashboard` immediately after first deploy (setup is permanently refused after the first admin exists)
 - [ ] `DOMAIN` set and DNS A/AAAA record for it points at the VPS
 - [ ] `docker compose build` succeeds
 - [ ] `docker compose up -d` runs cleanly; `docker compose logs -f app` shows no startup errors

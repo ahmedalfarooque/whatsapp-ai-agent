@@ -21,16 +21,22 @@ function formatDate(value) {
 }
 
 async function api(url, options) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { credentials: 'include', ...options });
   let body = null;
   try {
     body = await response.json();
   } catch {
     body = null;
   }
+  if (response.status === 401 && location.hash !== '#/login') {
+    location.hash = '#/login';
+    throw new Error('unauthenticated');
+  }
   if (!response.ok) {
     const message = (body && body.error) || `Request failed (${response.status})`;
-    throw new Error(message);
+    const error = new Error(message);
+    if (body && body.fields) error.fields = body.fields;
+    throw error;
   }
   return body;
 }
@@ -126,7 +132,13 @@ async function renderRoute() {
   }
 }
 
-window.addEventListener('hashchange', renderRoute);
+window.addEventListener('hashchange', () => {
+  if (location.hash === '#/login') {
+    renderRoute();
+  } else {
+    boot();
+  }
+});
 
 // ---------------------------------------------------------------------
 // Shared header bits (environment badge, sidebar mode note)
@@ -138,11 +150,86 @@ async function loadHeader() {
     document.querySelector('#environment').textContent =
       status.environment === 'development' ? 'Development' : status.environment === 'production' ? 'Production' : status.environment;
     document.querySelector('#sidebar-mode').textContent =
-      status.providerMode === 'mock' ? 'Read-only · mock providers' : 'Read-only · production providers';
+      status.providerMode === 'mock' ? 'Signed in · mock providers' : 'Signed in · production providers';
+    document.querySelector('#logout-btn').style.display = 'inline-flex';
   } catch {
     document.querySelector('#environment').textContent = 'Unavailable';
   }
 }
+
+document.querySelector('#logout-btn').addEventListener('click', async () => {
+  try {
+    await fetch('/api/dashboard/auth/logout', { method: 'POST', credentials: 'include' });
+  } finally {
+    location.hash = '#/login';
+    location.reload();
+  }
+});
+
+/** Runs once at page load and again right after a successful sign-in: checks
+ * auth status and either boots the real app or forces the login screen. */
+async function boot() {
+  const status = await fetch('/api/dashboard/auth/status', { credentials: 'include' }).then((r) => r.json());
+  if (!status.authenticated) {
+    document.querySelector('#logout-btn').style.display = 'none';
+    if (location.hash !== '#/login') location.hash = '#/login';
+    await renderRoute();
+    return;
+  }
+  if (location.hash === '#/login') location.hash = '#/';
+  await loadHeader();
+  await renderRoute();
+}
+
+// ---------------------------------------------------------------------
+// Login / first-run admin setup
+// ---------------------------------------------------------------------
+
+route('#/login', 'Sign in', '', async (view) => {
+  const status = await fetch('/api/dashboard/auth/status', { credentials: 'include' }).then((r) => r.json());
+  const isSetup = !status.hasAdmin;
+
+  view.innerHTML = `
+    <section class="panel detail" style="max-width:420px;margin:40px auto">
+      <h3>${isSetup ? 'Create the admin account' : 'Sign in'}</h3>
+      <p class="muted">${isSetup ? 'No admin account exists yet. Create one to unlock the dashboard.' : 'Enter your admin credentials to continue.'}</p>
+      <form id="auth-form">
+        <label class="muted" for="username">Username</label>
+        <input id="username" type="text" autocomplete="username" required style="width:100%;margin:6px 0 14px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe" />
+        <label class="muted" for="password">Password${isSetup ? ' (min 12 characters)' : ''}</label>
+        <input id="password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" required style="width:100%;margin:6px 0 14px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe" />
+        <div id="auth-error" class="form-error" hidden></div>
+        <button type="submit" class="btn primary" style="width:100%">${isSetup ? 'Create account & sign in' : 'Sign in'}</button>
+      </form>
+    </section>`;
+
+  const errorBox = view.querySelector('#auth-error');
+  view.querySelector('#auth-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorBox.hidden = true;
+    const username = view.querySelector('#username').value.trim();
+    const password = view.querySelector('#password').value;
+    try {
+      const res = await fetch(isSetup ? '/api/dashboard/auth/setup' : '/api/dashboard/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        errorBox.hidden = false;
+        errorBox.textContent = body.error || 'Sign-in failed.';
+        return;
+      }
+      location.hash = '#/';
+      await boot();
+    } catch {
+      errorBox.hidden = false;
+      errorBox.textContent = 'Could not reach the server.';
+    }
+  });
+});
 
 // ---------------------------------------------------------------------
 // Dashboard home
@@ -522,23 +609,112 @@ route('#/ai', 'AI', 'Current agent configuration — no secrets are shown here.'
 // Integrations
 // ---------------------------------------------------------------------
 
+const CREDENTIAL_GROUPS = [
+  {
+    title: 'WhatsApp Cloud API',
+    keys: ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_VERIFY_TOKEN', 'META_APP_SECRET'],
+  },
+  { title: 'OpenRouter', keys: ['OPENROUTER_API_KEY'] },
+  { title: 'Google Calendar', keys: ['GOOGLE_CLIENT_EMAIL', 'GOOGLE_PRIVATE_KEY'] },
+];
+
 route('#/integrations', 'Integrations', 'Configuration status only — opening this page never makes a real API call.', async (view) => {
   async function draw() {
-    const data = await api('/api/dashboard/integrations');
+    const [statusData, credentials] = await Promise.all([
+      api('/api/dashboard/integrations'),
+      api('/api/dashboard/credentials'),
+    ]);
     view.innerHTML = `
       <section class="panel">
-        <div class="status-list">${data.integrations
+        <div class="status-list">${statusData.integrations
           .map(
             (i) =>
               `<div class="status-row"><span class="status-name"><span class="dot ${stateTone(i.state) === 'green' || stateTone(i.state) === 'blue' ? 'green' : stateTone(i.state) === 'red' ? '' : ''}"></span>${esc(i.name)}</span><span class="state">${badge(i.state, stateTone(i.state))} <span class="muted">${esc(i.detail)}</span></span></div>`,
           )
           .join('')}</div>
         <div class="toolbar"><button id="refresh" class="btn">Re-check configuration</button></div>
-        <p class="muted">This reads server configuration only. It never contacts WhatsApp, OpenRouter, or Google — that only happens when a real customer message is processed.</p>
+        <p class="muted">This reads server configuration only. It never contacts WhatsApp, OpenRouter, or Google unless you explicitly click "Test connection" below.</p>
+      </section>
+
+      <section class="panel" style="margin-top:16px">
+        <h3>Credential overrides</h3>
+        <p class="muted">Entering a value here overrides the server's .env for that key at runtime, without a restart. Values are encrypted at rest and never shown back to you — only a masked preview.</p>
+        ${CREDENTIAL_GROUPS.map(
+          (group) => `
+          <h3 style="margin-top:20px">${esc(group.title)}</h3>
+          ${group.keys
+            .map((key) => {
+              const info = credentials[key] || { source: 'unset', masked: null };
+              return `
+              <div class="detail-grid" data-key="${key}">
+                <label class="muted">${esc(key)}</label>
+                <div>
+                  <span class="file">${info.masked ? esc(info.masked) : 'not set'}</span>
+                  ${badge(info.source, info.source === 'override' ? 'blue' : info.source === 'env' ? 'green' : 'muted')}
+                </div>
+                <span></span>
+                <div class="toolbar" style="margin:6px 0">
+                  <input type="password" class="cred-input" placeholder="Enter new value…" style="min-width:260px" />
+                  <button type="button" class="btn small cred-save">Save</button>
+                  <button type="button" class="btn small cred-test">Test connection</button>
+                  <button type="button" class="btn small cred-clear" ${info.source !== 'override' ? 'disabled' : ''}>Clear override</button>
+                </div>
+                <span></span>
+                <div class="cred-result muted" style="font-size:12px"></div>
+              </div>`;
+            })
+            .join('')}`,
+        ).join('')}
       </section>`;
+
     view.querySelector('#refresh').addEventListener('click', async () => {
       await draw();
       toast('Configuration status refreshed', 'success');
+    });
+
+    view.querySelectorAll('[data-key]').forEach((row) => {
+      const key = row.dataset.key;
+      const input = row.querySelector('.cred-input');
+      const result = row.querySelector('.cred-result');
+
+      row.querySelector('.cred-save').addEventListener('click', async () => {
+        if (!input.value) {
+          result.textContent = 'Enter a value first.';
+          return;
+        }
+        try {
+          await api(`/api/dashboard/credentials/${key}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: input.value }),
+          });
+          toast(`${key} saved`, 'success');
+          await draw();
+        } catch (error) {
+          result.textContent = error.message;
+        }
+      });
+
+      row.querySelector('.cred-test').addEventListener('click', async () => {
+        result.textContent = 'Testing…';
+        try {
+          const res = await api(`/api/dashboard/credentials/${key}/test`, { method: 'POST' });
+          result.textContent = res.detail;
+          result.style.color = res.ok ? '' : '#c0453f';
+        } catch (error) {
+          result.textContent = error.message;
+        }
+      });
+
+      row.querySelector('.cred-clear').addEventListener('click', async () => {
+        try {
+          await api(`/api/dashboard/credentials/${key}`, { method: 'DELETE' });
+          toast(`${key} override cleared`, 'success');
+          await draw();
+        } catch (error) {
+          result.textContent = error.message;
+        }
+      });
     });
   }
   await draw();
@@ -580,34 +756,119 @@ route('#/logs', 'Logs', '', async (view) => {
 // Settings (read-only, clearly separated from secrets)
 // ---------------------------------------------------------------------
 
-route('#/settings', 'Settings', 'Server-controlled configuration — change these via .env and redeploy, not from the browser.', async (view) => {
-  const data = await api('/api/dashboard/settings');
-  view.innerHTML = `
-    <section class="panel">
-      <h3>Business</h3>
-      <dl class="detail-grid">
-        <dt>Name</dt><dd>${esc(data.business.name)}</dd>
-        <dt>Timezone</dt><dd class="file">${esc(data.business.timezone)}</dd>
-        <dt>Hours</dt><dd>${esc(data.business.hoursStart)} – ${esc(data.business.hoursEnd)}</dd>
-        <dt>Open days (1=Mon..7=Sun)</dt><dd>${data.business.days.join(', ')}</dd>
-      </dl>
-      <h3>Booking</h3>
-      <dl class="detail-grid">
-        <dt>Default duration</dt><dd>${data.booking.durationMinutes} min</dd>
-        <dt>Buffer</dt><dd>${data.booking.bufferMinutes} min</dd>
-      </dl>
-      <h3>Agent</h3>
-      <dl class="detail-grid">
-        <dt>Restart keywords</dt><dd>${data.agent.restartKeywords.map((k) => `<span class="file">${esc(k)}</span>`).join(', ')}</dd>
-        <dt>Conversation history limit</dt><dd>${data.agent.conversationHistoryLimit} messages</dd>
-      </dl>
-      <h3>Security</h3>
-      <dl class="detail-grid">
-        <dt>Rate limit</dt><dd>${data.security.rateLimitPerMinute} requests / minute</dd>
-        <dt>Max request body size</dt><dd>${esc(data.security.maxBodySize)}</dd>
-      </dl>
-      <p class="muted">These are read from the server's environment configuration (src/config/env.ts). This page cannot change them — there is no arbitrary environment-variable or file editor here on purpose.</p>
-    </section>`;
+route('#/settings', 'Settings', 'Business-facing configuration — editable here, or falls back to the server .env when not set.', async (view) => {
+  function overrideHint(field, overrides) {
+    return overrides[field]
+      ? `<button type="button" class="btn small reset-field" data-field="${field}">Reset to env default</button>`
+      : `<span class="muted" style="font-size:11px">using env default</span>`;
+  }
+
+  async function draw() {
+    const data = await api('/api/dashboard/settings');
+    const o = data.overrides;
+    view.innerHTML = `
+      <section class="panel">
+        <form id="settings-form">
+          <h3>Business</h3>
+          <div class="detail-grid">
+            <label class="muted">Name</label><div><input name="businessName" value="${esc(data.business.name)}" /> ${overrideHint('businessName', o)}</div>
+            <label class="muted">Timezone</label><div><input name="businessTimezone" value="${esc(data.business.timezone)}" /> ${overrideHint('businessTimezone', o)}</div>
+            <label class="muted">Hours start</label><div><input name="businessHoursStart" value="${esc(data.business.hoursStart)}" placeholder="09:00" /> ${overrideHint('businessHoursStart', o)}</div>
+            <label class="muted">Hours end</label><div><input name="businessHoursEnd" value="${esc(data.business.hoursEnd)}" placeholder="18:00" /> ${overrideHint('businessHoursEnd', o)}</div>
+            <label class="muted">Open days (1=Mon..7=Sun, comma-separated)</label><div><input name="businessDays" value="${data.business.days.join(', ')}" /> ${overrideHint('businessDays', o)}</div>
+          </div>
+          <h3>Booking</h3>
+          <div class="detail-grid">
+            <label class="muted">Default duration (min)</label><div><input type="number" name="bookingDurationMinutes" value="${data.booking.durationMinutes}" /> ${overrideHint('bookingDurationMinutes', o)}</div>
+            <label class="muted">Buffer (min)</label><div><input type="number" name="bookingBufferMinutes" value="${data.booking.bufferMinutes}" /> ${overrideHint('bookingBufferMinutes', o)}</div>
+          </div>
+          <h3>Agent</h3>
+          <div class="detail-grid">
+            <label class="muted">Restart keywords (comma-separated)</label><div><input name="restartKeywords" value="${data.agent.restartKeywords.join(', ')}" /> ${overrideHint('restartKeywords', o)}</div>
+            <label class="muted">Conversation history limit</label><div><input type="number" name="conversationHistoryLimit" value="${data.agent.conversationHistoryLimit}" /> ${overrideHint('conversationHistoryLimit', o)}</div>
+          </div>
+          <h3>Customer-facing content</h3>
+          <div class="detail-grid">
+            <label class="muted">Welcome message</label><div><textarea name="welcomeMessage" rows="2">${esc(data.content.welcomeMessage || '')}</textarea> ${overrideHint('welcomeMessage', o)}</div>
+            <label class="muted">Fallback message</label><div><textarea name="fallbackMessage" rows="2">${esc(data.content.fallbackMessage || '')}</textarea> ${overrideHint('fallbackMessage', o)}</div>
+            <label class="muted">Cancellation policy</label><div><textarea name="cancellationPolicy" rows="3">${esc(data.content.cancellationPolicy || '')}</textarea> ${overrideHint('cancellationPolicy', o)}</div>
+            <label class="muted">Human escalation info</label><div><textarea name="humanEscalationInfo" rows="2">${esc(data.content.humanEscalationInfo || '')}</textarea> ${overrideHint('humanEscalationInfo', o)}</div>
+            <label class="muted">Supported languages (comma-separated)</label><div><input name="supportedLanguages" value="${data.content.supportedLanguages.join(', ')}" /> ${overrideHint('supportedLanguages', o)}</div>
+          </div>
+          <div id="settings-error" class="form-error" hidden></div>
+          <div class="toolbar">
+            <button type="submit" class="btn primary">Save</button>
+            <button type="button" id="cancel" class="btn">Cancel</button>
+          </div>
+        </form>
+        <h3>Server (env-only — requires editing .env and a restart)</h3>
+        <dl class="detail-grid">
+          <dt>Rate limit</dt><dd>${data.security.rateLimitPerMinute} requests / minute</dd>
+          <dt>Max request body size</dt><dd>${esc(data.security.maxBodySize)}</dd>
+        </dl>
+      </section>`;
+
+    const form = view.querySelector('#settings-form');
+    const errorBox = view.querySelector('#settings-error');
+
+    view.querySelector('#cancel').addEventListener('click', () => draw());
+
+    view.querySelectorAll('.reset-field').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        errorBox.hidden = true;
+        try {
+          await api('/api/dashboard/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [btn.dataset.field]: null }),
+          });
+          toast('Reset to env default', 'success');
+          await draw();
+        } catch (error) {
+          errorBox.hidden = false;
+          errorBox.textContent = error.message;
+        }
+      });
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorBox.hidden = true;
+      const raw = Object.fromEntries(new FormData(form).entries());
+      const patch = {
+        businessName: raw.businessName,
+        businessTimezone: raw.businessTimezone,
+        businessHoursStart: raw.businessHoursStart,
+        businessHoursEnd: raw.businessHoursEnd,
+        businessDays: raw.businessDays,
+        bookingDurationMinutes: Number(raw.bookingDurationMinutes),
+        bookingBufferMinutes: Number(raw.bookingBufferMinutes),
+        restartKeywords: raw.restartKeywords,
+        conversationHistoryLimit: Number(raw.conversationHistoryLimit),
+        welcomeMessage: raw.welcomeMessage || null,
+        fallbackMessage: raw.fallbackMessage || null,
+        cancellationPolicy: raw.cancellationPolicy || null,
+        humanEscalationInfo: raw.humanEscalationInfo || null,
+        supportedLanguages: raw.supportedLanguages || null,
+      };
+      try {
+        await api('/api/dashboard/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        });
+        toast('Settings saved', 'success');
+        await draw();
+      } catch (error) {
+        errorBox.hidden = false;
+        errorBox.textContent = error.fields
+          ? Object.entries(error.fields).map(([field, msg]) => `${field}: ${msg}`).join('; ')
+          : error.message;
+      }
+    });
+  }
+
+  await draw();
 });
 
 // ---------------------------------------------------------------------
@@ -644,5 +905,4 @@ route('#/project-sync', 'Project Sync', 'Multi-AI coordination state, read direc
 // Boot
 // ---------------------------------------------------------------------
 
-loadHeader();
-renderRoute();
+boot();

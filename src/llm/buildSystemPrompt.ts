@@ -1,8 +1,22 @@
 import { env } from '../config/env';
+import { getBusinessSettings } from '../config/businessSettings';
 import type { KnowledgeBase } from '../knowledge/loader';
 
 export function buildSystemPrompt(knowledge: KnowledgeBase): string {
-  return `You are the WhatsApp customer assistant for ${env.BUSINESS_NAME}.
+  const settings = getBusinessSettings();
+  const policiesSection = [
+    settings.welcomeMessage ? `Welcome message to use for a brand-new conversation: ${settings.welcomeMessage}` : null,
+    settings.fallbackMessage ? `Fallback message when you truly cannot help: ${settings.fallbackMessage}` : null,
+    settings.cancellationPolicy ? `Cancellation policy: ${settings.cancellationPolicy}` : null,
+    settings.humanEscalationInfo ? `How to escalate to a human: ${settings.humanEscalationInfo}` : null,
+    settings.supportedLanguages.length > 0
+      ? `Supported languages: ${settings.supportedLanguages.join(', ')}`
+      : null,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+
+  return `You are the WhatsApp customer assistant for ${settings.businessName}.
 
 SCOPE AND HONESTY RULES (never break these):
 - Only answer using the "BUSINESS KNOWLEDGE" section below. Never invent
@@ -49,10 +63,10 @@ CONVERSATION STYLE:
 - The customer's WhatsApp number is already known to the system — never ask
   them for their phone number.
 
-BUSINESS TIMEZONE: ${env.BUSINESS_TIMEZONE}
-BUSINESS HOURS: ${env.BUSINESS_HOURS_START}-${env.BUSINESS_HOURS_END}, days (1=Mon..7=Sun): ${env.BUSINESS_DAYS.join(', ')}
-DEFAULT APPOINTMENT DURATION: ${env.BOOKING_DURATION_MINUTES} minutes
-
+BUSINESS TIMEZONE: ${settings.businessTimezone}
+BUSINESS HOURS: ${settings.businessHoursStart}-${settings.businessHoursEnd}, days (1=Mon..7=Sun): ${settings.businessDays.join(', ')}
+DEFAULT APPOINTMENT DURATION: ${settings.bookingDurationMinutes} minutes
+${policiesSection ? `\nBUSINESS POLICIES:\n${policiesSection}\n` : ''}
 BUSINESS KNOWLEDGE:
 ${knowledge.asPromptText || '(no knowledge files loaded — say you do not have that information yet if asked about services/pricing/policies)'}
 `;

@@ -1,5 +1,60 @@
 # Final Status Report — WhatsApp AI Agent
 
+## Update (this session): Dashboard admin auth, encrypted credential overrides, editable business settings
+
+Added on top of everything below, without regressing it:
+- Real dashboard admin authentication (scrypt password hashing, DB-backed
+  sessions, first-run setup that permanently closes after one admin
+  account, login rate limiting). The dashboard is no longer gated by
+  `env.isProduction` alone — it's reachable in every environment behind a
+  real session, and `/api/dashboard/*` routes (other than auth itself)
+  return 401 without one.
+- An encrypted credential-override store (`credential_overrides` table,
+  AES-256-GCM, key derived from a new **required-in-every-environment**
+  `DASHBOARD_MASTER_KEY` env var) letting an admin set/test/clear the 7
+  WhatsApp/OpenRouter/Google credentials from the dashboard at runtime,
+  never exposed back to the browser (masked previews only). A dashboard
+  override takes precedence over `.env` per-key; `.env` remains the
+  fallback and is still what `env.ts`'s production-required-credential
+  check validates at boot (this override system is a runtime rotation
+  layer, not a way to boot production without real `.env` credentials).
+  Each credential has a real "Test connection" action (bounded, explicit,
+  never triggered by merely opening the page).
+- A new `business_settings` table making business-facing config (hours,
+  timezone, restart keywords, welcome/fallback messages, cancellation
+  policy, supported languages) dashboard-editable without a restart, with
+  `.env` as the fallback/seed and zod validation identical in spirit to
+  `env.ts`'s existing rules.
+- **Real bug found and fixed during this session's dependency graph**:
+  `better-sqlite3` was pinned to `^11.3.0`, which predates Node.js v24 —
+  under load (specifically, once outbound `fetch()` calls from the new
+  credential-test feature started running in the same process as
+  better-sqlite3's native module), the process crashed with a native
+  assertion failure (`node::RemoveEnvironmentCleanupHook`, `Assertion
+  failed: (env) != nullptr`). Reproduced twice, fixed by upgrading to
+  `better-sqlite3@^13.0.3` (which explicitly supports Node >=22); the
+  crash did not recur after 10+ further test-connection calls. This was a
+  pre-existing dependency/Node-version incompatibility, not something
+  introduced by this session's application logic — but it was only
+  surfaced because this session added the first code path that makes a
+  real outbound `fetch()` from the same live process as better-sqlite3.
+- A second real bug found via live browser QA: the "Test connection" check
+  for OpenRouter originally hit `/api/v1/models`, which OpenRouter serves
+  publicly regardless of the bearer token's validity — a fake key reported
+  "valid". Fixed by switching to `/api/v1/auth/key`, which genuinely 401s
+  on an invalid key.
+- Test suite grew from 196 to 233 tests (36 files), covering: password
+  hash/verify, session create/verify/expire/destroy, AES-256-GCM
+  encrypt/decrypt round-trip with tamper detection, business-settings
+  precedence/validation/no-secret-shaped-field guarantee, and full
+  integration coverage of setup/login/logout, credential set/test/clear,
+  settings read/write, and the two-case production-lockdown behavior
+  (401 unauthenticated, 200 with a valid session) that replaced the old
+  always-404-in-production behavior.
+- `npm run typecheck`, `npm run lint`, `npm run build`, and a full real
+  browser QA pass (setup → login → credentials → settings → logout, every
+  nav section, mobile viewport) all passed after these changes.
+
 ## Implementation status: COMPLETE (no real third-party credentials available)
 
 Every functional requirement from the approved architecture is implemented,

@@ -30,3 +30,8 @@ process.env.BUSINESS_DAYS = process.env.BUSINESS_DAYS ?? '1,2,3,4,5,6,7';
 process.env.RESTART_KEYWORDS = process.env.RESTART_KEYWORDS ?? 'restart,reset,start over';
 process.env.CONVERSATION_HISTORY_LIMIT = process.env.CONVERSATION_HISTORY_LIMIT ?? '20';
 process.env.MAX_TOOL_ROUNDS = process.env.MAX_TOOL_ROUNDS ?? '4';
+
+// A fixed, obviously-fake 32-byte key (base64) — required unconditionally by
+// env.ts for the dashboard's encrypted secret store, even in tests.
+process.env.DASHBOARD_MASTER_KEY =
+  process.env.DASHBOARD_MASTER_KEY ?? 'DZLe+BvfUId17vxA3cwqtF4GC0L+Zeh3LkN+CEvlxng=';

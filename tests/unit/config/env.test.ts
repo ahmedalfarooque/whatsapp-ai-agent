@@ -124,4 +124,56 @@ describe('env validation', () => {
       }),
     );
   });
+
+  describe('DASHBOARD_MASTER_KEY (required unconditionally, every environment)', () => {
+    it(
+      'rejects startup when the key is missing, even in development',
+      withEnvSnapshot(async () => {
+        process.env.NODE_ENV = 'development';
+        delete process.env.DASHBOARD_MASTER_KEY;
+
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        await expect(import('../../../src/config/env')).rejects.toThrow(
+          /Invalid environment configuration/,
+        );
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain('DASHBOARD_MASTER_KEY');
+        errorSpy.mockRestore();
+      }),
+    );
+
+    it(
+      'rejects a key that does not decode to exactly 32 bytes',
+      withEnvSnapshot(async () => {
+        process.env.NODE_ENV = 'development';
+        process.env.DASHBOARD_MASTER_KEY = 'dG9vLXNob3J0'; // base64, well under 32 bytes
+
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        await expect(import('../../../src/config/env')).rejects.toThrow(
+          /Invalid environment configuration/,
+        );
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain('DASHBOARD_MASTER_KEY');
+        errorSpy.mockRestore();
+      }),
+    );
+
+    it(
+      'accepts a valid 32-byte base64 key',
+      withEnvSnapshot(async () => {
+        process.env.NODE_ENV = 'development';
+        process.env.DASHBOARD_MASTER_KEY = 'DZLe+BvfUId17vxA3cwqtF4GC0L+Zeh3LkN+CEvlxng=';
+
+        await expect(import('../../../src/config/env')).resolves.toBeDefined();
+      }),
+    );
+
+    it(
+      'accepts a valid 32-byte hex key',
+      withEnvSnapshot(async () => {
+        process.env.NODE_ENV = 'development';
+        process.env.DASHBOARD_MASTER_KEY = '0'.repeat(64);
+
+        await expect(import('../../../src/config/env')).resolves.toBeDefined();
+      }),
+    );
+  });
 });

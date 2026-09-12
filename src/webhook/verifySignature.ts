@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
-import { env } from '../config/env';
+import { getEffectiveCredential } from '../config/effectiveConfig';
 import { logger } from '../logger';
 
 /** Attaches the raw request body buffer so the HMAC can be computed over exact bytes. */
@@ -9,7 +9,8 @@ export function rawBodySaver(req: Request, _res: Response, buf: Buffer): void {
 }
 
 function computeSignature(rawBody: Buffer): string {
-  return `sha256=${crypto.createHmac('sha256', env.META_APP_SECRET).update(rawBody).digest('hex')}`;
+  const secret = getEffectiveCredential('META_APP_SECRET');
+  return `sha256=${crypto.createHmac('sha256', secret).update(rawBody).digest('hex')}`;
 }
 
 /**
