@@ -8,6 +8,8 @@ import {
   confirmLock,
   markUncertain,
   releaseLock,
+  reconcileUncertainAsConfirmed,
+  reconcileUncertainAsNotBooked,
   findConfirmedByIdempotencyKey,
   buildIdempotencyKey,
   buildSlotKey,
@@ -144,5 +146,87 @@ describe('bookingLockRepo — state machine', () => {
       status: string;
     };
     expect(row.status).toBe('pending');
+  });
+});
+
+describe('bookingLockRepo — admin reconciliation of uncertain bookings', () => {
+  it('reconcileUncertainAsConfirmed transitions an uncertain lock to confirmed with the given event id', () => {
+    const first = claim();
+    if (!first.acquired) throw new Error('setup failed');
+    markUncertain(first.lock.id, db);
+
+    const changed = reconcileUncertainAsConfirmed(first.lock.id, 'evt_manually_found', db);
+    expect(changed).toBe(true);
+
+    const row = db.prepare('SELECT status, calendar_event_id FROM booking_locks WHERE id = ?').get(first.lock.id) as {
+      status: string;
+      calendar_event_id: string;
+    };
+    expect(row.status).toBe('confirmed');
+    expect(row.calendar_event_id).toBe('evt_manually_found');
+  });
+
+  it('reconcileUncertainAsConfirmed is a no-op on a pending (not uncertain) lock', () => {
+    const first = claim();
+    if (!first.acquired) throw new Error('setup failed');
+
+    const changed = reconcileUncertainAsConfirmed(first.lock.id, 'evt_should_not_apply', db);
+    expect(changed).toBe(false);
+
+    const row = db.prepare('SELECT status FROM booking_locks WHERE id = ?').get(first.lock.id) as { status: string };
+    expect(row.status).toBe('pending');
+  });
+
+  it('reconcileUncertainAsConfirmed is a no-op on an already-confirmed lock', () => {
+    const first = claim();
+    if (!first.acquired) throw new Error('setup failed');
+    confirmLock(first.lock.id, 'evt_real', db);
+
+    const changed = reconcileUncertainAsConfirmed(first.lock.id, 'evt_attempted_overwrite', db);
+    expect(changed).toBe(false);
+
+    const row = db.prepare('SELECT calendar_event_id FROM booking_locks WHERE id = ?').get(first.lock.id) as {
+      calendar_event_id: string;
+    };
+    expect(row.calendar_event_id).toBe('evt_real');
+  });
+
+  it('reconcileUncertainAsNotBooked deletes an uncertain lock, freeing its slot and idempotency key', () => {
+    const first = claim();
+    if (!first.acquired) throw new Error('setup failed');
+    markUncertain(first.lock.id, db);
+
+    const changed = reconcileUncertainAsNotBooked(first.lock.id, db);
+    expect(changed).toBe(true);
+
+    const row = db.prepare('SELECT * FROM booking_locks WHERE id = ?').get(first.lock.id);
+    expect(row).toBeUndefined();
+
+    // A fresh attempt for the exact same slot/idempotency key now succeeds.
+    const retry = claim();
+    expect(retry.acquired).toBe(true);
+  });
+
+  it('reconcileUncertainAsNotBooked is a no-op on a pending (not uncertain) lock — never silently deletes an in-flight attempt', () => {
+    const first = claim();
+    if (!first.acquired) throw new Error('setup failed');
+
+    const changed = reconcileUncertainAsNotBooked(first.lock.id, db);
+    expect(changed).toBe(false);
+
+    const row = db.prepare('SELECT * FROM booking_locks WHERE id = ?').get(first.lock.id);
+    expect(row).toBeDefined();
+  });
+
+  it('reconcileUncertainAsNotBooked is a no-op on an already-confirmed lock', () => {
+    const first = claim();
+    if (!first.acquired) throw new Error('setup failed');
+    confirmLock(first.lock.id, 'evt_real', db);
+
+    const changed = reconcileUncertainAsNotBooked(first.lock.id, db);
+    expect(changed).toBe(false);
+
+    const row = db.prepare('SELECT * FROM booking_locks WHERE id = ?').get(first.lock.id);
+    expect(row).toBeDefined();
   });
 });

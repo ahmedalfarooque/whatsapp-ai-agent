@@ -174,6 +174,42 @@ export function releaseLock(id: number, db: Database.Database = getDb()): void {
   db.prepare("DELETE FROM booking_locks WHERE id = ? AND status = 'pending'").run(id);
 }
 
+/**
+ * Admin reconciliation: an admin has manually checked the real Google
+ * Calendar and confirmed the event DOES exist. Records the real event id
+ * they found — this function never calls Google itself, it only records a
+ * human's out-of-band finding, so it carries none of the duplicate-creation
+ * risk an automated retry would. Only operates on a row that is actually
+ * 'uncertain' — a no-op (0 rows affected) on any other status, so a stale
+ * dashboard view can't silently corrupt an already-resolved booking.
+ */
+export function reconcileUncertainAsConfirmed(
+  id: number,
+  calendarEventId: string,
+  db: Database.Database = getDb(),
+): boolean {
+  const result = db
+    .prepare(
+      "UPDATE booking_locks SET status = 'confirmed', calendar_event_id = ?, updated_at = datetime('now') WHERE id = ? AND status = 'uncertain'",
+    )
+    .run(calendarEventId, id);
+  return result.changes > 0;
+}
+
+/**
+ * Admin reconciliation: an admin has manually checked the real Google
+ * Calendar and confirmed the event does NOT exist. Deletes the lock row
+ * entirely, freeing both its slot_key and idempotency_key so a legitimate
+ * new booking attempt for that slot/request can proceed. Only ever deletes
+ * a row that is 'uncertain' — never touches 'pending' (use releaseLock,
+ * which is for confirmed-failure paths, not manual reconciliation) or
+ * 'confirmed' rows.
+ */
+export function reconcileUncertainAsNotBooked(id: number, db: Database.Database = getDb()): boolean {
+  const result = db.prepare("DELETE FROM booking_locks WHERE id = ? AND status = 'uncertain'").run(id);
+  return result.changes > 0;
+}
+
 export interface BookingListItem extends BookingLock {
   customerLabel: string | null;
   waId: string;

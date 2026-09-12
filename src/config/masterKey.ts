@@ -4,7 +4,7 @@ import { env } from './env';
 const HKDF_INFO = 'whatsapp-ai-agent:dashboard-secrets:v1';
 const HKDF_SALT = Buffer.alloc(0);
 
-function decodeMasterKey(value: string): Buffer {
+export function decodeMasterKey(value: string): Buffer {
   if (/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
     const decoded = Buffer.from(value, 'base64');
     if (decoded.length === 32) return decoded;
@@ -18,6 +18,19 @@ function decodeMasterKey(value: string): Buffer {
   throw new Error('DASHBOARD_MASTER_KEY is invalid: must decode to exactly 32 bytes (base64 or hex).');
 }
 
+/**
+ * Derives the AES-256-GCM key from a raw 32-byte master key value. Exposed
+ * (not just the env-bound getSecretEncryptionKey below) so the offline
+ * rotation script (scripts/rotateMasterKey.ts) can derive the key for a NEW
+ * candidate master key without it ever being read into `env`/process env
+ * validation — rotation is deliberately an explicit, standalone operation,
+ * never something env.ts's normal boot path knows about.
+ */
+export function deriveKeyFromRawValue(rawValue: string): Buffer {
+  const rawKey = decodeMasterKey(rawValue);
+  return Buffer.from(crypto.hkdfSync('sha256', rawKey, HKDF_SALT, HKDF_INFO, 32));
+}
+
 let cachedKey: Buffer | null = null;
 
 /**
@@ -29,9 +42,7 @@ let cachedKey: Buffer | null = null;
  */
 export function getSecretEncryptionKey(): Buffer {
   if (!cachedKey) {
-    const rawKey = decodeMasterKey(env.DASHBOARD_MASTER_KEY);
-    const derived = crypto.hkdfSync('sha256', rawKey, HKDF_SALT, HKDF_INFO, 32);
-    cachedKey = Buffer.from(derived);
+    cachedKey = deriveKeyFromRawValue(env.DASHBOARD_MASTER_KEY);
   }
   return cachedKey;
 }

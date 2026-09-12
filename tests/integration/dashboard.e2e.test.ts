@@ -5,7 +5,7 @@ import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
 import { createApp } from '../../src/app';
 import { getOrCreateCustomer } from '../../src/memory/customerRepo';
 import { getOrCreateActiveConversation, appendMessage, resetConversation } from '../../src/memory/conversationRepo';
-import { acquireLock, confirmLock, buildIdempotencyKey, buildSlotKey } from '../../src/memory/bookingLockRepo';
+import { acquireLock, confirmLock, markUncertain, buildIdempotencyKey, buildSlotKey } from '../../src/memory/bookingLockRepo';
 import { getDb } from '../../src/memory/db';
 
 const KNOWLEDGE_DIR = path.join(__dirname, '..', '..', 'knowledge');
@@ -17,6 +17,7 @@ describe('dashboard', () => {
   let customerAId: number;
   let conversationAId: number;
   let originalFaqContent: string;
+  let uncertainBookingLockId: number;
 
   beforeAll(async () => {
     // Every dashboard API route (other than auth itself) now requires a
@@ -44,6 +45,28 @@ describe('dashboard', () => {
       db,
     );
     if (lockResult.acquired) confirmLock(lockResult.lock.id, 'evt_test_1', db);
+
+    const uncertainSlotKey = buildSlotKey('primary', '2099-02-02T10:00:00.000Z', '2099-02-02T10:30:00.000Z');
+    const uncertainIdempotencyKey = buildIdempotencyKey(
+      conversationAId,
+      '2099-02-02T10:00:00.000Z',
+      '2099-02-02T10:30:00.000Z',
+      'Consult',
+    );
+    const uncertainLockResult = acquireLock(
+      {
+        slotKey: uncertainSlotKey,
+        idempotencyKey: uncertainIdempotencyKey,
+        conversationId: conversationAId,
+        startISO: '2099-02-02T10:00:00.000Z',
+        endISO: '2099-02-02T10:30:00.000Z',
+      },
+      db,
+    );
+    if (uncertainLockResult.acquired) {
+      uncertainBookingLockId = uncertainLockResult.lock.id;
+      markUncertain(uncertainLockResult.lock.id, db);
+    }
 
     originalFaqContent = fs.existsSync(path.join(KNOWLEDGE_DIR, 'faq.md'))
       ? fs.readFileSync(path.join(KNOWLEDGE_DIR, 'faq.md'), 'utf-8')
@@ -196,6 +219,142 @@ describe('dashboard', () => {
     const res = await agent.get('/api/dashboard/bookings/upcoming');
     expect(res.status).toBe(200);
     expect(res.body.bookings.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('lists the seeded uncertain booking', async () => {
+    const res = await agent.get('/api/dashboard/bookings?status=uncertain');
+    expect(res.status).toBe(200);
+    expect(res.body.items.some((b: { id: number }) => b.id === uncertainBookingLockId)).toBe(true);
+  });
+
+  it('rejects a reconcile request with an invalid resolution', async () => {
+    const res = await agent
+      .post(`/api/dashboard/bookings/${uncertainBookingLockId}/reconcile`)
+      .send({ resolution: 'something-else' });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects reconcile-as-confirmed without a calendarEventId', async () => {
+    const res = await agent
+      .post(`/api/dashboard/bookings/${uncertainBookingLockId}/reconcile`)
+      .send({ resolution: 'confirmed' });
+    expect(res.status).toBe(400);
+  });
+
+  it('409s reconciling a booking that is not in the uncertain state', async () => {
+    const db = getDb();
+    const slotKey = buildSlotKey('primary', '2099-03-03T10:00:00.000Z', '2099-03-03T10:30:00.000Z');
+    const idempotencyKey = buildIdempotencyKey(
+      conversationAId,
+      '2099-03-03T10:00:00.000Z',
+      '2099-03-03T10:30:00.000Z',
+      'Consult',
+    );
+    const lockResult = acquireLock(
+      {
+        slotKey,
+        idempotencyKey,
+        conversationId: conversationAId,
+        startISO: '2099-03-03T10:00:00.000Z',
+        endISO: '2099-03-03T10:30:00.000Z',
+      },
+      db,
+    );
+    if (!lockResult.acquired) throw new Error('setup failed');
+    confirmLock(lockResult.lock.id, 'evt_already_confirmed', db);
+
+    const res = await agent
+      .post(`/api/dashboard/bookings/${lockResult.lock.id}/reconcile`)
+      .send({ resolution: 'not_booked' });
+    expect(res.status).toBe(409);
+  });
+
+  it('reconciles an uncertain booking as confirmed with a real event id, recorded and never re-appliable', async () => {
+    const res = await agent
+      .post(`/api/dashboard/bookings/${uncertainBookingLockId}/reconcile`)
+      .send({ resolution: 'confirmed', calendarEventId: 'evt_manually_verified' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('confirmed');
+
+    const listed = await agent.get('/api/dashboard/bookings?status=confirmed');
+    const reconciled = listed.body.items.find((b: { id: number }) => b.id === uncertainBookingLockId);
+    expect(reconciled.calendar_event_id).toBe('evt_manually_verified');
+
+    // Already resolved — a second reconcile attempt is refused, not silently re-applied.
+    const second = await agent
+      .post(`/api/dashboard/bookings/${uncertainBookingLockId}/reconcile`)
+      .send({ resolution: 'not_booked' });
+    expect(second.status).toBe(409);
+  });
+
+  it('reconciles an uncertain booking as not-booked, freeing the slot for a fresh attempt', async () => {
+    const db = getDb();
+    const slotKey = buildSlotKey('primary', '2099-04-04T10:00:00.000Z', '2099-04-04T10:30:00.000Z');
+    const idempotencyKey = buildIdempotencyKey(
+      conversationAId,
+      '2099-04-04T10:00:00.000Z',
+      '2099-04-04T10:30:00.000Z',
+      'Consult',
+    );
+    const lockResult = acquireLock(
+      {
+        slotKey,
+        idempotencyKey,
+        conversationId: conversationAId,
+        startISO: '2099-04-04T10:00:00.000Z',
+        endISO: '2099-04-04T10:30:00.000Z',
+      },
+      db,
+    );
+    if (!lockResult.acquired) throw new Error('setup failed');
+    markUncertain(lockResult.lock.id, db);
+
+    const res = await agent
+      .post(`/api/dashboard/bookings/${lockResult.lock.id}/reconcile`)
+      .send({ resolution: 'not_booked' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('released');
+
+    // The exact same slot/idempotency key can now be claimed again.
+    const retry = acquireLock(
+      {
+        slotKey,
+        idempotencyKey,
+        conversationId: conversationAId,
+        startISO: '2099-04-04T10:00:00.000Z',
+        endISO: '2099-04-04T10:30:00.000Z',
+      },
+      db,
+    );
+    expect(retry.acquired).toBe(true);
+  });
+
+  it('reconcile response never exposes a secret value', async () => {
+    const db = getDb();
+    const slotKey = buildSlotKey('primary', '2099-05-05T10:00:00.000Z', '2099-05-05T10:30:00.000Z');
+    const idempotencyKey = buildIdempotencyKey(
+      conversationAId,
+      '2099-05-05T10:00:00.000Z',
+      '2099-05-05T10:30:00.000Z',
+      'Consult',
+    );
+    const lockResult = acquireLock(
+      {
+        slotKey,
+        idempotencyKey,
+        conversationId: conversationAId,
+        startISO: '2099-05-05T10:00:00.000Z',
+        endISO: '2099-05-05T10:30:00.000Z',
+      },
+      db,
+    );
+    if (!lockResult.acquired) throw new Error('setup failed');
+    markUncertain(lockResult.lock.id, db);
+
+    const res = await agent
+      .post(`/api/dashboard/bookings/${lockResult.lock.id}/reconcile`)
+      .send({ resolution: 'confirmed', calendarEventId: 'evt_no_secret_here' });
+    expect(JSON.stringify(res.body)).not.toMatch(/\bsecret\b|\btoken\b|\bapi[_-]?key\b/i);
   });
 
   // ---- Knowledge ------------------------------------------------------------
@@ -371,6 +530,23 @@ describe('dashboard', () => {
     const res = await agent.get('/api/dashboard/project-sync');
     expect(res.status).toBe(200);
     expect(res.body.available).toBe(true);
+  });
+
+  // ---- Logout-all (MUST run last: revokes every session, including `agent`'s) --
+  it('logout-all revokes every active session, including the caller\'s own', async () => {
+    const secondAgent = request.agent(app);
+    const login = await secondAgent
+      .post('/api/dashboard/auth/login')
+      .send({ username: 'test-admin', password: 'a-very-long-test-password-123' });
+    expect(login.status).toBe(200);
+    expect((await secondAgent.get('/api/dashboard/summary')).status).toBe(200);
+
+    const res = await agent.post('/api/dashboard/auth/logout-all');
+    expect(res.status).toBe(200);
+    expect(res.body.revoked).toBeGreaterThanOrEqual(2);
+
+    expect((await agent.get('/api/dashboard/summary')).status).toBe(401);
+    expect((await secondAgent.get('/api/dashboard/summary')).status).toBe(401);
   });
 
   // ---- Production lockdown: auth-gated, not always-404 -----------------------

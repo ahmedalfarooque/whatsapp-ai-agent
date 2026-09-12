@@ -30,20 +30,25 @@ interface CredentialOverrideRow {
   ciphertext: string;
 }
 
-function encrypt(plaintext: string): string {
+/** Encrypts with an explicit key — exported so the offline rotation script
+ * (scripts/rotateMasterKey.ts) can re-encrypt existing rows under a NEW
+ * master key using the exact same AES-GCM framing, without duplicating the
+ * crypto logic or touching env/getSecretEncryptionKey. */
+export function encryptWithKey(plaintext: string, key: Buffer): string {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', getSecretEncryptionKey(), iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf-8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
   return Buffer.concat([iv, authTag, encrypted]).toString('base64');
 }
 
-function decrypt(payload: string): string {
+/** Decrypts with an explicit key — see encryptWithKey. */
+export function decryptWithKey(payload: string, key: Buffer): string {
   const raw = Buffer.from(payload, 'base64');
   const iv = raw.subarray(0, 12);
   const authTag = raw.subarray(12, 28);
   const ciphertext = raw.subarray(28);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', getSecretEncryptionKey(), iv);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAuthTag(authTag);
   const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   return decrypted.toString('utf-8');
@@ -51,7 +56,7 @@ function decrypt(payload: string): string {
 
 /** Encrypts and stores (or replaces) an override value for one credential key. */
 export function setSecret(key: OverridableKey, plaintext: string, updatedByAdminId: number): void {
-  const ciphertext = encrypt(plaintext);
+  const ciphertext = encryptWithKey(plaintext, getSecretEncryptionKey());
   getDb()
     .prepare(
       `INSERT INTO credential_overrides (key, ciphertext, updated_at, updated_by)
@@ -70,7 +75,20 @@ export function getSecret(key: OverridableKey): string | null {
     .prepare('SELECT key, ciphertext FROM credential_overrides WHERE key = ?')
     .get(key) as CredentialOverrideRow | undefined;
   if (!row) return null;
-  return decrypt(row.ciphertext);
+  return decryptWithKey(row.ciphertext, getSecretEncryptionKey());
+}
+
+/** Lists every row's raw key + ciphertext — used only by the offline rotation
+ * script, which needs to decrypt under the OLD key and re-encrypt under the
+ * NEW one. Never used by any request-serving code path. */
+export function listAllOverrideRows(): CredentialOverrideRow[] {
+  return getDb().prepare('SELECT key, ciphertext FROM credential_overrides').all() as CredentialOverrideRow[];
+}
+
+/** Overwrites a row's ciphertext in place — used only by the offline
+ * rotation script after re-encrypting under the new key. */
+export function overwriteCiphertext(key: string, ciphertext: string): void {
+  getDb().prepare('UPDATE credential_overrides SET ciphertext = ? WHERE key = ?').run(ciphertext, key);
 }
 
 /** Removes an override, reverting that key to its .env-sourced value. */

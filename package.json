@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate": "tsx src/memory/runMigrations.ts",
+    "rotate-master-key": "tsx scripts/rotateMasterKey.ts",
     "sync:check": "node scripts/project-sync.cjs check",
     "sync:test": "node --test scripts/project-sync.test.cjs"
   },

@@ -117,3 +117,12 @@ export function destroySessionByToken(token: string): void {
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   getDb().prepare('DELETE FROM admin_sessions WHERE token_hash = ?').run(tokenHash);
 }
+
+/** Revokes every active dashboard session (including the caller's own) —
+ * for when an admin suspects a session/device was compromised and wants a
+ * hard reset rather than tracking down individual sessions. Everyone,
+ * including whoever calls this, must log in again afterward. */
+export function destroyAllSessions(): number {
+  const result = getDb().prepare('DELETE FROM admin_sessions').run();
+  return result.changes;
+}

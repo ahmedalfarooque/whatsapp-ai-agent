@@ -9,6 +9,7 @@ import {
   createSession,
   verifySessionToken,
   destroySessionByToken,
+  destroyAllSessions,
   adminCount,
 } from '../../../src/dashboard/auth';
 
@@ -72,5 +73,19 @@ describe('dashboard auth', () => {
         crypto.createHash('sha256').update(session.token).digest('hex'),
       );
     expect(verifySessionToken(session.token)).toBeNull();
+  });
+
+  it('destroyAllSessions revokes every session at once, including sessions for other logins', () => {
+    const adminId = createAdminUser('admin', 'a-very-long-password-123');
+    const sessionA = createSession(adminId);
+    const sessionB = createSession(adminId);
+    expect(verifySessionToken(sessionA.token)).not.toBeNull();
+    expect(verifySessionToken(sessionB.token)).not.toBeNull();
+
+    const revoked = destroyAllSessions();
+    expect(revoked).toBeGreaterThanOrEqual(2);
+
+    expect(verifySessionToken(sessionA.token)).toBeNull();
+    expect(verifySessionToken(sessionB.token)).toBeNull();
   });
 });

@@ -16,7 +16,11 @@ import {
 } from './data';
 import { listCustomers, getCustomerById } from '../memory/customerRepo';
 import { listConversations, getConversationById, getConversationMessages } from '../memory/conversationRepo';
-import { listBookingLocks } from '../memory/bookingLockRepo';
+import {
+  listBookingLocks,
+  reconcileUncertainAsConfirmed,
+  reconcileUncertainAsNotBooked,
+} from '../memory/bookingLockRepo';
 import { listKnowledgeFiles, readKnowledgeFile, writeKnowledgeFile, KnowledgeFileError } from './knowledgeAdmin';
 import { getProjectSyncView } from './projectSync';
 import { env } from '../config/env';
@@ -26,6 +30,7 @@ import {
   verifyAdminCredentials,
   createSession,
   destroySessionByToken,
+  destroyAllSessions,
 } from './auth';
 import {
   requireDashboardAuth,
@@ -157,6 +162,16 @@ export function createDashboardRouter(): Router {
     requireDashboardAuth(req, res, next);
   });
 
+  // Revokes EVERY active session (including the caller's own) — for when an
+  // admin suspects a session/device was compromised. Requires an already
+  // valid session to invoke (gated above like every other route here), so
+  // it can't be used to lock out an admin by an unauthenticated caller.
+  router.post('/api/dashboard/auth/logout-all', (_req, res) => {
+    const revoked = destroyAllSessions();
+    clearSessionCookie(res);
+    res.json({ ok: true, revoked });
+  });
+
   // ---- Overview -------------------------------------------------------
   router.get('/api/dashboard/summary', (_req, res) => {
     res.json(getDashboardSummary());
@@ -230,6 +245,52 @@ export function createDashboardRouter(): Router {
         ? statusParam
         : undefined;
     res.json(listBookingLocks({ status, limit, offset }));
+  });
+
+  // Admin reconciliation for an 'uncertain' booking: the admin has manually
+  // checked the real Google Calendar and is recording what they found. This
+  // endpoint never calls Google itself — it only records a human's
+  // out-of-band finding, so it carries none of the duplicate-creation risk
+  // an automated retry would.
+  router.post('/api/dashboard/bookings/:id/reconcile', (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: 'invalid booking id' });
+      return;
+    }
+    const resolution = req.body?.resolution;
+    if (resolution !== 'confirmed' && resolution !== 'not_booked') {
+      res.status(400).json({ error: 'resolution must be "confirmed" or "not_booked"' });
+      return;
+    }
+    if (resolution === 'confirmed') {
+      const calendarEventId = req.body?.calendarEventId;
+      if (typeof calendarEventId !== 'string' || calendarEventId.trim().length === 0) {
+        res.status(400).json({ error: 'calendarEventId is required when resolution is "confirmed"' });
+        return;
+      }
+      const changed = reconcileUncertainAsConfirmed(id, calendarEventId.trim());
+      if (!changed) {
+        res.status(409).json({ error: 'booking is not in an uncertain state (already resolved, or does not exist)' });
+        return;
+      }
+      logger.warn(
+        { bookingLockId: id, adminUserId: req.adminUserId, calendarEventId: calendarEventId.trim() },
+        'admin manually reconciled an uncertain booking as CONFIRMED',
+      );
+      res.json({ ok: true, status: 'confirmed' });
+      return;
+    }
+    const changed = reconcileUncertainAsNotBooked(id);
+    if (!changed) {
+      res.status(409).json({ error: 'booking is not in an uncertain state (already resolved, or does not exist)' });
+      return;
+    }
+    logger.warn(
+      { bookingLockId: id, adminUserId: req.adminUserId },
+      'admin manually reconciled an uncertain booking as NOT BOOKED (slot released)',
+    );
+    res.json({ ok: true, status: 'released' });
   });
 
   // Kept for the dashboard home page's compact "upcoming" widget.

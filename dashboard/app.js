@@ -461,13 +461,22 @@ route('#/bookings', 'Bookings', 'Real appointment records from the booking syste
         </div>
         ${
           data.items.length
-            ? `<table class="data-table"><thead><tr><th>Customer</th><th>Start</th><th>End</th><th>Status</th><th>Calendar event</th></tr></thead><tbody>${data.items
+            ? `<table class="data-table"><thead><tr><th>Customer</th><th>Start</th><th>End</th><th>Status</th><th>Calendar event</th><th></th></tr></thead><tbody>${data.items
                 .map(
                   (b) =>
-                    `<tr><td>${esc(b.customerLabel || b.waId)}</td><td>${formatDate(b.start_iso)}</td><td>${formatDate(b.end_iso)}</td><td>${badge(b.status, stateTone(b.status))}</td><td class="file">${esc(b.calendar_event_id || '—')}</td></tr>`,
+                    `<tr><td>${esc(b.customerLabel || b.waId)}</td><td>${formatDate(b.start_iso)}</td><td>${formatDate(b.end_iso)}</td><td>${badge(b.status, stateTone(b.status))}</td><td class="file">${esc(b.calendar_event_id || '—')}</td><td>${
+                      b.status === 'uncertain'
+                        ? `<div class="toolbar" style="margin:0"><button class="btn small reconcile-confirmed" data-id="${b.id}">Mark confirmed…</button><button class="btn small reconcile-not-booked" data-id="${b.id}">Mark not booked</button></div>`
+                        : ''
+                    }</td></tr>`,
                 )
                 .join('')}</tbody></table>`
             : emptyView('No bookings recorded yet — bookings created through the WhatsApp agent appear here.')
+        }
+        ${
+          data.items.some((b) => b.status === 'uncertain')
+            ? `<p class="muted" style="margin-top:10px">Uncertain bookings mean the system could not confirm whether Google actually created the event. Before reconciling, manually check the real Google Calendar for this exact time slot — never guess. "Mark confirmed" requires the real event ID you found there; "Mark not booked" releases the slot for a fresh attempt and should only be used once you've confirmed no event exists.</p>`
+            : ''
         }
         <div class="pager"><span class="muted">${data.total} total</span><div><button id="prev" class="btn" ${state.offset === 0 ? 'disabled' : ''}>← Prev</button><button id="next" class="btn" ${state.offset + state.limit >= data.total ? 'disabled' : ''}>Next →</button></div></div>
       </section>`;
@@ -484,6 +493,47 @@ route('#/bookings', 'Bookings', 'Real appointment records from the booking syste
     view.querySelector('#next')?.addEventListener('click', () => {
       state.offset += state.limit;
       draw();
+    });
+
+    view.querySelectorAll('.reconcile-confirmed').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const calendarEventId = prompt(
+          'Enter the real Google Calendar event ID you found by manually checking the calendar for this exact time slot:',
+        );
+        if (!calendarEventId) return;
+        try {
+          await api(`/api/dashboard/bookings/${btn.dataset.id}/reconcile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resolution: 'confirmed', calendarEventId }),
+          });
+          toast('Booking marked confirmed', 'success');
+          await draw();
+        } catch (error) {
+          toast(error.message, 'error');
+        }
+      });
+    });
+    view.querySelectorAll('.reconcile-not-booked').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (
+          !confirm(
+            'Only do this if you have manually confirmed in the real Google Calendar that NO event exists for this time slot. This releases the slot for a fresh booking attempt. Continue?',
+          )
+        )
+          return;
+        try {
+          await api(`/api/dashboard/bookings/${btn.dataset.id}/reconcile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resolution: 'not_booked' }),
+          });
+          toast('Booking marked not booked — slot released', 'success');
+          await draw();
+        } catch (error) {
+          toast(error.message, 'error');
+        }
+      });
     });
   }
 
@@ -806,12 +856,27 @@ route('#/settings', 'Settings', 'Business-facing configuration — editable here
           <dt>Rate limit</dt><dd>${data.security.rateLimitPerMinute} requests / minute</dd>
           <dt>Max request body size</dt><dd>${esc(data.security.maxBodySize)}</dd>
         </dl>
+        <h3>Security</h3>
+        <p class="muted">If you suspect a dashboard session or device was compromised, revoke every active session at once — everyone, including you, will need to log in again.</p>
+        <div class="toolbar">
+          <button type="button" id="logout-all" class="btn">Log out everywhere</button>
+        </div>
       </section>`;
 
     const form = view.querySelector('#settings-form');
     const errorBox = view.querySelector('#settings-error');
 
     view.querySelector('#cancel').addEventListener('click', () => draw());
+
+    view.querySelector('#logout-all').addEventListener('click', async () => {
+      if (!confirm('This will log out every active dashboard session, including this one. Continue?')) return;
+      try {
+        await api('/api/dashboard/auth/logout-all', { method: 'POST' });
+      } finally {
+        location.hash = '#/login';
+        location.reload();
+      }
+    });
 
     view.querySelectorAll('.reset-field').forEach((btn) => {
       btn.addEventListener('click', async () => {

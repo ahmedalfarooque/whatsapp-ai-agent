@@ -1,7 +1,18 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { getDb } from '../../../src/memory/db';
-import { setSecret, getSecret, clearSecret, listConfiguredOverrideKeys, maskSecret } from '../../../src/config/secretStore';
+import {
+  setSecret,
+  getSecret,
+  clearSecret,
+  listConfiguredOverrideKeys,
+  maskSecret,
+  listAllOverrideRows,
+  overwriteCiphertext,
+  encryptWithKey,
+  decryptWithKey,
+} from '../../../src/config/secretStore';
 import { createAdminUser } from '../../../src/dashboard/auth';
+import { deriveKeyFromRawValue } from '../../../src/config/masterKey';
 
 describe('secretStore', () => {
   let adminId: number;
@@ -54,5 +65,32 @@ describe('secretStore', () => {
     const masked = maskSecret('sk-abcdefghijklmnop');
     expect(masked).not.toBe('sk-abcdefghijklmnop');
     expect(masked.length).toBeLessThan('sk-abcdefghijklmnop'.length);
+  });
+
+  it('key rotation round-trip: decrypt under old key, re-encrypt under new key, still readable', () => {
+    setSecret('OPENROUTER_API_KEY', 'sk-before-rotation', adminId);
+    setSecret('GOOGLE_PRIVATE_KEY', 'pem-before-rotation', adminId);
+
+    const oldKey = deriveKeyFromRawValue(process.env.DASHBOARD_MASTER_KEY as string);
+    const newRawKey = '1'.repeat(64); // a different, validly-shaped 32-byte hex key
+    const newKey = deriveKeyFromRawValue(newRawKey);
+    expect(oldKey.equals(newKey)).toBe(false);
+
+    const rows = listAllOverrideRows();
+    expect(rows.length).toBe(2);
+    for (const row of rows) {
+      const plaintext = decryptWithKey(row.ciphertext, oldKey);
+      overwriteCiphertext(row.key, encryptWithKey(plaintext, newKey));
+    }
+
+    // Simulate the post-rotation world: reading with the OLD key now fails
+    // (proves rotation actually happened, not a no-op)...
+    const rotatedRow = getDb().prepare('SELECT ciphertext FROM credential_overrides WHERE key = ?').get('OPENROUTER_API_KEY') as {
+      ciphertext: string;
+    };
+    expect(() => decryptWithKey(rotatedRow.ciphertext, oldKey)).toThrow();
+
+    // ...but reading with the NEW key recovers the original plaintext exactly.
+    expect(decryptWithKey(rotatedRow.ciphertext, newKey)).toBe('sk-before-rotation');
   });
 });

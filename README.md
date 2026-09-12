@@ -85,7 +85,7 @@ to start with a clear error if any are missing.
 | `BOOKING_DURATION_MINUTES`, `BOOKING_BUFFER_MINUTES` | Default appointment length and buffer around existing events |
 | `RESTART_KEYWORDS` | Comma-separated words that reset a conversation |
 | `DOMAIN` | Your real domain, for Caddy's automatic HTTPS |
-| `DASHBOARD_MASTER_KEY` | Required in **every** environment (dev/test/production) — encrypts the dashboard's credential-override store and gates dashboard sessions. Generate once with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` and never rotate casually (rotating without re-encrypting existing overrides orphans them — clear and re-enter overrides after a rotation). |
+| `DASHBOARD_MASTER_KEY` | Required in **every** environment (dev/test/production) — encrypts the dashboard's credential-override store and gates dashboard sessions. Generate once with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. See below for the supported rotation procedure — do not just edit `.env` and restart, existing overrides would become unreadable. |
 
 **Never commit `.env` or any real credential.** `.gitignore` already
 excludes it.
@@ -247,9 +247,19 @@ including production, but every page and API route behind it requires that
 authenticated session.
 
 From the dashboard you can:
-- View real customers, conversations, and bookings (including `uncertain`
-  bookings that need manual reconciliation — see the booking-reliability
-  notes in `FINAL_STATUS.md`).
+- View real customers, conversations, and bookings. `uncertain` bookings
+  (the system couldn't confirm whether Google actually created the event —
+  see the booking-reliability notes in `FINAL_STATUS.md`) can be manually
+  reconciled from the Bookings page: **"Mark confirmed…"** records a real
+  Google Calendar event ID you found by manually checking the calendar
+  (never calls Google itself — it only records your finding), and **"Mark
+  not booked"** releases the slot for a fresh attempt once you've manually
+  confirmed no event exists. Neither action ever creates, retries, or
+  queries anything on Google's side — the safety of the whole booking
+  system rests on a human actually looking at the real calendar first.
+- **Log out everywhere** (Settings page) revokes every active dashboard
+  session at once (including your own) if you suspect a session or device
+  was compromised.
 - View and edit the allowlisted knowledge files (with automatic timestamped
   backups before every save).
 - View and edit business-facing **Settings** (hours, timezone, restart
@@ -274,6 +284,27 @@ production deployment must ship with valid real credentials in `.env` to
 boot at all. The dashboard's override store is a **runtime rotation
 mechanism on top of an already-valid deployment**, not a way to boot
 production with an empty `.env`.
+
+## 11b. Rotating DASHBOARD_MASTER_KEY
+
+If the key needs to change (suspected compromise, routine security hygiene),
+never just edit `.env` and restart — every existing credential override
+would become permanently unreadable (fail closed, not a silent data loss —
+`getSecret` would throw rather than return garbage). Instead:
+
+1. Generate a new key: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+2. Stop the app (rotation must run uncontended against the same database file).
+3. With the **current** `DASHBOARD_MASTER_KEY` still in `.env`, run:
+   `NEW_DASHBOARD_MASTER_KEY=<the new key> npm run rotate-master-key`
+   This decrypts every stored credential override under the old key and
+   re-encrypts it under the new one, in one transaction — nothing is
+   written until every row has decrypted successfully.
+4. Update `DASHBOARD_MASTER_KEY` in `.env` to the new value.
+5. Restart the app.
+
+If you have no credential overrides configured (common for a dev/staging
+setup that only uses `.env`-sourced credentials), the script reports there
+is nothing to rotate and you can just update `.env` and restart directly.
 
 ## 12. Troubleshooting
 

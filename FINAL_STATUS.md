@@ -1,6 +1,52 @@
 # Final Status Report — WhatsApp AI Agent
 
-## Update (this session): Dashboard admin auth, encrypted credential overrides, editable business settings
+## Update (final acceptance pass): uncertain-booking reconciliation, master-key rotation, session revoke
+
+Added on top of the previous session's dashboard work, without redoing or
+regressing any of it (249/249 tests, typecheck/lint/build all still clean):
+
+- **Uncertain-booking reconciliation.** The Bookings dashboard page now has
+  "Mark confirmed…" and "Mark not booked" actions for `uncertain` rows.
+  Both are pure record-keeping — neither ever calls Google Calendar. "Mark
+  confirmed" requires the admin to paste in a real event ID they found by
+  manually checking the actual calendar; "Mark not booked" deletes the lock
+  row (freeing the slot for a genuine retry) and is explicitly documented as
+  only safe once the admin has manually confirmed no event exists. This was
+  judged the safest design: any automated Google query/retry from this path
+  would reintroduce exactly the duplicate-booking risk the lock system
+  exists to prevent. Both actions are backed by real repo functions
+  (`reconcileUncertainAsConfirmed`/`reconcileUncertainAsNotBooked`) that are
+  no-ops (409 at the API layer) on anything other than a genuinely
+  `uncertain` row, and both were exercised live in a real running dev
+  server, not just in tests.
+- **Master-key rotation.** `npm run rotate-master-key`
+  (`scripts/rotateMasterKey.ts`) decrypts every existing credential override
+  under the current `DASHBOARD_MASTER_KEY` and re-encrypts it under a new
+  one in a single transaction, so a key change never orphans stored
+  credentials. Documented as an offline/maintenance step (app stopped, run
+  once) rather than a dashboard button, since it touches every stored
+  secret at once — a fundamentally different risk profile than setting one
+  credential while the app is live.
+- **Log out everywhere.** A new `destroyAllSessions()`/`POST
+  /api/dashboard/auth/logout-all` revokes every active dashboard session at
+  once (including the caller's), for when a session or device is suspected
+  compromised. Requires an already-valid session to invoke.
+- **Docker.** `docker compose config` was run and validates cleanly
+  (healthcheck and `depends_on: condition: service_healthy` wiring both
+  parse correctly). Actual `docker build`/`up`/container-start/migration/
+  volume-persistence remain **unverified** — the Docker Desktop Linux
+  engine is not available in this environment, same as every prior session.
+  This is stated plainly, not glossed over: nothing here should be read as
+  "Docker was tested."
+- New tests added (13, bringing the suite to 249): repo-level reconciliation
+  guards (no-op on non-uncertain rows, confirmed/not-booked transitions,
+  slot actually freed for retry), `destroyAllSessions` unit test, a
+  key-rotation round-trip test (old key fails post-rotation, new key
+  recovers the exact original plaintext), and dashboard integration tests
+  for the reconcile endpoint (400/409/200 cases, no secret leak) and
+  logout-all (revokes the caller's own session and a second session).
+
+## Update (dashboard session): Dashboard admin auth, encrypted credential overrides, editable business settings
 
 Added on top of everything below, without regressing it:
 - Real dashboard admin authentication (scrypt password hashing, DB-backed

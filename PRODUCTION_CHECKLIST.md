@@ -63,3 +63,6 @@ steps behind each item.
 - [ ] Webhook signature verification confirmed rejecting an unsigned/tampered request
 - [ ] Rate limiting on `/webhook` confirmed active (`RATE_LIMIT_PER_MINUTE`)
 - [ ] Ran `npm audit` and reviewed/addressed anything critical/high
+- [ ] Confirmed `/api/dashboard/*` (other than `/auth/status|setup|login`) returns 401 without a session cookie
+- [ ] Have a documented plan for who holds the dashboard admin password, and know the `npm run rotate-master-key` procedure before it's ever needed under pressure
+- [ ] Reviewed any `uncertain` bookings in the dashboard before go-live traffic ramps up — none should exist on a fresh deploy, but confirm the reconciliation flow (Bookings page) is understood by whoever operates the account
