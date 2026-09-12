@@ -1,0 +1,67 @@
+{
+  "session": "1064caee-f2bf-45b5-b4ed-9f47ff7a7810",
+  "agent": "Claude-Code",
+  "task": "Final acceptance pass: uncertain-booking reconciliation, key rotation, session revoke, Docker check",
+  "at": "2026-09-12T13:28:23.999Z",
+  "finished": true,
+  "summary": "Final acceptance pass on the dashboard auth/secrets/settings work: added admin reconciliation for uncertain bookings (Mark confirmed / Mark not booked — pure record-keeping, never calls Google), a safe offline master-key rotation script (npm run rotate-master-key), and a 'Log out everywhere' session-revoke action. Verified docker compose config (daemon still unavailable in this environment, marked unverified honestly). Ran a full live browser audit of every dashboard section including seeding and reconciling two real uncertain bookings end-to-end. Confirmed webhook/health/readiness regressions clean.",
+  "reason": "User's final acceptance pass prompt asked for the three remaining design decisions from the prior session's nextSteps (uncertain-booking reconciliation, master-key rotation, session revoke) to be resolved, a Docker availability check, and one more full production-readiness audit — with an explicit instruction not to redo already-complete work and not to claim 'fully live' without real external credentials tested.",
+  "tests": "npm test: 36 files, 249 tests passed (up from 233) — new: bookingLockRepo reconciliation guards (confirmed/not-booked transitions, no-op on wrong state, slot freed for retry), destroyAllSessions unit test, a master-key-rotation round-trip test (old key fails post-rotation, new key recovers exact plaintext), and dashboard integration tests for the reconcile endpoint (400/409/200) and logout-all (revokes both the caller's and a second session). npm run typecheck/lint/build all passed. Live browser audit: seeded two real uncertain booking_locks rows via a throwaway script, verified 'Mark not booked' actually deletes the row and frees the slot for a fresh claim, verified 'Mark confirmed' actually records the admin-supplied event id and flips status to confirmed, verified 'Log out everywhere' actually forces re-login, all with zero console errors and the server staying up throughout. Regression-checked signed webhook (200)/bad-signature (401)/health/readiness/unauthenticated-401 all still correct. docker compose config validates cleanly (healthcheck + depends_on:condition:service_healthy parse correctly); docker build/up/migration/volume-persistence remain UNVERIFIED — the Docker Desktop Linux engine is unavailable in this environment, stated honestly rather than faked.",
+  "nextSteps": "Only legitimate external setup remains: real Meta/WhatsApp Business credentials + webhook registration, a real OpenRouter API key, a real Google service-account + calendar share, a real DOMAIN for Caddy/HTTPS, and (when a Docker-capable environment is available) an actual docker compose build/up verification. No further internal engineering work is outstanding against the explicit scope of this task.",
+  "changedFiles": [
+    {
+      "path": "FINAL_STATUS.md",
+      "change": "modified"
+    },
+    {
+      "path": "PRODUCTION_CHECKLIST.md",
+      "change": "modified"
+    },
+    {
+      "path": "README.md",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "package.json",
+      "change": "modified"
+    },
+    {
+      "path": "scripts/rotateMasterKey.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/config/masterKey.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/auth.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/bookingLockRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/dashboard/auth.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/memory/bookingLockRepo.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}
