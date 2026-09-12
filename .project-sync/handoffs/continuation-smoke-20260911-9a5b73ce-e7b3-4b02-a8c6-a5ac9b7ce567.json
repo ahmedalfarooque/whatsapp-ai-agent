@@ -1,0 +1,32 @@
+{
+  "session": "continuation-smoke-20260911",
+  "agent": "Codex",
+  "task": "Add safe production provider smoke-test entry points and verify readiness",
+  "at": "2026-09-11T18:21:30.744Z",
+  "finished": true,
+  "summary": "Verified the protected baseline and added three isolated production smoke-test entry points for OpenRouter, Google Calendar, and Meta WhatsApp. Existing source edits were preserved as unknown-owned. Development startup and endpoint checks passed with mock providers.",
+  "reason": "The requested continuation phase required controlled live-test entry points without making live external calls. The scripts reuse existing provider modules, require production mode, and gate all write-capable operations explicitly.",
+  "tests": "npm test: 31 files and 161 tests passed. npm run typecheck passed. npm run lint passed. npm run build passed. npm run sync:test passed. Development smoke: mock provider selection logged, /health 200, /readiness 200, invalid webhook signature 401. Docker build was attempted but could not connect because the Docker Desktop Linux daemon was unavailable. No real Meta, OpenRouter, or Google credentials were present, so live provider tests remain unrun.",
+  "nextSteps": "Configure real production credentials in an ignored .env, run the read-only OpenRouter and Google availability smoke tests, then run the explicitly confirmed test-calendar write and explicitly confirmed WhatsApp recipient send. Start Docker Desktop and repeat the image build and compose health check. Reconcile the existing unknown-owned working-tree edits before committing or merging.",
+  "changedFiles": [
+    {
+      "path": "scripts/smoke-google-calendar.ts",
+      "change": "added"
+    },
+    {
+      "path": "scripts/smoke-openrouter.ts",
+      "change": "added"
+    },
+    {
+      "path": "scripts/smoke-whatsapp.ts",
+      "change": "added"
+    }
+  ],
+  "inherited": [
+    {
+      "path": ".codex/hooks.json",
+      "change": "added"
+    }
+  ],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

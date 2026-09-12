@@ -9,6 +9,7 @@ describe('Calendar mock provider', () => {
 
   it('createEventMock always reports success with a mock event id, without a real Google API call', async () => {
     const result = await createEventMock({
+      conversationId: 1,
       summary: 'Test',
       startISO: '2025-01-01T10:00:00',
       endISO: '2025-01-01T10:30:00',

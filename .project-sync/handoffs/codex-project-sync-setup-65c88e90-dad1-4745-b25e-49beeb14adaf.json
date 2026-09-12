@@ -1,0 +1,122 @@
+{
+  "session": "codex-project-sync-setup",
+  "agent": "Codex",
+  "task": "Install shared multi-app coordination",
+  "at": "2026-09-10T23:41:27.839Z",
+  "finished": true,
+  "summary": "Installed shared project instructions, cooperative single-writer lock, file fingerprints, unique checkpoint/handoff records and Claude Code hooks. Existing application edits preserved.",
+  "reason": "Keep Codex, Claude Code and Cowork informed of project changes using one repository-local handoff system. No other project was modified.",
+  "tests": "node --test scripts/project-sync.test.cjs: 2 scenarios passed, covering two-way app handoff, unknown edits, added/deleted files, exclusion rules, conflict lock, checkpoint recovery and hook context. npm run typecheck: PASS. npm run lint: PASS. npm test: 31 files, 161 tests PASS. Native Codex instructions loaded during setup; Claude Code hooks simulated, fresh session unverified. Cowork native folder activation unavailable through tools and remains unverified.",
+  "nextSteps": "Bind .project-sync/COWORK.md text using Cowork native folder instructions for this live folder; cannot safely claim that setting was applied. Verify fresh Claude Code startup. Review pre-existing unknown-owned booking/AI/client edits separately. Live credentials/deployment and historical FINAL_STATUS claims require independent verification. No commit was made.",
+  "changedFiles": [
+    {
+      "path": ".claude/settings.json",
+      "change": "added"
+    },
+    {
+      "path": ".dockerignore",
+      "change": "modified"
+    },
+    {
+      "path": ".gitignore",
+      "change": "modified"
+    },
+    {
+      "path": "AGENTS.md",
+      "change": "added"
+    },
+    {
+      "path": "CLAUDE.md",
+      "change": "added"
+    },
+    {
+      "path": "README.md",
+      "change": "modified"
+    },
+    {
+      "path": "package.json",
+      "change": "modified"
+    },
+    {
+      "path": "scripts/project-sync.cjs",
+      "change": "modified"
+    },
+    {
+      "path": "scripts/project-sync.test.cjs",
+      "change": "added"
+    }
+  ],
+  "inherited": [
+    {
+      "path": "src/calendar/booking.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "src/llm/agentLoop.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "src/llm/buildSystemPrompt.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "src/pipeline/processInboundMessage.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "src/tools/bookAppointment.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "src/tools/checkAvailability.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "src/tools/index.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "src/utils/retry.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "src/whatsapp/client.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "tests/unit/calendar/mockProvider.test.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "tests/unit/calendar/providerSelection.test.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "tests/unit/llm/agentLoop.test.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "tests/unit/tools/bookAppointment.test.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    },
+    {
+      "path": "tests/unit/tools/checkAvailability.test.ts",
+      "change": "pre-existing",
+      "owner": "unknown"
+    }
+  ],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

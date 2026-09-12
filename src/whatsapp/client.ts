@@ -1,6 +1,12 @@
 import { env } from '../config/env';
 import { logger } from '../logger';
-import { fetchWithTimeout, withRetry, HttpError, isRetryableHttpError } from '../utils/retry';
+import {
+  fetchWithTimeout,
+  withRetry,
+  HttpError,
+  isRetryableHttpError,
+  isRetryableForNonIdempotentSend,
+} from '../utils/retry';
 import { sendTextMessageMock, markMessageAsReadMock } from './mockClient';
 import type { SendTextMessageResponse } from './types';
 
@@ -8,7 +14,11 @@ function graphUrl(pathSegment: string): string {
   return `https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${pathSegment}`;
 }
 
-async function graphRequest<T>(pathSegment: string, body: Record<string, unknown>): Promise<T> {
+async function graphRequest<T>(
+  pathSegment: string,
+  body: Record<string, unknown>,
+  isRetryable: (error: unknown) => boolean,
+): Promise<T> {
   return withRetry(
     async () => {
       const response = await fetchWithTimeout(
@@ -33,7 +43,7 @@ async function graphRequest<T>(pathSegment: string, body: Record<string, unknown
     },
     {
       retries: 2,
-      isRetryable: isRetryableHttpError,
+      isRetryable,
       onRetry: (error, attempt) => {
         logger.warn({ error, attempt }, 'retrying WhatsApp Graph API request');
       },
@@ -50,6 +60,11 @@ export async function sendTextMessage(
     return sendTextMessageMock(toWaId, body);
   }
   try {
+    // Sending a message is NOT idempotent — a duplicate send is a real,
+    // customer-visible message the customer would receive twice. Only
+    // retry on a definite server-side rejection (429/5xx); never retry on
+    // an ambiguous network/timeout error, since the message may have
+    // already been delivered before we gave up waiting for the response.
     const result = await graphRequest<SendTextMessageResponse>(
       `${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
       {
@@ -58,6 +73,7 @@ export async function sendTextMessage(
         type: 'text',
         text: { preview_url: false, body },
       },
+      isRetryableForNonIdempotentSend,
     );
     logger.info({ toWaId, messageId: result.messages?.[0]?.id }, 'sent WhatsApp text message');
     return result;
@@ -73,11 +89,17 @@ export async function markMessageAsRead(messageId: string): Promise<void> {
     return markMessageAsReadMock(messageId);
   }
   try {
-    await graphRequest(`${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-      messaging_product: 'whatsapp',
-      status: 'read',
-      message_id: messageId,
-    });
+    // Marking a message read is idempotent from the customer's perspective
+    // (no visible duplicate effect), so the generic retry policy is fine here.
+    await graphRequest(
+      `${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+      },
+      isRetryableHttpError,
+    );
   } catch (error) {
     logger.warn({ messageId, error }, 'failed to mark WhatsApp message as read (non-fatal)');
   }

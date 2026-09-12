@@ -11,3 +11,6 @@ secrets
 tests
 .vscode
 .idea
+.project-sync
+AGENTS.md
+CLAUDE.md

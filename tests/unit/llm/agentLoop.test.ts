@@ -45,7 +45,7 @@ describe('runAgentLoop', () => {
   it('returns immediately when the model answers without needing a tool', async () => {
     vi.mocked(chatCompletion).mockResolvedValue(textResponse('Hello, how can I help?') as never);
 
-    const result = await runAgentLoop({ systemPrompt: 'sys', history: [] });
+    const result = await runAgentLoop({ systemPrompt: 'sys', history: [], conversationId: 1 });
 
     expect(result.finalText).toBe('Hello, how can I help?');
     expect(chatCompletion).toHaveBeenCalledOnce();
@@ -61,13 +61,13 @@ describe('runAgentLoop', () => {
       slots: ['2025-06-10T10:00:00'],
     });
 
-    const result = await runAgentLoop({ systemPrompt: 'sys', history: [] });
+    const result = await runAgentLoop({ systemPrompt: 'sys', history: [], conversationId: 1 });
 
     expect(result.finalText).toBe('We have a 10am slot free.');
-    expect(toolRegistry.check_availability.handler).toHaveBeenCalledWith({
-      date: '2025-06-10',
-      durationMinutes: 30,
-    });
+    expect(toolRegistry.check_availability.handler).toHaveBeenCalledWith(
+      { date: '2025-06-10', durationMinutes: 30 },
+      { conversationId: 1 },
+    );
     expect(chatCompletion).toHaveBeenCalledTimes(2);
     expect(result.generatedMessages.some((m) => m.role === 'tool')).toBe(true);
   });
@@ -77,7 +77,7 @@ describe('runAgentLoop', () => {
       .mockResolvedValueOnce(toolCallResponse('delete_database', {}) as never)
       .mockResolvedValueOnce(textResponse('done') as never);
 
-    const result = await runAgentLoop({ systemPrompt: 'sys', history: [] });
+    const result = await runAgentLoop({ systemPrompt: 'sys', history: [], conversationId: 1 });
     expect(result.finalText).toBe('done');
   });
 
@@ -87,7 +87,7 @@ describe('runAgentLoop', () => {
       .mockResolvedValueOnce(textResponse('ok') as never);
     vi.mocked(toolRegistry.check_availability.handler).mockRejectedValue(new Error('boom'));
 
-    const result = await runAgentLoop({ systemPrompt: 'sys', history: [] });
+    const result = await runAgentLoop({ systemPrompt: 'sys', history: [], conversationId: 1 });
     expect(result.finalText).toBe('ok');
   });
 
@@ -97,7 +97,7 @@ describe('runAgentLoop', () => {
     );
     vi.mocked(toolRegistry.check_availability.handler).mockResolvedValue({ slots: [] });
 
-    const result = await runAgentLoop({ systemPrompt: 'sys', history: [], maxToolRounds: 2 });
+    const result = await runAgentLoop({ systemPrompt: 'sys', history: [], conversationId: 1, maxToolRounds: 2 });
 
     expect(chatCompletion).toHaveBeenCalledTimes(2);
     expect(result.finalText).toMatch(/get back to you|contact us/i);

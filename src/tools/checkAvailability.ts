@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { env } from '../config/env';
 import { findFreeSlots } from '../calendar/availability';
 import { logger } from '../logger';
+import type { ToolContext } from './index';
 
 export const checkAvailabilitySchema = {
   type: 'function' as const,
@@ -42,6 +43,9 @@ export interface CheckAvailabilityResult {
 
 export async function checkAvailabilityHandler(
   rawArgs: unknown,
+  // check_availability is read-only and needs no per-conversation context,
+  // but every tool handler shares the same (args, context) signature.
+  _context: ToolContext,
 ): Promise<CheckAvailabilityResult> {
   const parsed = argsSchema.safeParse(rawArgs);
   if (!parsed.success) {

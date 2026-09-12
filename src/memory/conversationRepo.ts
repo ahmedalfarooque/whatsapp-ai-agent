@@ -116,6 +116,79 @@ export function getRecentMessages(
   }));
 }
 
+export interface ConversationListItem {
+  id: number;
+  status: 'active' | 'ended';
+  started_at: string;
+  ended_at: string | null;
+  customerId: number;
+  customerLabel: string;
+  waId: string;
+  messageCount: number;
+  lastMessageAt: string | null;
+}
+
+const MAX_PAGE_SIZE = 100;
+
+export function listConversations(
+  params: { status?: 'active' | 'ended'; limit?: number; offset?: number } = {},
+  db: Database.Database = getDb(),
+): { items: ConversationListItem[]; total: number } {
+  const limit = Math.max(1, Math.min(params.limit ?? 25, MAX_PAGE_SIZE));
+  const offset = Math.max(0, params.offset ?? 0);
+  const whereClause = params.status ? 'WHERE c.status = @status' : '';
+  const args = params.status ? { status: params.status } : {};
+
+  const total = (
+    db.prepare(`SELECT COUNT(*) AS count FROM conversations c ${whereClause}`).get(args) as {
+      count: number;
+    }
+  ).count;
+
+  const items = db
+    .prepare(
+      `SELECT c.id, c.status, c.started_at, c.ended_at, cu.id AS customerId,
+              cu.display_name AS customerLabel, cu.wa_id AS waId,
+              (SELECT COUNT(*) FROM conversation_messages m WHERE m.conversation_id = c.id) AS messageCount,
+              (SELECT MAX(m2.created_at) FROM conversation_messages m2 WHERE m2.conversation_id = c.id) AS lastMessageAt
+       FROM conversations c
+       JOIN customers cu ON cu.id = c.customer_id
+       ${whereClause}
+       ORDER BY COALESCE(lastMessageAt, c.started_at) DESC
+       LIMIT @limit OFFSET @offset`,
+    )
+    .all({ ...args, limit, offset }) as ConversationListItem[];
+
+  return { items, total };
+}
+
+export function getConversationById(
+  id: number,
+  db: Database.Database = getDb(),
+): ConversationListItem | undefined {
+  return db
+    .prepare(
+      `SELECT c.id, c.status, c.started_at, c.ended_at, cu.id AS customerId,
+              cu.display_name AS customerLabel, cu.wa_id AS waId,
+              (SELECT COUNT(*) FROM conversation_messages m WHERE m.conversation_id = c.id) AS messageCount,
+              (SELECT MAX(m2.created_at) FROM conversation_messages m2 WHERE m2.conversation_id = c.id) AS lastMessageAt
+       FROM conversations c
+       JOIN customers cu ON cu.id = c.customer_id
+       WHERE c.id = ?`,
+    )
+    .get(id) as ConversationListItem | undefined;
+}
+
+/** Full chronological message history for a conversation, for admin display (not the LLM-shaped subset). */
+export function getConversationMessages(
+  conversationId: number,
+  db: Database.Database = getDb(),
+): ConversationMessage[] {
+  return db
+    .prepare('SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY id ASC')
+    .all(conversationId) as ConversationMessage[];
+}
+
 /** Ends the current active conversation (if any) and returns the new active one. */
 export function resetConversation(
   customerId: number,

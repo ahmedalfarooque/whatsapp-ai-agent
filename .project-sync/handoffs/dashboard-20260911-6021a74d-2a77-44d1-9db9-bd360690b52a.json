@@ -1,0 +1,47 @@
+{
+  "session": "dashboard-20260911",
+  "agent": "Codex",
+  "task": "Add read-only admin dashboard and dashboard APIs",
+  "at": "2026-09-11T19:31:17.837Z",
+  "finished": false,
+  "summary": "Added a read-only local admin dashboard as an additive layer over the protected WhatsApp AI Agent backend. Added dashboard data queries, static dashboard assets, read-only APIs, root redirect, and integration coverage. Existing webhook, health, readiness, provider, booking, and SQLite behavior was preserved.",
+  "reason": "The project request required a professional dashboard at /dashboard without replacing the existing API. The dashboard reuses the existing SQLite connection, reports real database values, masks WhatsApp identifiers, shows knowledge-file presence, and is disabled in production until admin authentication exists.",
+  "tests": "npm test: 32 files and 164 tests passed. npm run typecheck passed. npm run lint passed. npm run build passed. Built-server verification: GET / returned 302 to /dashboard, GET /dashboard returned 200, dashboard summary returned real SQLite counts, /health and /readiness returned 200, invalid POST /webhook returned 401, and SIGINT shutdown completed cleanly. Docker build remains unverified because the Docker Desktop Linux daemon was unavailable.",
+  "nextSteps": "Add authenticated production dashboard access before enabling the dashboard in production. Then add paginated customer, conversation, booking, logs, and knowledge detail views. Reconcile the existing unknown-owned working-tree edits before committing or merging.",
+  "changedFiles": [
+    {
+      "path": "Dockerfile",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "added"
+    },
+    {
+      "path": "dashboard/index.html",
+      "change": "added"
+    },
+    {
+      "path": "dashboard/styles.css",
+      "change": "added"
+    },
+    {
+      "path": "src/app.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/data.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "added"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

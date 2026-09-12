@@ -1,0 +1,63 @@
+{
+  "session": "943bc4a9-3ff3-40e6-ab27-13a16ae142c5",
+  "agent": "Claude-Code",
+  "task": "Finish dashboard: functional pages, real APIs, tests",
+  "at": "2026-09-11T20:17:24.011Z",
+  "finished": true,
+  "summary": "Finished the dashboard Codex left additive-but-incomplete: replaced the placeholder single-view page with a real 12-section hash-routed SPA (Dashboard, Customers, Conversations, Bookings, Knowledge, Services, AI, Integrations, Logs, System, Settings, Project Sync). Every nav link now goes to a working view or a clear not-available state; no dead controls. Added listCustomers/getCustomerById to customerRepo, listConversations/getConversationById/getConversationMessages to conversationRepo, listBookingLocks to bookingLockRepo, and new src/dashboard/knowledgeAdmin.ts (allowlisted atomic knowledge-file edit with backup) and src/dashboard/projectSync.ts (read-only writer/handoff view). Rewrote src/dashboard/router.ts and src/dashboard/data.ts, dashboard/index.html, dashboard/app.js, dashboard/styles.css. Fixed a real pre-existing data bug: dashboard summary/bookings/customer counts were querying the unused booking_sessions table instead of booking_locks (the real source of truth from the earlier booking-idempotency work), which would have made Bookings silently always-empty. Fixed a real browser bug found during live verification: matchRoute() called .exec() on string route patterns and threw, hanging the whole SPA on Loading forever on every page including home — fixed by branching on typeof pattern.",
+  "reason": "User reported the dashboard added by a prior Codex session did not behave like a real application (Cannot GET /, dead buttons, missing navigation/settings) and asked for it to be finished as a genuine functional admin app reusing the existing repos/services/database, with no fake data, no second booking/knowledge store, and no live external API calls triggered merely by opening a page.",
+  "tests": "npm test: 32 files, 196 tests passed (dashboard.e2e.test.ts alone: 35 tests covering root redirect, static assets, health/readiness/webhook untouched, customers/conversations/bookings list+detail+pagination+404/400, knowledge list/read/save-with-backup/reject-traversal/reject-malformed-json/reject-oversized(413)/reject-non-allowlisted, services/ai/integrations/system/settings never leaking secret-like fields, project-sync read-only view, and full production lockdown returning 404 on every dashboard route). npm run typecheck, npm run lint, npm run build all passed clean. Live browser verification (fresh dev server, mock providers, empty DB): navigated to all 12 dashboard sections directly, zero console errors on any page; knowledge editor loads real file content, Reset-to-last-saved and Cancel both verified working; Integrations 'Re-check configuration' verified to only call GET /api/dashboard/integrations, no external WhatsApp/OpenRouter/Google request ever fires; network log across every page showed only /api/dashboard/* and static asset requests. Regression-checked outside the browser: signed POST /webhook returned 200, badly-signed POST /webhook returned 401, GET /health and /readiness returned 200. Docker build/run remains unverified: Docker Desktop's Linux engine was not running in this environment (same limitation as the prior session).",
+  "nextSteps": "Add real authenticated production admin access before ever enabling this dashboard outside development (it is explicitly gated to non-production by requireLocalDashboard/env.isProduction today and must stay that way until real auth exists). Verify the Docker build/run once a Docker daemon is available. Reconcile the pre-existing unknown-owned working-tree edits (booking idempotency/provider-selection files from before this session) before any external commit or merge — this session did not touch or explain their origin, only preserved them.",
+  "changedFiles": [
+    {
+      "path": ".gitignore",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/index.html",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/styles.css",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/data.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/knowledgeAdmin.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/projectSync.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/bookingLockRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/conversationRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

@@ -16,7 +16,9 @@
     "lint:fix": "eslint . --ext .ts --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate": "tsx src/memory/runMigrations.ts"
+    "migrate": "tsx src/memory/runMigrations.ts",
+    "sync:check": "node scripts/project-sync.cjs check",
+    "sync:test": "node --test scripts/project-sync.test.cjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

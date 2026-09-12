@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp AI Agent · Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">✦</span><span>WhatsApp AI<br><small>Agent Console</small></span></div>
+    <nav id="nav">
+      <a data-route="#/" href="#/">▦ <span>Dashboard</span></a>
+      <a data-route="#/customers" href="#/customers">♙ <span>Customers</span></a>
+      <a data-route="#/conversations" href="#/conversations">◌ <span>Conversations</span></a>
+      <a data-route="#/bookings" href="#/bookings">◷ <span>Bookings</span></a>
+      <a data-route="#/knowledge" href="#/knowledge">⌁ <span>Knowledge</span></a>
+      <a data-route="#/services" href="#/services">◇ <span>Services</span></a>
+      <a data-route="#/ai" href="#/ai">✦ <span>AI</span></a>
+      <a data-route="#/integrations" href="#/integrations">◎ <span>Integrations</span></a>
+      <a data-route="#/logs" href="#/logs">≡ <span>Logs</span></a>
+      <a data-route="#/system" href="#/system">◆ <span>System</span></a>
+      <a data-route="#/settings" href="#/settings">⚙ <span>Settings</span></a>
+      <a data-route="#/project-sync" href="#/project-sync">⇄ <span>Project Sync</span></a>
+    </nav>
+    <div class="sidebar-note"><span class="dot green"></span><span>Local console<br><small id="sidebar-mode">Loading…</small></span></div>
+  </aside>
+  <main class="main">
+    <header>
+      <div><p class="eyebrow">ADMIN CONSOLE</p><h1 id="page-title">Dashboard</h1><p class="muted" id="page-subtitle">A clear view of your customer conversations and agent health.</p></div>
+      <div class="header-actions"><span class="env-badge" id="environment">Loading…</span><span class="avatar">A</span></div>
+    </header>
+    <div id="toast-host"></div>
+    <div id="view">Loading…</div>
+    <footer>WhatsApp AI Agent · Dashboard reuses the live application database · <a href="/health">Health</a> · <a href="/readiness">Readiness</a></footer>
+  </main>
+  <script src="/dashboard/app.js"></script>
+</body></html>

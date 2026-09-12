@@ -40,6 +40,8 @@ function safeParseArgs(raw: string): unknown {
 export interface RunAgentLoopParams {
   systemPrompt: string;
   history: ChatMessageForLlm[];
+  /** Threaded through to every tool call so handlers (e.g. book_appointment) can scope idempotency to this conversation. */
+  conversationId: number;
   maxToolRounds?: number;
 }
 
@@ -90,7 +92,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
         resultContent = JSON.stringify({ error: `unknown tool: ${toolName}` });
       } else {
         try {
-          const result = await toolDef.handler(args);
+          const result = await toolDef.handler(args, { conversationId: params.conversationId });
           resultContent = JSON.stringify(result);
         } catch (error) {
           logger.error({ toolName, error }, 'tool handler threw an unexpected error');

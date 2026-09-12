@@ -50,6 +50,7 @@ describe('Calendar provider selection', () => {
 
         const busy = await freeBusyQuery('2025-01-01T00:00:00Z', '2025-01-01T01:00:00Z');
         const created = await createEvent({
+          conversationId: 1,
           summary: 'Test',
           startISO: '2025-01-01T10:00:00',
           endISO: '2025-01-01T10:30:00',
@@ -66,9 +67,15 @@ describe('Calendar provider selection', () => {
 
   it('production mode calls the real Google Calendar client', async () => {
     await withIsolatedEnv(setAllProductionCreds, async () => {
+      const { getOrCreateCustomer } = await import('../../../src/memory/customerRepo');
+      const { getOrCreateActiveConversation } = await import('../../../src/memory/conversationRepo');
       const { createEvent } = await import('../../../src/calendar/booking');
 
+      const customer = getOrCreateCustomer('15551234567', 'Alice');
+      const conversation = getOrCreateActiveConversation(customer.id);
+
       const result = await createEvent({
+        conversationId: conversation.id,
         summary: 'Test',
         startISO: '2025-01-01T10:00:00',
         endISO: '2025-01-01T10:30:00',

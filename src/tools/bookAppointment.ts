@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { env } from '../config/env';
 import { createEvent } from '../calendar/booking';
 import { logger } from '../logger';
+import type { ToolContext } from './index';
 
 export const bookAppointmentSchema = {
   type: 'function' as const,
@@ -37,13 +38,24 @@ const argsSchema = z.object({
 export interface BookAppointmentResult {
   success: boolean;
   conflict?: boolean;
+  /**
+   * The booking's outcome could not be determined (Google connectivity
+   * issue) — it may or may not have actually gone through. Distinct from
+   * `conflict` (we know the slot is taken) and from a plain failure (we
+   * know it didn't happen). The model must not claim success OR failure —
+   * see the system prompt's handling of this case.
+   */
+  uncertain?: boolean;
   eventId?: string;
   startISO?: string;
   endISO?: string;
   error?: string;
 }
 
-export async function bookAppointmentHandler(rawArgs: unknown): Promise<BookAppointmentResult> {
+export async function bookAppointmentHandler(
+  rawArgs: unknown,
+  context: ToolContext,
+): Promise<BookAppointmentResult> {
   const parsed = argsSchema.safeParse(rawArgs);
   if (!parsed.success) {
     return { success: false, error: `invalid arguments: ${parsed.error.message}` };
@@ -59,7 +71,12 @@ export async function bookAppointmentHandler(rawArgs: unknown): Promise<BookAppo
   const end = start.plus({ minutes: durationMinutes });
 
   try {
+    // conversationId scopes the idempotency key — see src/calendar/booking.ts —
+    // so a retried request for the exact same slot/service/customer from this
+    // conversation is recognized as "the same logical booking" rather than a
+    // brand new one, and never creates a second Google Calendar event.
     const result = await createEvent({
+      conversationId: context.conversationId,
       summary: `${parsed.data.serviceType} — ${parsed.data.customerName}`,
       description: `Booked via WhatsApp AI agent for ${parsed.data.customerName}.`,
       startISO: start.toISO() as string,
@@ -67,6 +84,9 @@ export async function bookAppointmentHandler(rawArgs: unknown): Promise<BookAppo
     });
 
     if (!result.success) {
+      if ('uncertain' in result && result.uncertain) {
+        return { success: false, uncertain: true };
+      }
       return { success: false, conflict: true };
     }
 

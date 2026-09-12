@@ -258,3 +258,12 @@ src/
 knowledge/      business knowledge files (edit these, not code)
 tests/          unit + integration tests (all external services mocked)
 ```
+# Working with multiple AI apps
+
+Codex and Claude Code read the shared instructions in `AGENTS.md` / `CLAUDE.md`.
+Run `npm run sync:check` for the latest writer, handoff and unexplained changes.
+See [.project-sync/PROTOCOL.md](.project-sync/PROTOCOL.md) for start/checkpoint/finish
+commands and [.project-sync/COWORK.md](.project-sync/COWORK.md) for Cowork folder binding.
+Only one participating agent writes at a time; all use this same live checkout.
+Run `npm run sync:test` to verify the helper. Cowork native instruction activation and
+a fresh Claude Code session remain unverified; local hook simulations pass.

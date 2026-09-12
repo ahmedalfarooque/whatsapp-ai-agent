@@ -1,0 +1,14 @@
+{
+  "session": "943bc4a9-3ff3-40e6-ab27-13a16ae142c5",
+  "agent": "Claude-Code",
+  "task": "Verify real googleapis/gaxios error shape for booking classifier",
+  "at": "2026-09-11T03:01:08.000Z",
+  "finished": true,
+  "summary": "Verified isConfirmedGoogleFailure against REAL network calls through the actual googleapis/gaxios libraries (no mocking): a fake-but-real JWT auth attempt against Google's live OAuth token endpoint returned a genuine GaxiosError with both .status and .response.status set to 400 (invalid_grant), classified correctly as a confirmed failure. A real DNS failure (gaxios request to a non-resolving host) returned a GaxiosError with no .response/.status and a string .code ('ENOTFOUND'), classified correctly as ambiguous. No code discrepancy was found, so no source changes were made.",
+  "reason": "Prior session's booking-idempotency hardening documented isConfirmedGoogleFailure's status-extraction logic as built from documented gaxios behavior, not observed live. This task closed that gap using only synthetic/throwaway credentials (a locally generated RSA keypair, fake service-account email) so no real secrets were used or exposed, and no real calendar was touched.",
+  "tests": "No new tests added (no defect found to regress-test). Re-ran full existing suite after the earlier session's changes: npm test = 31 files / 161 tests PASS, npm run typecheck PASS, npm run lint PASS, npm run build PASS (migrations 001-003 all copy to dist). Verification scripts were run outside the repo (session scratchpad) and deleted after use; they are not part of the codebase.",
+  "nextSteps": "Working tree still contains the same uncommitted, previously-flagged unknown-owned edits (booking locks/migrations, provider/error tests, dev-mode changes) — this task made zero source changes, so nothing new to commit. A live 4xx/5xx from the actual Calendar API endpoint itself (as opposed to the OAuth token endpoint) was not obtained, since that requires a real, authorized service account; the OAuth-endpoint result is representative because both code paths share the same gaxios error class, but this is not identical to observing calendar.events.insert's own error responses. Recommend real end-to-end verification once live Meta/OpenRouter/Google credentials are available.",
+  "changedFiles": [],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

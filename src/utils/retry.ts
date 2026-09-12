@@ -81,3 +81,22 @@ export function isRetryableHttpError(error: unknown): boolean {
   // Network-level errors (fetch throws TypeError/AbortError) are retryable.
   return true;
 }
+
+/**
+ * Stricter classifier for operations with a real, customer-visible,
+ * non-idempotent side effect (e.g. sending a WhatsApp message) — where a
+ * blind retry on an AMBIGUOUS outcome could duplicate that side effect.
+ *
+ * A definite HTTP response (429/5xx) means the server rejected the request
+ * synchronously — safe to retry, the side effect did not happen. A network
+ * error, or a timeout/abort, is ambiguous: the request may have already
+ * been fully processed by the server before we gave up waiting for the
+ * response, so it is NOT retried here — the caller surfaces the failure
+ * instead of risking a duplicate send.
+ */
+export function isRetryableForNonIdempotentSend(error: unknown): boolean {
+  if (error instanceof HttpError) {
+    return error.status === 429 || error.status >= 500;
+  }
+  return false;
+}

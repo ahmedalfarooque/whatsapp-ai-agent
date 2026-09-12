@@ -93,7 +93,7 @@ async function processInboundMessageUnlocked(
 
   let finalText: string;
   try {
-    const loopResult = await runAgentLoop({ systemPrompt, history });
+    const loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
     finalText = loopResult.finalText;
 
     for (const generated of loopResult.generatedMessages) {

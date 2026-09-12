@@ -2,7 +2,12 @@ import { TOOL_NAMES } from '../config/constants';
 import { checkAvailabilitySchema, checkAvailabilityHandler } from './checkAvailability';
 import { bookAppointmentSchema, bookAppointmentHandler } from './bookAppointment';
 
-export type ToolHandler = (args: unknown) => Promise<unknown>;
+/** Context available to every tool handler, independent of whatever the LLM supplied as arguments. */
+export interface ToolContext {
+  conversationId: number;
+}
+
+export type ToolHandler = (args: unknown, context: ToolContext) => Promise<unknown>;
 
 export interface ToolDefinition {
   schema: { type: 'function'; function: Record<string, unknown> };

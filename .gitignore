@@ -26,6 +26,14 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Local coordination runtime; instructions/handoffs remain versionable
+.project-sync/writer.json
+.project-sync/report.json
+.project-sync/**/*.tmp
+
 # Caddy runtime state
 caddy_data/
 caddy_config/
+
+# Dashboard knowledge-file edit backups (runtime, never business content of record)
+knowledge/.backups/

@@ -7,6 +7,7 @@ import { logger } from './logger';
 import { rawBodySaver } from './webhook/verifySignature';
 import { createWebhookRouter } from './webhook/router';
 import { createHealthRouter } from './health/router';
+import { createDashboardRouter } from './dashboard/router';
 import { loadKnowledgeBase } from './knowledge/loader';
 import path from 'node:path';
 
@@ -23,6 +24,7 @@ export function createApp(): Express {
   );
 
   app.use(createHealthRouter());
+  app.use(createDashboardRouter());
 
   const webhookLimiter = rateLimit({
     windowMs: 60_000,
