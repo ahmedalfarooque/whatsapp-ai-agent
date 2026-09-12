@@ -1,0 +1,151 @@
+{
+  "session": "1064caee-f2bf-45b5-b4ed-9f47ff7a7810",
+  "agent": "Claude-Code",
+  "task": "Dashboard auth, encrypted secret store, business settings table",
+  "at": "2026-09-12T04:46:21.023Z",
+  "finished": true,
+  "summary": "Implemented real dashboard admin authentication (scrypt password hashing, DB-backed sessions with sliding expiry, rate-limited login, one-time first-run admin setup), an encrypted per-key credential-override store (AES-256-GCM, key derived from a new mandatory-in-every-environment DASHBOARD_MASTER_KEY, masked reads, real per-provider 'Test connection' actions), and a new business_settings table making business-facing config (hours, timezone, restart keywords, welcome/fallback messages, cancellation policy, languages) dashboard-editable without a restart, env as fallback. Every dashboard API route except auth/status/setup/login now requires a valid session; the old 'always 404 in production' gate is replaced by real auth reachable in every environment. Updated dashboard/app.js with a login/first-run-setup screen, credential management UI, and an editable settings form. Migrations 004-007 added.",
+  "reason": "User's master autonomous-execution prompt asked for the WhatsApp AI Agent's dashboard to become a real protected admin system (no more unauthenticated dashboard), with in-dashboard credential configuration/testing and business-settings editing, while explicitly keeping the existing agent pipeline, booking reliability, and mock-provider architecture untouched and avoiding any new paid infrastructure. User explicitly chose the full-encrypted-secret-store and new-settings-table options when asked to scope the two biggest design decisions.",
+  "tests": "npm test: 36 files, 233 tests passed (up from 196) — new coverage: password hash/verify, session lifecycle (create/verify/expire/destroy), AES-256-GCM round-trip with tamper detection, business-settings precedence/validation/no-secret-field guarantee, and dashboard integration tests for setup/login/logout, credential set/test/clear, settings read/write validation, and a two-case production-lockdown test (401 unauthenticated including auth-routes-still-reachable, 200 with a valid session) replacing the old always-404 test. npm run typecheck, npm run lint, npm run build all passed. Real browser QA performed end-to-end: first-run admin setup, login, every nav section (customers/conversations/bookings/knowledge/services/ai/logs/system/project-sync) with zero console errors, settings save/validate-reject/reset-to-default with immediate effect (no restart), credential save/test/clear for all three providers, logout, and a mobile-viewport check of the login screen. Regression-checked signed webhook (200)/bad-signature (401)/health/readiness all still work post-change. A real production-blocking bug was found and fixed during this QA: better-sqlite3 ^11.3.0 crashed the Node v24 process with a native assertion failure once real outbound fetch() calls (from the new credential-test feature) ran in the same process — fixed by upgrading to better-sqlite3 ^13.0.3 (Node >=22 support), verified not to recur after repeated testing. A second real bug (OpenRouter's /models endpoint doesn't actually validate the API key, so a fake key reported 'valid') was found and fixed by switching to /auth/key. Docker was not tested — the Docker Desktop Linux engine is unavailable in this environment (same limitation noted in every prior session); docker-compose.yml was given an explicit app-service healthcheck and a service_healthy dependency for caddy as a config-only improvement, unverified at runtime.",
+  "nextSteps": "Genuine remaining work: (1) verify docker compose build/up once a Docker daemon is available in some environment; (2) consider a session-list/revoke-all-sessions admin UI action (not built — only single-session logout exists); (3) the uncertain-booking dashboard view still has no dedicated reconciliation action beyond visibility (mentioned as a possible future addition in earlier handoffs, not required by this session's explicit scope); (4) DASHBOARD_MASTER_KEY rotation has no automated re-encryption path for existing credential_overrides rows — documented as a manual clear-and-re-enter step in README, not automated.",
+  "changedFiles": [
+    {
+      "path": ".env.example",
+      "change": "modified"
+    },
+    {
+      "path": "FINAL_STATUS.md",
+      "change": "modified"
+    },
+    {
+      "path": "PRODUCTION_CHECKLIST.md",
+      "change": "modified"
+    },
+    {
+      "path": "README.md",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/index.html",
+      "change": "modified"
+    },
+    {
+      "path": "docker-compose.yml",
+      "change": "modified"
+    },
+    {
+      "path": "package-lock.json",
+      "change": "modified"
+    },
+    {
+      "path": "package.json",
+      "change": "modified"
+    },
+    {
+      "path": "src/calendar/googleClient.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/calendar/timezone.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/config/businessSettings.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/config/effectiveConfig.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/config/env.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/config/masterKey.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/auth.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/authMiddleware.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/data.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/llm/buildSystemPrompt.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/llm/openRouterClient.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/migrations/004_business_settings.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/migrations/005_admin_users.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/migrations/006_admin_sessions.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/pipeline/processInboundMessage.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/restart/isRestartCommand.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/webhook/verifySignature.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/client.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/setup.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/config/businessSettings.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/config/env.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/config/masterKey.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/dashboard/auth.test.ts",
+      "change": "added"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}
