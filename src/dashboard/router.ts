@@ -48,7 +48,7 @@ import {
   type OverridableKey,
 } from '../config/secretStore';
 import { getEffectiveCredential } from '../config/effectiveConfig';
-import { testConnection } from './credentialTest';
+import { testConnection, getLastConnectionCheck } from './credentialTest';
 import { getDb } from '../memory/db';
 import {
   updateBusinessSettings,
@@ -355,13 +355,42 @@ export function createDashboardRouter(): Router {
   // ---- Credentials (encrypted dashboard override store) ----------------------
   router.get('/api/dashboard/credentials', (_req, res) => {
     const configuredOverrides = new Set(listConfiguredOverrideKeys());
-    const result: Record<string, { source: 'override' | 'env' | 'unset'; masked: string | null }> = {};
+    const result: Record<
+      string,
+      {
+        source: 'override' | 'env' | 'unset';
+        masked: string | null;
+        lastCheckedAt: string | null;
+        lastCheckOk: boolean | null;
+        lastCheckDetail: string | null;
+      }
+    > = {};
     for (const key of OVERRIDABLE_KEYS) {
       const effective = getEffectiveCredential(key);
       const source = configuredOverrides.has(key) ? 'override' : effective ? 'env' : 'unset';
-      result[key] = { source, masked: effective ? maskSecret(effective) : null };
+      const lastCheck = getLastConnectionCheck(key);
+      result[key] = {
+        source,
+        masked: effective ? maskSecret(effective) : null,
+        lastCheckedAt: lastCheck?.testedAt ?? null,
+        lastCheckOk: lastCheck?.ok ?? null,
+        lastCheckDetail: lastCheck?.detail ?? null,
+      };
     }
     res.json(result);
+  });
+
+  // Real webhook connection information — the exact route Meta must call and
+  // whether a verify token is currently configured (never its value). Built
+  // from the incoming request's own host, so it can never drift from the
+  // actual deployed URL the way a hand-typed doc value could.
+  router.get('/api/dashboard/webhook-info', (req, res) => {
+    const webhookUrl = `${req.protocol}://${req.get('host')}/webhook`;
+    res.json({
+      webhookUrl,
+      verifyTokenConfigured: Boolean(getEffectiveCredential('WHATSAPP_VERIFY_TOKEN')),
+      appSecretConfigured: Boolean(getEffectiveCredential('META_APP_SECRET')),
+    });
   });
 
   router.put('/api/dashboard/credentials/:key', (req, res) => {

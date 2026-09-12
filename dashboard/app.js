@@ -670,9 +670,10 @@ const CREDENTIAL_GROUPS = [
 
 route('#/integrations', 'Integrations', 'Configuration status only — opening this page never makes a real API call.', async (view) => {
   async function draw() {
-    const [statusData, credentials] = await Promise.all([
+    const [statusData, credentials, webhookInfo] = await Promise.all([
       api('/api/dashboard/integrations'),
       api('/api/dashboard/credentials'),
+      api('/api/dashboard/webhook-info'),
     ]);
     view.innerHTML = `
       <section class="panel">
@@ -687,6 +688,17 @@ route('#/integrations', 'Integrations', 'Configuration status only — opening t
       </section>
 
       <section class="panel" style="margin-top:16px">
+        <h3>WhatsApp webhook</h3>
+        <p class="muted">Enter this exact URL as the Callback URL in Meta's WhatsApp App → Configuration → Webhook screen, along with the Verify Token value you set below (WHATSAPP_VERIFY_TOKEN).</p>
+        <dl class="detail-grid">
+          <dt>Webhook URL (Callback URL)</dt><dd class="file">${esc(webhookInfo.webhookUrl)}</dd>
+          <dt>Verify token</dt><dd>${webhookInfo.verifyTokenConfigured ? badge('Configured', 'green') : badge('Not configured', 'red')}</dd>
+          <dt>App secret (signature verification)</dt><dd>${webhookInfo.appSecretConfigured ? badge('Configured', 'green') : badge('Not configured', 'red')}</dd>
+        </dl>
+        <p class="muted" style="margin-top:8px">Meta calls this exact URL for both the one-time GET verification handshake and every inbound POST message event — there is only one webhook route in this application, so whatever you configure here is exactly what Meta will reach.</p>
+      </section>
+
+      <section class="panel" style="margin-top:16px">
         <h3>Credential overrides</h3>
         <p class="muted">Entering a value here overrides the server's .env for that key at runtime, without a restart. Values are encrypted at rest and never shown back to you — only a masked preview.</p>
         ${CREDENTIAL_GROUPS.map(
@@ -694,13 +706,17 @@ route('#/integrations', 'Integrations', 'Configuration status only — opening t
           <h3 style="margin-top:20px">${esc(group.title)}</h3>
           ${group.keys
             .map((key) => {
-              const info = credentials[key] || { source: 'unset', masked: null };
+              const info = credentials[key] || { source: 'unset', masked: null, lastCheckedAt: null, lastCheckOk: null, lastCheckDetail: null };
+              const lastCheckLine = info.lastCheckedAt
+                ? `<div class="muted" style="font-size:11px;margin-top:4px">Last checked ${formatDate(info.lastCheckedAt)}: <span style="color:${info.lastCheckOk ? '#0e8f68' : '#c0453f'}">${esc(info.lastCheckDetail || '')}</span></div>`
+                : '';
               return `
               <div class="detail-grid" data-key="${key}">
                 <label class="muted">${esc(key)}</label>
                 <div>
                   <span class="file">${info.masked ? esc(info.masked) : 'not set'}</span>
                   ${badge(info.source, info.source === 'override' ? 'blue' : info.source === 'env' ? 'green' : 'muted')}
+                  ${lastCheckLine}
                 </div>
                 <span></span>
                 <div class="toolbar" style="margin:6px 0">

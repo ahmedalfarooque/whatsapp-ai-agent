@@ -525,6 +525,35 @@ describe('dashboard', () => {
     expect(res.status).toBe(400);
   });
 
+  it('records and reports the last connection test result per credential', async () => {
+    const before = await agent.get('/api/dashboard/credentials');
+    expect(before.body.WHATSAPP_ACCESS_TOKEN.lastCheckedAt).toBeNull();
+
+    const testRes = await agent.post('/api/dashboard/credentials/WHATSAPP_ACCESS_TOKEN/test');
+    expect(typeof testRes.body.ok).toBe('boolean');
+
+    const after = await agent.get('/api/dashboard/credentials');
+    expect(after.body.WHATSAPP_ACCESS_TOKEN.lastCheckedAt).toBeTruthy();
+    expect(after.body.WHATSAPP_ACCESS_TOKEN.lastCheckOk).toBe(testRes.body.ok);
+    expect(after.body.WHATSAPP_ACCESS_TOKEN.lastCheckDetail).toBe(testRes.body.detail);
+  });
+
+  // ---- Webhook info ----------------------------------------------------------
+  it('exposes the real webhook URL matching the actual webhook route, never the verify token value', async () => {
+    const res = await agent.get('/api/dashboard/webhook-info');
+    expect(res.status).toBe(200);
+    expect(res.body.webhookUrl).toMatch(/\/webhook$/);
+    expect(typeof res.body.verifyTokenConfigured).toBe('boolean');
+    expect(typeof res.body.appSecretConfigured).toBe('boolean');
+    expect(JSON.stringify(res.body)).not.toContain(process.env.WHATSAPP_VERIFY_TOKEN);
+    expect(JSON.stringify(res.body)).not.toContain(process.env.META_APP_SECRET);
+  });
+
+  it('rejects an unauthenticated request to webhook-info', async () => {
+    const res = await request(app).get('/api/dashboard/webhook-info');
+    expect(res.status).toBe(401);
+  });
+
   // ---- Project sync --------------------------------------------------------
   it('project-sync view reads real repository coordination state', async () => {
     const res = await agent.get('/api/dashboard/project-sync');

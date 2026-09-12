@@ -276,6 +276,36 @@ From the dashboard you can:
   `calendars.get`) — the dashboard never claims "Connected" without one of
   these succeeding, and opening the page itself never calls any provider.
 
+### Connecting the real WhatsApp number from the dashboard (no code edits)
+
+The Integrations page also shows a **WhatsApp webhook** panel with the exact
+callback URL Meta needs — computed live from the request that loaded the
+page, so it can never drift from the actual `/webhook` route the app
+implements. To go from a fresh deploy to a live connection:
+
+1. Log in to `/dashboard` and open **Integrations**.
+2. Enter your real `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
+   `WHATSAPP_VERIFY_TOKEN`, and `META_APP_SECRET` and **Save** each.
+3. Click **Test connection** on the WhatsApp row — this makes one real,
+   bounded call to the Graph API to confirm the token and phone number ID
+   actually work, and records a timestamped last-check result you can
+   revisit later without re-testing.
+4. Copy the **Webhook URL** shown in the WhatsApp webhook panel and, in
+   Meta's App → WhatsApp → Configuration screen, set it as the **Callback
+   URL** together with the same verify-token value from step 2, then click
+   **Verify and save** — Meta calls this exact URL to complete the GET
+   handshake.
+5. Subscribe to the **messages** field, then send a WhatsApp message to
+   your business number from a real phone.
+6. Confirm the message appears processed (check `docker compose logs app`,
+   or the dashboard's Conversations page) and that a reply arrives back on
+   WhatsApp.
+
+Until step 6 has actually happened with a real message, do not describe the
+system as "live" — a successful Test connection or a verified webhook only
+means configuration is correct, not that a real message has completed the
+full round trip.
+
 A dashboard credential override always takes precedence over `.env` for
 that one key; clearing the override reverts to `.env`. Production's
 startup-time required-credential check (`src/config/env.ts`) is

@@ -9,6 +9,22 @@ export interface ConnectionTestResult {
   detail: string;
 }
 
+export interface LastConnectionCheck extends ConnectionTestResult {
+  testedAt: string;
+}
+
+/**
+ * Last test result per credential, kept in memory for the life of the
+ * process — deliberately not persisted to the database. It's operational
+ * status, not business data, and "unknown since restart" is an honest,
+ * safe default (never shows a stale "Connected" from a previous process).
+ */
+const lastResults = new Map<OverridableKey, LastConnectionCheck>();
+
+export function getLastConnectionCheck(key: OverridableKey): LastConnectionCheck | null {
+  return lastResults.get(key) ?? null;
+}
+
 /**
  * Runs a real, bounded connectivity check for one integration using its
  * EFFECTIVE credential (dashboard override if set, else .env). Never
@@ -18,6 +34,12 @@ export interface ConnectionTestResult {
  * actually succeeding.
  */
 export async function testConnection(key: OverridableKey): Promise<ConnectionTestResult> {
+  const result = await runConnectionTest(key);
+  lastResults.set(key, { ...result, testedAt: new Date().toISOString() });
+  return result;
+}
+
+async function runConnectionTest(key: OverridableKey): Promise<ConnectionTestResult> {
   switch (key) {
     case 'WHATSAPP_ACCESS_TOKEN':
     case 'WHATSAPP_PHONE_NUMBER_ID':
