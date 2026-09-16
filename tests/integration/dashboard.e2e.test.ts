@@ -557,8 +557,8 @@ describe('dashboard', () => {
   // ---- WhatsApp production setup (manual config + Save + Sync) ---------------
   it('rejects Save Configuration when a required field is missing', async () => {
     const res = await agent.post('/api/dashboard/whatsapp/configure').send({
-      wabaId: 'waba_1',
-      phoneNumberId: 'phone_1',
+      wabaId: '1111111111',
+      phoneNumberId: '2222222222',
       accessToken: 'token_1',
       verifyToken: 'verify_1',
       appSecret: 'secret_1',
@@ -570,8 +570,8 @@ describe('dashboard', () => {
 
   it('rejects Save Configuration with a non-URL webhook value', async () => {
     const res = await agent.post('/api/dashboard/whatsapp/configure').send({
-      wabaId: 'waba_1',
-      phoneNumberId: 'phone_1',
+      wabaId: '1111111111',
+      phoneNumberId: '2222222222',
       accessToken: 'token_1',
       verifyToken: 'verify_1',
       appSecret: 'secret_1',
@@ -581,10 +581,23 @@ describe('dashboard', () => {
     expect(res.body.fields).toContain('webhookUrl');
   });
 
+  it('rejects a non-numeric WABA ID or Phone Number ID (e.g. an email a browser autofilled)', async () => {
+    const res = await agent.post('/api/dashboard/whatsapp/configure').send({
+      wabaId: 'someone@example.com',
+      phoneNumberId: '2222222222',
+      accessToken: 'token_1',
+      verifyToken: 'verify_1',
+      appSecret: 'secret_1',
+      webhookUrl: 'https://tunnel.example.com/webhook',
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.fields).toContain('wabaId');
+  });
+
   it('Save Configuration persists all six fields and moves status to saved (never live) without echoing secrets', async () => {
     const saveRes = await agent.post('/api/dashboard/whatsapp/configure').send({
-      wabaId: 'waba_test_123',
-      phoneNumberId: 'phone_test_456',
+      wabaId: '1388480302719892',
+      phoneNumberId: '937660752766640',
       accessToken: 'super-secret-token-value',
       verifyToken: 'super-secret-verify-value',
       appSecret: 'super-secret-app-value',
@@ -598,8 +611,8 @@ describe('dashboard', () => {
     expect(statusRes.status).toBe(200);
     expect(statusRes.body.syncStatus).toBe('saved');
     expect(statusRes.body.webhookUrl).toBe('https://tunnel.example.com/webhook');
-    expect(statusRes.body.wabaId).toBe('waba_test_123');
-    expect(statusRes.body.phoneNumberId).toBe('phone_test_456');
+    expect(statusRes.body.wabaId).toBe('1388480302719892');
+    expect(statusRes.body.phoneNumberId).toBe('937660752766640');
     expect(statusRes.body.configured).toEqual({
       wabaId: true,
       phoneNumberId: true,

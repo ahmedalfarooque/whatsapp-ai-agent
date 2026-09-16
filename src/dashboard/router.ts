@@ -441,6 +441,14 @@ export function createDashboardRouter(): Router {
       res.status(400).json({ error: 'validation_failed', fields: ['webhookUrl'] });
       return;
     }
+    // WABA ID and Phone Number ID are Meta-issued numeric identifiers, never
+    // email addresses or other text — reject anything else outright, in case
+    // a browser autofilled the wrong value into the form before submit.
+    const numericFieldErrors = (['wabaId', 'phoneNumberId'] as const).filter((key) => !/^\d+$/.test(fields[key]!.trim()));
+    if (numericFieldErrors.length > 0) {
+      res.status(400).json({ error: 'validation_failed', fields: numericFieldErrors });
+      return;
+    }
 
     const adminUserId = req.adminUserId as number;
     setSecret('WHATSAPP_BUSINESS_ACCOUNT_ID', wabaId.trim(), adminUserId);

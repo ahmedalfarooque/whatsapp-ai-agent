@@ -661,25 +661,62 @@ route('#/ai', 'AI', 'Current agent configuration — no secrets are shown here.'
 
 const OPTIONAL_CREDENTIAL_GROUPS = [{ title: 'Google Calendar', keys: ['GOOGLE_CLIENT_EMAIL', 'GOOGLE_PRIVATE_KEY'] }];
 
+// Browsers' password managers autofill by structural heuristic (a text field
+// immediately preceding a password field inside a <form> reads as "username
+// + password"), largely ignoring autocomplete="off" for that judgment. These
+// fields hold WhatsApp/Meta configuration, never login credentials, so every
+// input below gets a form-unique id, autocomplete="new-password" (the value
+// Chromium actually honors to suppress both save-prompts and autofill —
+// plain "off" is not reliable), and the assorted per-manager "ignore this
+// field" attributes. A decoy username/password pair (see waDecoyFields) sits
+// before the real fields in the DOM to absorb whatever the browser still
+// insists on offering.
 function pwField(name, label, help, value) {
+  const id = `wa-field-${name}`;
   return `
     <div class="field">
-      <label for="${name}">${esc(label)}</label>
+      <label for="${id}">${esc(label)}</label>
       <div class="pw-wrap">
-        <input id="${name}" name="${name}" type="password" autocomplete="off" placeholder="${value ? 'Saved — enter a new value to replace' : 'Enter value'}" />
-        <button type="button" class="pw-toggle" data-for="${name}" aria-label="Show value">Show</button>
+        <input id="${id}" name="${name}" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" spellcheck="false" placeholder="${value ? 'Saved — enter a new value to replace' : 'Enter value'}" />
+        <button type="button" class="pw-toggle" data-for="${id}" aria-label="Show value">Show</button>
       </div>
       ${help ? `<p class="field-help">${help}</p>` : ''}
     </div>`;
 }
 
-function textField(name, label, help, value) {
+function textField(name, label, help, value, opts = {}) {
+  const id = `wa-field-${name}`;
+  const numericAttrs = opts.numeric ? ' inputmode="numeric" pattern="[0-9]*"' : '';
   return `
     <div class="field">
-      <label for="${name}">${esc(label)}</label>
-      <input id="${name}" name="${name}" type="text" value="${esc(value || '')}" autocomplete="off" />
+      <label for="${id}">${esc(label)}</label>
+      <input id="${id}" name="${name}" type="text" value="${esc(value || '')}" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other"${numericAttrs} />
       ${help ? `<p class="field-help">${help}</p>` : ''}
     </div>`;
+}
+
+// Invisible (but present-in-DOM, not display:none) decoy username/password
+// pair — the classic, documented mitigation for browsers that fill a text+
+// password pair regardless of autocomplete hints. Placed first in the form
+// so it, not the real fields, is whatever the browser's heuristic targets.
+// Excluded by name from the real payload (see readFormFields).
+function autofillDecoy() {
+  return `
+    <div aria-hidden="true" style="position:absolute;width:1px;height:1px;overflow:hidden;left:-9999px">
+      <input type="text" name="username" autocomplete="username" tabindex="-1" />
+      <input type="password" name="password" autocomplete="current-password" tabindex="-1" />
+    </div>`;
+}
+
+// Reads only the named, expected fields from a form — never a blind
+// Object.fromEntries(new FormData(form).entries()), so a decoy or any
+// browser-injected extra field can never leak into the JSON sent to the server.
+function readFormFields(form, names) {
+  const payload = {};
+  for (const name of names) {
+    payload[name] = form.elements.namedItem(name)?.value ?? '';
+  }
+  return payload;
 }
 
 function connectionDot(live) {
@@ -719,9 +756,10 @@ route('#/integrations', 'Integrations', 'Connect your production WhatsApp Busine
         <h3>WhatsApp Business</h3>
         <p class="muted">Enter your production WhatsApp Business details below, save, then click Sync WhatsApp to verify the connection with Meta.</p>
 
-        <form id="wa-form">
-          ${textField('wabaId', 'WhatsApp Business Account ID (WABA ID)', 'From Meta Business Manager → WhatsApp Accounts.', waStatus.wabaId)}
-          ${textField('phoneNumberId', 'Phone Number ID', 'From Meta → WhatsApp → API Setup, for the number you are sending from.', waStatus.phoneNumberId)}
+        <form id="wa-form" autocomplete="off">
+          ${autofillDecoy()}
+          ${textField('wabaId', 'WhatsApp Business Account ID (WABA ID)', 'Numbers only, from Meta Business Manager → WhatsApp Accounts.', waStatus.wabaId, { numeric: true })}
+          ${textField('phoneNumberId', 'Phone Number ID', 'Numbers only, from Meta → WhatsApp → API Setup, for the number you are sending from.', waStatus.phoneNumberId, { numeric: true })}
           ${pwField('accessToken', 'Access Token', 'A permanent System User token with WhatsApp messaging permission.', waStatus.configured.accessToken)}
           ${pwField('verifyToken', 'Verify Token', 'A value you choose — enter the same value in Meta\'s webhook setup.', waStatus.configured.verifyToken)}
           ${pwField('appSecret', 'Meta App Secret', 'From Meta App → Settings → Basic. Used to verify incoming webhook signatures.', waStatus.configured.appSecret)}
@@ -745,7 +783,8 @@ route('#/integrations', 'Integrations', 'Connect your production WhatsApp Busine
       <section class="panel setup-card ai-card" style="margin-top:16px">
         <h3>AI</h3>
         <p class="muted">Your OpenRouter API key powers the assistant's replies.</p>
-        <form id="ai-form">
+        <form id="ai-form" autocomplete="off">
+          ${autofillDecoy()}
           ${pwField('apiKey', 'OpenRouter API Key', null, openRouterSaved)}
           ${textField('model', 'Model', 'Default: openrouter/free — a free model, no payment method needed.', aiConfig.model)}
           <div class="toolbar" style="margin-top:8px">
@@ -796,8 +835,7 @@ route('#/integrations', 'Integrations', 'Connect your production WhatsApp Busine
 
     view.querySelector('#wa-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const fd = new FormData(e.target);
-      const payload = Object.fromEntries(fd.entries());
+      const payload = readFormFields(e.target, ['wabaId', 'phoneNumberId', 'accessToken', 'verifyToken', 'appSecret', 'webhookUrl']);
       try {
         await api('/api/dashboard/whatsapp/configure', {
           method: 'POST',
@@ -809,6 +847,13 @@ route('#/integrations', 'Integrations', 'Connect your production WhatsApp Busine
       } catch (error) {
         toast(error.message, 'error');
       }
+    });
+
+    view.querySelectorAll('input[inputmode="numeric"]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const digitsOnly = input.value.replace(/\D/g, '');
+        if (digitsOnly !== input.value) input.value = digitsOnly;
+      });
     });
 
     view.querySelector('#wa-sync').addEventListener('click', async (e) => {
@@ -826,8 +871,7 @@ route('#/integrations', 'Integrations', 'Connect your production WhatsApp Busine
 
     view.querySelector('#ai-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const fd = new FormData(e.target);
-      const payload = Object.fromEntries(fd.entries());
+      const payload = readFormFields(e.target, ['apiKey', 'model']);
       const result = view.querySelector('#ai-result');
       result.textContent = 'Testing…';
       try {
