@@ -21,7 +21,17 @@ function formatDate(value) {
 }
 
 async function api(url, options) {
-  const response = await fetch(url, { credentials: 'include', ...options });
+  let response;
+  try {
+    response = await fetch(url, { credentials: 'include', ...options });
+  } catch {
+    // The browser's own network-layer failure (server not running,
+    // connection refused, DNS failure) — its native message is the terse
+    // "Failed to fetch", which tells the user nothing actionable. This is
+    // the ONLY place that error can originate; every server-provided error
+    // below carries the server's own real message instead.
+    throw new Error(`Could not reach the server at ${location.origin} — is it running?`);
+  }
   let body = null;
   try {
     body = await response.json();
