@@ -1,0 +1,11 @@
+{
+  "framework": null,
+  "buildCommand": "echo no build step needed",
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "{dashboard/**,src/memory/migrations/**}"
+    }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
+}

@@ -37,3 +37,5 @@ caddy_config/
 
 # Dashboard knowledge-file edit backups (runtime, never business content of record)
 knowledge/.backups/
+
+.vercel
