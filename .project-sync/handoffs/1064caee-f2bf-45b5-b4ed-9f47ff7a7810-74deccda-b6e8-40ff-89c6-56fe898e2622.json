@@ -1,0 +1,31 @@
+{
+  "session": "1064caee-f2bf-45b5-b4ed-9f47ff7a7810",
+  "agent": "Claude-Code",
+  "task": "Fix local runtime, verify build, assess GitHub/Vercel deployment readiness",
+  "at": "2026-09-16T09:06:31.508Z",
+  "finished": true,
+  "summary": "Fixed localhost (server + .env had been cleaned up after prior QA and never restarted — not a bug, just not running; confirmed via netstat/curl before restarting). Re-verified build/typecheck/lint/tests all clean (258/258). Created a private GitHub repo (github.com/ahmedalfarooque/whatsapp-ai-agent) and pushed master with no secrets in history (verified .gitignore coverage and full git log for any accidentally-committed .env/secrets/db files — none found). Set up a Vercel project (ahmed-1673s-projects/whatsapp-ai-agent) and a new api/index.ts serverless entrypoint wrapping the existing createApp(). Discovered and partially worked around a real Vercel CLI defect: its zero-config Express-framework auto-detection (cached server-side in the linked project's settings, not overridable via vercel.json or the local project.json cache in this CLI version) drops dashboard/index.html and dashboard/styles.css from the function bundle even though the same includeFiles glob correctly retains app.js and the SQL migration files. Did NOT run an actual `vercel deploy` because it would provably crash-loop: DASHBOARD_MASTER_KEY (required unconditionally at module load) has no value in Vercel's environment, and setting it was blocked by Claude Code's own safety classifier ('Secret-Store Writes') — correctly requires the human to set it. Also determined, independent of the above, that better-sqlite3's local-file storage does not durably persist across Vercel's ephemeral serverless invocations, so Vercel is not a safe production target for this app regardless; the repo's existing Docker/VPS path is the correct one.",
+  "reason": "User asked to fix the local runtime, verify the build, and assess/attempt real GitHub + Vercel deployment, explicitly forbidding faked success and requiring an honest verdict on SQLite durability on Vercel before calling any deployment production-ready.",
+  "tests": "npm test: 36 files, 258 tests passed (unchanged). npm run typecheck/lint/build all passed. localhost: curl http://localhost:3000/health -> 200, http://localhost:3000/dashboard -> 200 (confirmed working after restart). GitHub: git log --all scan for .env/secrets/*.json/*.db found none; repo pushed successfully, verified with `gh repo view`. Vercel: `vercel build` completes with exit 0 and produces a valid function bundle including the better-sqlite3 linux-x64 prebuilt native binary (no compilation needed, ships prebuilt), but dashboard/index.html and dashboard/styles.css are verifiably absent from .vercel/output/functions/api/index.func/dashboard/ after two different config approaches (framework: null in vercel.json; directly editing the cached .vercel/project.json framework field) — both produced byte-identical output, meaning the auto-detection is external to both files in this CLI version (54.14.0; a newer 59.x is available and might behave differently, untested). No `vercel deploy` was run since it would visibly crash on every request without DASHBOARD_MASTER_KEY set.",
+  "nextSteps": "Two things need the human directly, in order: (1) decide whether Vercel is still wanted at all given the SQLite durability problem is unresolved by any change made here — recommend using the existing Docker/VPS deployment path instead, which this repo already fully supports; (2) if Vercel is still wanted for a non-durable preview/demo only, set DASHBOARD_MASTER_KEY (and DATABASE_PATH=/tmp/app.db) as Vercel environment variables via the Vercel dashboard (Claude Code's safety layer blocks writing secrets into third-party env stores directly), then either upgrade the Vercel CLI and retry `vercel build`, or have the dashboard's index.html/styles.css inlined into the Express app as string constants so they no longer depend on Vercel's static-file bundling heuristic. No further internal engineering work is outstanding against this session's explicit scope (runtime + deployment only, no redesign).",
+  "changedFiles": [
+    {
+      "path": ".gitignore",
+      "change": "modified"
+    },
+    {
+      "path": "api/index.ts",
+      "change": "added"
+    },
+    {
+      "path": "public/.gitkeep",
+      "change": "added"
+    },
+    {
+      "path": "vercel.json",
+      "change": "added"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}
