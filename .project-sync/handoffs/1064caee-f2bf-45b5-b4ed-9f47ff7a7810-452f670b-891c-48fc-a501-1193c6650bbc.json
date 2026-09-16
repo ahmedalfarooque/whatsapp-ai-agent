@@ -1,0 +1,24 @@
+{
+  "session": "1064caee-f2bf-45b5-b4ed-9f47ff7a7810",
+  "agent": "Claude-Code",
+  "task": "Fix WhatsApp form field-population and Failed-to-fetch dashboard bugs end to end",
+  "at": "2026-09-16T10:15:55.130Z",
+  "finished": true,
+  "summary": "Root-caused both reported symptoms. (1) 'WhatsApp fields populated incorrectly' — already fixed in the prior session (unique field ids, autocomplete='new-password', decoy username/password pair, explicit-field-list form submission, numeric-only server-side validation on WABA ID/Phone Number ID); re-verified intact on disk and via a full fresh browser click-through (login -> Integrations -> refresh -> edit -> save -> restart -> persistence -> Sync -> AI test), all correct: secrets always blank on load, WABA ID/Phone Number ID/Webhook URL correctly rehydrate, no console errors. (2) 'Failed to fetch' on Save/Sync/AI — root cause was simply that the Node dev server was not running at all (confirmed via netstat/curl before touching anything: connection refused, not an app bug); starting it resolved the dashboard immediately, confirmed by real request logs from the user's own live browser session succeeding right after the restart. Additionally hardened the one genuine related gap found: the dashboard's api() helper now distinguishes a real network-layer failure (server unreachable) from a server-provided error, showing 'Could not reach the server at <origin> — is it running?' instead of the browser's bare 'Failed to fetch', while every actual backend error message was already being surfaced correctly (this part was not broken).",
+  "reason": "User reported the two specific dashboard symptoms from their own PC and asked for an end-to-end diagnosis (not a guess) plus verification that the fix didn't just look right visually but that the actual frontend/backend values were correct.",
+  "tests": "npm test: 36 files, 259 tests passed (unchanged from the prior session's fix). npm run typecheck/lint/build all passed. Live verification performed on an ISOLATED port/database (3002) to avoid disturbing the user's own live session on port 3000 (their real Edge browser was actively using the real dev server on port 3000 during this session, confirmed via server request logs — a fresh admin account setup succeeded there moments after the server was restarted, and it was left running and untouched with its own data intact). On the isolated instance: fresh admin setup, login, Integrations load (all 6 fields blank), edit + Save Configuration (succeeded, 'Configuration saved'), full Node process restart, confirmed WABA ID/Phone Number ID/Webhook URL persisted and all three secrets remained blank with the 'Saved' placeholder, ran Sync WhatsApp (real Meta Graph API call, real 401 with a fake token, correctly reported, never fabricated success), ran Save & Test AI (real OpenRouter call, real 401, correctly reported), zero browser console errors throughout.",
+  "nextSteps": "No internal engineering work is outstanding against this session's explicit scope. Deployment state checked as requested, unchanged from the prior session: GitHub repo (github.com/ahmedalfarooque/whatsapp-ai-agent, private) is up to date with the latest commit; Vercel has zero deployments (none was ever run, since it would crash without DASHBOARD_MASTER_KEY set as a Vercel env var, which requires the human to set via the Vercel dashboard — Claude Code's safety layer blocks setting third-party secrets directly). No live URL exists and none should be claimed live. The user's own local dev server on port 3000 was left running with their own real admin account/data intact, exactly as they left it.",
+  "changedFiles": [
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    }
+  ],
+  "inherited": [
+    {
+      "path": "~$en Router.docx",
+      "change": "added"
+    }
+  ],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}
