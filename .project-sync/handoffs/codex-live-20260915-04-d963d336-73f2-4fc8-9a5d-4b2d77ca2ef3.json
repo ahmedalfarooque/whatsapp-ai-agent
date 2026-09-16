@@ -1,0 +1,19 @@
+{
+  "session": "codex-live-20260915-04",
+  "agent": "Codex",
+  "task": "Refresh free tunnel evidence for live test",
+  "at": "2026-09-15T20:19:32.924Z",
+  "finished": false,
+  "summary": "Applied the approved minimal change and refreshed the free HTTPS tunnel. Production now requires only WhatsApp and OpenRouter credentials; Google Calendar credentials are optional and calendar operations use the existing mock provider when either Google credential is absent.",
+  "reason": "The live WhatsApp/OpenRouter test must boot without Google Calendar credentials while preserving real-provider validation and existing development mocks.",
+  "tests": "npm test: 36 files and 250 tests passed. npm run typecheck passed. npm run lint passed. npm run build passed. Local /health and /readiness returned HTTP 200. New tunnel https://small-crabs-mix.loca.lt/readiness returned HTTP 200; its webhook verification route returned HTTP 403 for an intentionally incorrect token, confirming public reachability.",
+  "nextSteps": "Configure the existing encrypted credential store with the real WhatsApp credentials and the authorized OpenRouter free route, then attach to the authenticated Meta Developer tab and configure the callback/subscription. Browser attachment timed out, credential_overrides remains empty, no Meta settings changed, and no WhatsApp message was sent.",
+  "changedFiles": [],
+  "inherited": [
+    {
+      "path": "localtunnel-live.out",
+      "change": "added"
+    }
+  ],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

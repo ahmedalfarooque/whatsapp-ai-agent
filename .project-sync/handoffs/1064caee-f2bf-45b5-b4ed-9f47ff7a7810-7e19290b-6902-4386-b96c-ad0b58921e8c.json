@@ -1,0 +1,80 @@
+{
+  "session": "1064caee-f2bf-45b5-b4ed-9f47ff7a7810",
+  "agent": "Claude-Code",
+  "task": "Recover abandoned Codex lock; implement manual production WhatsApp/OpenRouter configuration and Sync WhatsApp activation",
+  "at": "2026-09-16T08:26:19.792Z",
+  "finished": true,
+  "summary": "Recovered the abandoned Codex writer lock (codex-live-20260916-02, stopped mid-task on usage-limit exhaustion, externally deleted by the human operator per protocol's confirmed-termination recovery path). Verified via git diff that Codex's one completed change (Google Calendar independently mockable via shouldUseMockCalendarProviders) was legitimate and left untouched. Replaced the dashboard's developer-facing 'Credential overrides' Integrations UI with a single business-facing WhatsApp Business setup card (WABA ID, Phone Number ID, Access Token, Verify Token, App Secret, Webhook URL) plus a simplified AI card, backed by: a new whatsapp_connection table for the manually-saved webhook URL and real sync/live status, a new WHATSAPP_BUSINESS_ACCOUNT_ID overridable credential key, a real syncWhatsapp() Graph API verification (token validity, phone number reachability, phone-number-belongs-to-WABA check), and a dashboard-editable OpenRouter model (default openrouter/free) via business_settings instead of env-only. Save Configuration never claims live; only a successful Sync WhatsApp does, and it always performs a genuine Meta API call with the real error surfaced on failure.",
+  "reason": "User's explicit product requirement: manual production configuration must be entered/saved/activated through the dashboard without automatic Meta/tunnel discovery, with SAVE != LIVE and no silent mock fallback in production; the pre-existing per-env-var override UI was developer-oriented and did not support a single guided WhatsApp setup + explicit Sync action.",
+  "tests": "npm test: 36 files, 258 tests passed (up from 250 baseline for this session) — added Save Configuration validation/persistence/no-secret-leak tests, a real Sync WhatsApp test (genuine outbound Graph API call, asserts boolean/string shape and no token leakage, accepts either live or failed outcome since only a fake token is available in this environment), an AI configure+test round trip, and unauthenticated-401 checks for every new route. npm run typecheck/lint/build all passed. Live browser QA on a fresh dev DB: filled and saved the new WhatsApp card (status correctly showed 'Configuration saved'), clicked Sync WhatsApp and got a REAL Meta Graph API 401 rejection surfaced verbatim (fake token, as expected — no fabricated success), filled and tested the AI card (real OpenRouter 401 with a fake key, surfaced correctly), verified the top summary chips reflect actual last-check state (not just 'a key is saved'), restarted the server process and confirmed all saved configuration and last-sync status survived, and confirmed all four new API routes (whatsapp/status, whatsapp/configure, whatsapp/sync, ai/configure) return 401 after logout. Found and fixed one real bug during this QA: the AI card's test-result message was being wiped by the subsequent view re-render.",
+  "nextSteps": "Only legitimate external work remains: real Meta production credentials (System User token, App Secret, Verify Token) for WABA 1388480302719892 / phone 937660752766640, and a real public HTTPS webhook URL registered with Meta, entered through this new dashboard UI by the account owner. No further internal engineering work is outstanding against the explicit scope of this task. Docker/tunnel/live-message verification remain unperformed in this sandboxed environment as in every prior session.",
+  "changedFiles": [
+    {
+      "path": ".env.example",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/styles.css",
+      "change": "modified"
+    },
+    {
+      "path": "localtunnel-live.err",
+      "change": "deleted"
+    },
+    {
+      "path": "localtunnel-live.out",
+      "change": "deleted"
+    },
+    {
+      "path": "src/config/businessSettings.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/config/env.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/config/whatsappConnection.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/data.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/whatsappSync.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/llm/openRouterClient.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/migrations/008_whatsapp_connection.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/migrations/009_business_settings_openrouter_model.sql",
+      "change": "added"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [
+    {
+      "path": "localtunnel-live.err",
+      "change": "modified"
+    }
+  ],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

@@ -1,0 +1,40 @@
+{
+  "session": "codex-live-20260915-03",
+  "agent": "Codex",
+  "task": "Allow real WhatsApp/OpenRouter with optional Google Calendar",
+  "at": "2026-09-15T19:35:05.023Z",
+  "finished": true,
+  "summary": "Applied the approved minimal change: production now requires only WhatsApp and OpenRouter credentials; Google Calendar credentials are optional and calendar operations use the existing mock provider when either Google credential is absent. Updated focused tests for the new provider-selection contract.",
+  "reason": "The live WhatsApp/OpenRouter test must boot without Google Calendar credentials while preserving real-provider validation and existing development mocks.",
+  "tests": "npm test: 36 files and 250 tests passed. npm run typecheck passed. npm run lint passed. npm run build passed. Local /health and /readiness returned HTTP 200. The temporary localtunnel URL returned HTTP 408 during recheck, so tunnel and Meta handshake were not verified.",
+  "nextSteps": "Restart or re-establish the authorized HTTPS tunnel, attach to the authenticated Meta Developer tab, configure the callback and subscription, then run the controlled inbound WhatsApp round trip. No credentials were entered, no Meta settings were changed, and no WhatsApp message was sent in this session.",
+  "changedFiles": [
+    {
+      "path": "tests/unit/calendar/booking.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/calendar/freeBusyQuery.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/config/env.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [
+    {
+      "path": "src/calendar/availability.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/calendar/booking.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/config/env.ts",
+      "change": "modified"
+    }
+  ],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

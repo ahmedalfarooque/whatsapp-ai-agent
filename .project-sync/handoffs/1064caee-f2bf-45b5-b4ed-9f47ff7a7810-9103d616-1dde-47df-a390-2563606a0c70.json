@@ -1,0 +1,31 @@
+{
+  "session": "1064caee-f2bf-45b5-b4ed-9f47ff7a7810",
+  "agent": "Claude-Code",
+  "task": "Final WhatsApp connection readiness pass",
+  "at": "2026-09-12T23:43:39.361Z",
+  "finished": true,
+  "summary": "Final WhatsApp connection readiness pass. Verified webhook route is singular and exact (/webhook, GET+POST), credential resolution consistently uses getEffectiveCredential() everywhere (zero raw .env reads outside config modules), and all dashboard WhatsApp operations are auth-gated. Found two genuine gaps against the required owner-facing workflow and closed them: (1) no webhook URL/verification info was shown anywhere in the dashboard, (2) no persisted last-connection-test result per credential. Added GET /api/dashboard/webhook-info (URL computed live from the request, never hardcoded) and in-memory last-check tracking surfaced via /api/dashboard/credentials. Updated the Integrations UI and README with the exact real-world connection sequence.",
+  "reason": "User's final readiness prompt required the dashboard to expose webhook URL/verification guidance and last connection test status before the app can be called ready for a real Meta WhatsApp connection, without redoing already-complete auth/secrets/settings work or adding any deferred multi-agent features.",
+  "tests": "npm test: 36 files, 252 tests passed (up from 249) — added: last-connection-check persistence test, webhook-info content/secret-leak test, webhook-info unauthenticated-401 test. npm run typecheck/lint/build all passed. Live browser pass on a fresh dev DB: logged in via first-run setup, opened Integrations, confirmed the new webhook panel renders the real /webhook URL with verify-token/app-secret shown as Configured/Not configured only (never values), clicked Test connection on WHATSAPP_ACCESS_TOKEN with no credential set and got the correct 'not configured' detail, opened Settings, logged out, confirmed /api/dashboard/credentials and /api/dashboard/webhook-info both return 401 post-logout while /health and /readiness remain 200. Docker: daemon unavailable in this environment (confirmed via `docker version`, same as every prior session) — `docker compose config` still parses cleanly; build/up remain unverified, stated honestly.",
+  "nextSteps": "No further internal engineering work remains against this task's scope. The only remaining items are external: real Meta/WhatsApp Business credentials + webhook registration with a real HTTPS domain, a real OpenRouter key, a real Google service account + calendar share, and (separately) an actual docker compose build/up verification once a Docker-capable environment is available. The system must not be called 'live' until a real WhatsApp message has completed the full inbound/outbound round trip against real credentials.",
+  "changedFiles": [
+    {
+      "path": "README.md",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

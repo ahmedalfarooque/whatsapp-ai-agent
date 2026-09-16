@@ -1,0 +1,19 @@
+{
+  "session": "codex-live-20260916-01",
+  "agent": "Codex",
+  "task": "Resume live Meta/WhatsApp verification; restart stale free tunnel only",
+  "at": "2026-09-15T23:35:05.977Z",
+  "finished": true,
+  "summary": "Verified the existing Meta Developer app is accessible in the authenticated Edge profile. Restarted only the stale free localtunnel process; the new public tunnel is https://little-phones-shop.loca.lt. No source code, WhatsApp account, phone, WABA, or payment configuration was changed.",
+  "reason": "Continue production Meta verification while preserving the approved Google Calendar optional-credentials change.",
+  "tests": "Local port 3000 is listening; local /health and /readiness returned 200. Public tunnel /health and /readiness returned 200; public /webhook returned 403 for an intentionally invalid verification request, confirming the route is reachable and rejects the wrong token. Meta Production setup visibly marks Configure Webhooks completed. Meta business verification is In review and the app is Unpublished. No credentials were entered, no token was printed, and no WhatsApp message was sent.",
+  "nextSteps": "Production live flow remains blocked until Meta permits production webhook delivery and a valid production system-user or equivalent WhatsApp token with required permissions is available. Then configure the existing encrypted dashboard store, set openrouter/free, verify WABA subscription, and run one controlled inbound/outbound test. Keep Google Calendar mock/unavailable.",
+  "changedFiles": [
+    {
+      "path": "localtunnel-live.out",
+      "change": "modified"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}
