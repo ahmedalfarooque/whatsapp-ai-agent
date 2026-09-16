@@ -75,7 +75,7 @@ export type CreateEventOutcome = CreateEventResult | CreateEventConflict | Creat
  * documented residual risk, not something this code claims to solve.
  */
 export async function createEvent(params: CreateEventParams): Promise<CreateEventOutcome> {
-  if (env.shouldUseMockProviders) {
+  if (env.shouldUseMockCalendarProviders) {
     return createEventMock(params);
   }
 

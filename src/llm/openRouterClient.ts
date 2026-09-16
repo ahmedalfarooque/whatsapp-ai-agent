@@ -1,5 +1,6 @@
 import { env } from '../config/env';
 import { getEffectiveCredential } from '../config/effectiveConfig';
+import { getBusinessSettings } from '../config/businessSettings';
 import { logger } from '../logger';
 import { fetchWithTimeout, withRetry, HttpError, isRetryableHttpError } from '../utils/retry';
 import { chatCompletionMock } from './mockOpenRouterClient';
@@ -33,7 +34,7 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
             ...(env.OPENROUTER_APP_NAME ? { 'X-Title': env.OPENROUTER_APP_NAME } : {}),
           },
           body: JSON.stringify({
-            model: env.OPENROUTER_MODEL,
+            model: getBusinessSettings().openRouterModel,
             messages: request.messages,
             tools: request.tools,
             temperature: request.temperature ?? 0.4,

@@ -6,8 +6,6 @@ const PRODUCTION_REQUIRED_KEYS = [
   'WHATSAPP_VERIFY_TOKEN',
   'META_APP_SECRET',
   'OPENROUTER_API_KEY',
-  'GOOGLE_CLIENT_EMAIL',
-  'GOOGLE_PRIVATE_KEY',
 ] as const;
 
 /** Snapshots and restores process.env around a test that mutates it. */
@@ -80,8 +78,8 @@ describe('env validation', () => {
       process.env.WHATSAPP_VERIFY_TOKEN = 'real-verify-token';
       process.env.META_APP_SECRET = 'real-app-secret';
       process.env.OPENROUTER_API_KEY = 'real-openrouter-key';
-      process.env.GOOGLE_CLIENT_EMAIL = 'real@example.iam.gserviceaccount.com';
-      process.env.GOOGLE_PRIVATE_KEY = 'real-private-key';
+      delete process.env.GOOGLE_CLIENT_EMAIL;
+      delete process.env.GOOGLE_PRIVATE_KEY;
     }
 
     it(
@@ -130,7 +128,7 @@ describe('env validation', () => {
       'rejects startup when the key is missing, even in development',
       withEnvSnapshot(async () => {
         process.env.NODE_ENV = 'development';
-        delete process.env.DASHBOARD_MASTER_KEY;
+        process.env.DASHBOARD_MASTER_KEY = '';
 
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         await expect(import('../../../src/config/env')).rejects.toThrow(

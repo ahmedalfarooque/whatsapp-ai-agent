@@ -554,6 +554,106 @@ describe('dashboard', () => {
     expect(res.status).toBe(401);
   });
 
+  // ---- WhatsApp production setup (manual config + Save + Sync) ---------------
+  it('rejects Save Configuration when a required field is missing', async () => {
+    const res = await agent.post('/api/dashboard/whatsapp/configure').send({
+      wabaId: 'waba_1',
+      phoneNumberId: 'phone_1',
+      accessToken: 'token_1',
+      verifyToken: 'verify_1',
+      appSecret: 'secret_1',
+      // webhookUrl intentionally omitted
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.fields).toContain('webhookUrl');
+  });
+
+  it('rejects Save Configuration with a non-URL webhook value', async () => {
+    const res = await agent.post('/api/dashboard/whatsapp/configure').send({
+      wabaId: 'waba_1',
+      phoneNumberId: 'phone_1',
+      accessToken: 'token_1',
+      verifyToken: 'verify_1',
+      appSecret: 'secret_1',
+      webhookUrl: 'not-a-url',
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.fields).toContain('webhookUrl');
+  });
+
+  it('Save Configuration persists all six fields and moves status to saved (never live) without echoing secrets', async () => {
+    const saveRes = await agent.post('/api/dashboard/whatsapp/configure').send({
+      wabaId: 'waba_test_123',
+      phoneNumberId: 'phone_test_456',
+      accessToken: 'super-secret-token-value',
+      verifyToken: 'super-secret-verify-value',
+      appSecret: 'super-secret-app-value',
+      webhookUrl: 'https://tunnel.example.com/webhook',
+    });
+    expect(saveRes.status).toBe(200);
+    expect(saveRes.body).toEqual({ ok: true, status: 'saved' });
+    expect(JSON.stringify(saveRes.body)).not.toContain('super-secret');
+
+    const statusRes = await agent.get('/api/dashboard/whatsapp/status');
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body.syncStatus).toBe('saved');
+    expect(statusRes.body.webhookUrl).toBe('https://tunnel.example.com/webhook');
+    expect(statusRes.body.wabaId).toBe('waba_test_123');
+    expect(statusRes.body.phoneNumberId).toBe('phone_test_456');
+    expect(statusRes.body.configured).toEqual({
+      wabaId: true,
+      phoneNumberId: true,
+      accessToken: true,
+      verifyToken: true,
+      appSecret: true,
+      webhookUrl: true,
+    });
+    expect(JSON.stringify(statusRes.body)).not.toContain('super-secret');
+  });
+
+  it('Sync WhatsApp performs a real Meta verification and never returns the access token, regardless of outcome', async () => {
+    const res = await agent.post('/api/dashboard/whatsapp/sync');
+    expect(res.status).toBe(200);
+    expect(typeof res.body.ok).toBe('boolean');
+    expect(typeof res.body.detail).toBe('string');
+    expect(JSON.stringify(res.body)).not.toContain('super-secret-token-value');
+
+    // A real sync attempt (success or failure) is recorded and survives re-read.
+    const statusRes = await agent.get('/api/dashboard/whatsapp/status');
+    expect(['live', 'failed']).toContain(statusRes.body.syncStatus);
+    expect(statusRes.body.lastSyncAt).toBeTruthy();
+    expect(statusRes.body.lastSyncDetail).toBe(res.body.detail);
+  });
+
+  it('rejects unauthenticated requests to every WhatsApp setup route', async () => {
+    const unauth = request(app);
+    expect((await unauth.get('/api/dashboard/whatsapp/status')).status).toBe(401);
+    expect((await unauth.post('/api/dashboard/whatsapp/configure').send({})).status).toBe(401);
+    expect((await unauth.post('/api/dashboard/whatsapp/sync')).status).toBe(401);
+  });
+
+  // ---- AI (OpenRouter) simplified save+test ----------------------------------
+  it('rejects AI configure without an API key', async () => {
+    const res = await agent.post('/api/dashboard/ai/configure').send({ model: 'openrouter/free' });
+    expect(res.status).toBe(400);
+  });
+
+  it('AI configure persists the key/model and returns a real (non-fabricated) connection result', async () => {
+    const res = await agent.post('/api/dashboard/ai/configure').send({ apiKey: 'sk-or-fake-test-key', model: 'openrouter/free' });
+    expect(res.status).toBe(200);
+    expect(typeof res.body.ok).toBe('boolean');
+    expect(typeof res.body.detail).toBe('string');
+    expect(JSON.stringify(res.body)).not.toContain('sk-or-fake-test-key');
+
+    const aiRes = await agent.get('/api/dashboard/ai');
+    expect(aiRes.body.model).toBe('openrouter/free');
+  });
+
+  it('rejects an unauthenticated request to AI configure', async () => {
+    const res = await request(app).post('/api/dashboard/ai/configure').send({ apiKey: 'x' });
+    expect(res.status).toBe(401);
+  });
+
   // ---- Project sync --------------------------------------------------------
   it('project-sync view reads real repository coordination state', async () => {
     const res = await agent.get('/api/dashboard/project-sync');

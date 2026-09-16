@@ -24,8 +24,6 @@ const PRODUCTION_REQUIRED_KEYS = [
   'WHATSAPP_VERIFY_TOKEN',
   'META_APP_SECRET',
   'OPENROUTER_API_KEY',
-  'GOOGLE_CLIENT_EMAIL',
-  'GOOGLE_PRIVATE_KEY',
 ] as const;
 
 const envSchema = z
@@ -38,12 +36,16 @@ const envSchema = z
     // Optional at the schema level — see PRODUCTION_REQUIRED_KEYS above.
     WHATSAPP_ACCESS_TOKEN: z.string().optional().default(''),
     WHATSAPP_PHONE_NUMBER_ID: z.string().optional().default(''),
+    // Not required to send/receive messages (only the phone number ID is),
+    // but used by the dashboard's Sync WhatsApp step to verify the
+    // configured phone number actually belongs to this WABA.
+    WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().optional().default(''),
     WHATSAPP_VERIFY_TOKEN: z.string().optional().default(''),
     META_APP_SECRET: z.string().optional().default(''),
     WHATSAPP_API_VERSION: z.string().default('v21.0'),
 
     OPENROUTER_API_KEY: z.string().optional().default(''),
-    OPENROUTER_MODEL: z.string().default('openai/gpt-4o-mini'),
+    OPENROUTER_MODEL: z.string().default('openrouter/free'),
     OPENROUTER_SITE_URL: z.string().optional().default(''),
     OPENROUTER_APP_NAME: z.string().optional().default('WhatsApp AI Agent'),
 
@@ -95,7 +97,10 @@ const envSchema = z
       });
     }
 
-    // Real credentials are mandatory ONLY in production. Development and
+    // WhatsApp and OpenRouter credentials are mandatory ONLY in production.
+    // Google Calendar is optional for deployments that do not enable it; in
+    // that case calendar operations deliberately remain on the mock provider.
+    // Development and
     // test never require them — this is what makes `npm run dev` safe to
     // start without Meta/OpenRouter/Google credentials, and is also why
     // this check must never be loosened to cover 'production' accidentally
@@ -168,6 +173,14 @@ export const env = {
    * requires all real credentials to be present (enforced above).
    */
   shouldUseMockProviders: raw.NODE_ENV !== 'production',
+  /**
+   * Calendar is independently mockable when no complete Google service
+   * account is configured. This permits a live WhatsApp/OpenRouter test
+   * without inventing Google credentials or changing booking semantics when
+   * Google is configured.
+   */
+  shouldUseMockCalendarProviders:
+    raw.NODE_ENV !== 'production' || !raw.GOOGLE_CLIENT_EMAIL || !raw.GOOGLE_PRIVATE_KEY,
 };
 
 export type Env = typeof env;

@@ -5,13 +5,16 @@ import { getSecretEncryptionKey } from './masterKey';
 /**
  * The exact set of credential fields that may be overridden from the
  * dashboard, at runtime, on top of (never instead of) the process's real
- * .env-derived production-required credentials. Keep this in sync with
- * PRODUCTION_REQUIRED_KEYS in src/config/env.ts — it is intentionally the
- * same literal list, not re-derived, so both stay reviewable at a glance.
+ * .env-derived production-required credentials. This is a SUPERSET of
+ * PRODUCTION_REQUIRED_KEYS in src/config/env.ts — every production-required
+ * key is overridable here, plus a couple of fields (WABA ID) that are not
+ * required to run the app but are used by the dashboard's Sync WhatsApp
+ * verification step.
  */
 export const OVERRIDABLE_KEYS = [
   'WHATSAPP_ACCESS_TOKEN',
   'WHATSAPP_PHONE_NUMBER_ID',
+  'WHATSAPP_BUSINESS_ACCOUNT_ID',
   'WHATSAPP_VERIFY_TOKEN',
   'META_APP_SECRET',
   'OPENROUTER_API_KEY',
@@ -23,6 +26,21 @@ export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number];
 
 export function isOverridableKey(value: string): value is OverridableKey {
   return (OVERRIDABLE_KEYS as readonly string[]).includes(value);
+}
+
+/**
+ * Keys that identify configuration rather than a secret — safe to display in
+ * full in the dashboard UI (never just a masked preview). Still stored
+ * through the same encrypted override store as everything else here, so
+ * there's exactly one credential-override mechanism, not two.
+ */
+export const NON_SECRET_OVERRIDABLE_KEYS: readonly OverridableKey[] = [
+  'WHATSAPP_PHONE_NUMBER_ID',
+  'WHATSAPP_BUSINESS_ACCOUNT_ID',
+];
+
+export function isSecretOverridableKey(key: OverridableKey): boolean {
+  return !NON_SECRET_OVERRIDABLE_KEYS.includes(key);
 }
 
 interface CredentialOverrideRow {

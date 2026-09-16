@@ -47,7 +47,7 @@ export function getServiceStatuses(): ServiceStatus[] {
     {
       name: 'OpenRouter',
       state: mockLabel ? 'Development Mock' : 'Production',
-      detail: mockLabel ? 'No real AI calls are made' : `Configured (model: ${env.OPENROUTER_MODEL})`,
+      detail: mockLabel ? 'No real AI calls are made' : `Configured (model: ${getBusinessSettings().openRouterModel})`,
     },
     {
       name: 'Google Calendar',
@@ -141,7 +141,7 @@ export function getAiConfig(): AiConfigView {
   return {
     mode: env.NODE_ENV,
     providerMode: env.shouldUseMockProviders ? 'mock' : 'production',
-    model: env.OPENROUTER_MODEL,
+    model: getBusinessSettings().openRouterModel,
     maxToolRounds: env.MAX_TOOL_ROUNDS,
     conversationHistoryLimit: getBusinessSettings().conversationHistoryLimit,
     toolsEnabled: ['check_availability', 'book_appointment'],
@@ -177,7 +177,7 @@ export function getIntegrations(): IntegrationView[] {
       name: 'OpenRouter',
       state: mock ? 'Development Mock' : openRouterConfigured ? 'Configured' : 'Missing configuration',
       configured: openRouterConfigured,
-      detail: `Model: ${env.OPENROUTER_MODEL}`,
+      detail: `Model: ${getBusinessSettings().openRouterModel}`,
     },
     {
       name: 'Google Calendar',

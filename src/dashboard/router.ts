@@ -54,6 +54,8 @@ import {
   updateBusinessSettings,
   BusinessSettingsValidationError,
 } from '../config/businessSettings';
+import { getWhatsappConnectionState, markWhatsappConfigurationSaved } from '../config/whatsappConnection';
+import { syncWhatsapp } from './whatsappSync';
 
 function parsePageParams(req: Request): { limit: number; offset: number } {
   const limit = Number.parseInt(String(req.query.limit ?? '25'), 10);
@@ -391,6 +393,96 @@ export function createDashboardRouter(): Router {
       verifyTokenConfigured: Boolean(getEffectiveCredential('WHATSAPP_VERIFY_TOKEN')),
       appSecretConfigured: Boolean(getEffectiveCredential('META_APP_SECRET')),
     });
+  });
+
+  // ---- WhatsApp production setup (manual config → Save → Sync) --------------
+  // Single, business-facing view of the six WhatsApp fields plus the manually
+  // saved webhook URL and the real, persisted connection/sync state — this is
+  // what the simplified "WhatsApp Business" card in the dashboard reads.
+  router.get('/api/dashboard/whatsapp/status', (req, res) => {
+    const state = getWhatsappConnectionState();
+    const configured = {
+      wabaId: Boolean(getEffectiveCredential('WHATSAPP_BUSINESS_ACCOUNT_ID')),
+      phoneNumberId: Boolean(getEffectiveCredential('WHATSAPP_PHONE_NUMBER_ID')),
+      accessToken: Boolean(getEffectiveCredential('WHATSAPP_ACCESS_TOKEN')),
+      verifyToken: Boolean(getEffectiveCredential('WHATSAPP_VERIFY_TOKEN')),
+      appSecret: Boolean(getEffectiveCredential('META_APP_SECRET')),
+      webhookUrl: Boolean(state.webhookUrl),
+    };
+    res.json({
+      syncStatus: state.syncStatus,
+      lastSyncAt: state.lastSyncAt,
+      lastSyncDetail: state.lastSyncDetail,
+      displayPhoneNumber: state.displayPhoneNumber,
+      wabaName: state.wabaName,
+      webhookUrl: state.webhookUrl,
+      // The actual route Meta will reach, derived from this request — shown
+      // alongside the saved value so a mismatch is obvious at a glance.
+      actualWebhookRoute: `${req.protocol}://${req.get('host')}/webhook`,
+      configured,
+      // Non-secret configuration values, shown in full (never masked) since
+      // they identify the account, not a credential.
+      wabaId: getEffectiveCredential('WHATSAPP_BUSINESS_ACCOUNT_ID') || null,
+      phoneNumberId: getEffectiveCredential('WHATSAPP_PHONE_NUMBER_ID') || null,
+    });
+  });
+
+  router.post('/api/dashboard/whatsapp/configure', (req, res) => {
+    const { wabaId, phoneNumberId, accessToken, verifyToken, appSecret, webhookUrl } = req.body ?? {};
+    const fields: Record<string, string> = { wabaId, phoneNumberId, accessToken, verifyToken, appSecret, webhookUrl };
+    const missing = Object.entries(fields)
+      .filter(([, v]) => typeof v !== 'string' || v.trim().length === 0)
+      .map(([k]) => k);
+    if (missing.length > 0) {
+      res.status(400).json({ error: 'validation_failed', fields: missing });
+      return;
+    }
+    if (!/^https?:\/\/.+/i.test(webhookUrl.trim())) {
+      res.status(400).json({ error: 'validation_failed', fields: ['webhookUrl'] });
+      return;
+    }
+
+    const adminUserId = req.adminUserId as number;
+    setSecret('WHATSAPP_BUSINESS_ACCOUNT_ID', wabaId.trim(), adminUserId);
+    setSecret('WHATSAPP_PHONE_NUMBER_ID', phoneNumberId.trim(), adminUserId);
+    setSecret('WHATSAPP_ACCESS_TOKEN', accessToken.trim(), adminUserId);
+    setSecret('WHATSAPP_VERIFY_TOKEN', verifyToken.trim(), adminUserId);
+    setSecret('META_APP_SECRET', appSecret.trim(), adminUserId);
+    markWhatsappConfigurationSaved(webhookUrl.trim());
+
+    res.json({ ok: true, status: 'saved' });
+  });
+
+  // Explicit production activation step: performs a REAL Graph API
+  // verification against the saved credentials. Never simulated, never
+  // claims success without an actual 200 from Meta. See whatsappSync.ts.
+  router.post('/api/dashboard/whatsapp/sync', async (_req, res) => {
+    try {
+      const result = await syncWhatsapp();
+      res.json(result);
+    } catch (error) {
+      logger.error({ error }, 'dashboard: WhatsApp sync threw unexpectedly');
+      res.status(500).json({ ok: false, detail: 'internal_server_error' });
+    }
+  });
+
+  // ---- AI (OpenRouter) — simplified single-action save+test ------------------
+  router.post('/api/dashboard/ai/configure', async (req, res) => {
+    const apiKey = req.body?.apiKey;
+    const model = typeof req.body?.model === 'string' && req.body.model.trim() ? req.body.model.trim() : 'openrouter/free';
+    if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
+      res.status(400).json({ error: 'validation_failed', fields: ['apiKey'] });
+      return;
+    }
+    setSecret('OPENROUTER_API_KEY', apiKey.trim(), req.adminUserId as number);
+    updateBusinessSettings({ openRouterModel: model });
+    try {
+      const result = await testConnection('OPENROUTER_API_KEY');
+      res.json(result);
+    } catch (error) {
+      logger.error({ error }, 'dashboard: AI configure/test threw unexpectedly');
+      res.status(500).json({ ok: false, detail: 'internal_server_error' });
+    }
   });
 
   router.put('/api/dashboard/credentials/:key', (req, res) => {

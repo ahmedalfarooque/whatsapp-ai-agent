@@ -659,64 +659,116 @@ route('#/ai', 'AI', 'Current agent configuration — no secrets are shown here.'
 // Integrations
 // ---------------------------------------------------------------------
 
-const CREDENTIAL_GROUPS = [
-  {
-    title: 'WhatsApp Cloud API',
-    keys: ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_VERIFY_TOKEN', 'META_APP_SECRET'],
-  },
-  { title: 'OpenRouter', keys: ['OPENROUTER_API_KEY'] },
-  { title: 'Google Calendar', keys: ['GOOGLE_CLIENT_EMAIL', 'GOOGLE_PRIVATE_KEY'] },
-];
+const OPTIONAL_CREDENTIAL_GROUPS = [{ title: 'Google Calendar', keys: ['GOOGLE_CLIENT_EMAIL', 'GOOGLE_PRIVATE_KEY'] }];
 
-route('#/integrations', 'Integrations', 'Configuration status only — opening this page never makes a real API call.', async (view) => {
+function pwField(name, label, help, value) {
+  return `
+    <div class="field">
+      <label for="${name}">${esc(label)}</label>
+      <div class="pw-wrap">
+        <input id="${name}" name="${name}" type="password" autocomplete="off" placeholder="${value ? 'Saved — enter a new value to replace' : 'Enter value'}" />
+        <button type="button" class="pw-toggle" data-for="${name}" aria-label="Show value">Show</button>
+      </div>
+      ${help ? `<p class="field-help">${help}</p>` : ''}
+    </div>`;
+}
+
+function textField(name, label, help, value) {
+  return `
+    <div class="field">
+      <label for="${name}">${esc(label)}</label>
+      <input id="${name}" name="${name}" type="text" value="${esc(value || '')}" autocomplete="off" />
+      ${help ? `<p class="field-help">${help}</p>` : ''}
+    </div>`;
+}
+
+function connectionDot(live) {
+  return `<span class="dot ${live ? 'green' : ''}"></span>`;
+}
+
+route('#/integrations', 'Integrations', 'Connect your production WhatsApp Business number and AI provider.', async (view) => {
   async function draw() {
-    const [statusData, credentials, webhookInfo] = await Promise.all([
-      api('/api/dashboard/integrations'),
+    const [waStatus, aiConfig, credentials] = await Promise.all([
+      api('/api/dashboard/whatsapp/status'),
+      api('/api/dashboard/ai'),
       api('/api/dashboard/credentials'),
-      api('/api/dashboard/webhook-info'),
     ]);
+    const openRouterSaved = credentials.OPENROUTER_API_KEY?.source !== 'unset';
+    const openRouterConnected = credentials.OPENROUTER_API_KEY?.lastCheckOk === true;
+    const aiChipLabel = openRouterConnected ? 'CONNECTED' : openRouterSaved ? 'NOT CONNECTED' : 'NOT CONFIGURED';
+    const waLive = waStatus.syncStatus === 'live';
+
+    const statusLabel = { not_configured: 'Not configured', saved: 'Configuration saved', live: 'Connected — LIVE', failed: 'Connection failed' }[
+      waStatus.syncStatus
+    ] || 'Not configured';
+    const statusTone = { not_configured: 'muted', saved: 'amber', live: 'green', failed: 'red' }[waStatus.syncStatus] || 'muted';
+
     view.innerHTML = `
-      <section class="panel">
-        <div class="status-list">${statusData.integrations
-          .map(
-            (i) =>
-              `<div class="status-row"><span class="status-name"><span class="dot ${stateTone(i.state) === 'green' || stateTone(i.state) === 'blue' ? 'green' : stateTone(i.state) === 'red' ? '' : ''}"></span>${esc(i.name)}</span><span class="state">${badge(i.state, stateTone(i.state))} <span class="muted">${esc(i.detail)}</span></span></div>`,
-          )
-          .join('')}</div>
-        <div class="toolbar"><button id="refresh" class="btn">Re-check configuration</button></div>
-        <p class="muted">This reads server configuration only. It never contacts WhatsApp, OpenRouter, or Google unless you explicitly click "Test connection" below.</p>
+      <section class="summary-row">
+        <div class="summary-chip">
+          <span class="summary-name">WhatsApp Business</span>
+          ${badge(waLive ? 'LIVE' : 'NOT CONNECTED', waLive ? 'green' : 'muted')}
+        </div>
+        <div class="summary-chip">
+          <span class="summary-name">AI</span>
+          ${badge(aiChipLabel, openRouterConnected ? 'green' : 'muted')}
+        </div>
       </section>
 
-      <section class="panel" style="margin-top:16px">
-        <h3>WhatsApp webhook</h3>
-        <p class="muted">Enter this exact URL as the Callback URL in Meta's WhatsApp App → Configuration → Webhook screen, along with the Verify Token value you set below (WHATSAPP_VERIFY_TOKEN).</p>
-        <dl class="detail-grid">
-          <dt>Webhook URL (Callback URL)</dt><dd class="file">${esc(webhookInfo.webhookUrl)}</dd>
-          <dt>Verify token</dt><dd>${webhookInfo.verifyTokenConfigured ? badge('Configured', 'green') : badge('Not configured', 'red')}</dd>
-          <dt>App secret (signature verification)</dt><dd>${webhookInfo.appSecretConfigured ? badge('Configured', 'green') : badge('Not configured', 'red')}</dd>
-        </dl>
-        <p class="muted" style="margin-top:8px">Meta calls this exact URL for both the one-time GET verification handshake and every inbound POST message event — there is only one webhook route in this application, so whatever you configure here is exactly what Meta will reach.</p>
+      <section class="panel setup-card">
+        <h3>WhatsApp Business</h3>
+        <p class="muted">Enter your production WhatsApp Business details below, save, then click Sync WhatsApp to verify the connection with Meta.</p>
+
+        <form id="wa-form">
+          ${textField('wabaId', 'WhatsApp Business Account ID (WABA ID)', 'From Meta Business Manager → WhatsApp Accounts.', waStatus.wabaId)}
+          ${textField('phoneNumberId', 'Phone Number ID', 'From Meta → WhatsApp → API Setup, for the number you are sending from.', waStatus.phoneNumberId)}
+          ${pwField('accessToken', 'Access Token', 'A permanent System User token with WhatsApp messaging permission.', waStatus.configured.accessToken)}
+          ${pwField('verifyToken', 'Verify Token', 'A value you choose — enter the same value in Meta\'s webhook setup.', waStatus.configured.verifyToken)}
+          ${pwField('appSecret', 'Meta App Secret', 'From Meta App → Settings → Basic. Used to verify incoming webhook signatures.', waStatus.configured.appSecret)}
+          ${textField('webhookUrl', 'Webhook URL', `The public HTTPS URL you register with Meta as the Callback URL. This application always answers at ${esc(waStatus.actualWebhookRoute)}.`, waStatus.webhookUrl)}
+
+          <div class="toolbar" style="margin-top:8px">
+            <button type="submit" class="btn primary">Save Configuration</button>
+            <button type="button" id="wa-sync" class="btn">Sync WhatsApp</button>
+          </div>
+        </form>
+
+        <div class="status-line">
+          ${connectionDot(waLive)}
+          <span class="badge ${statusTone}">${statusLabel}</span>
+          ${waStatus.wabaName || waStatus.displayPhoneNumber ? `<span class="muted">${esc([waStatus.wabaName, waStatus.displayPhoneNumber].filter(Boolean).join(' · '))}</span>` : ''}
+          ${waStatus.lastSyncAt ? `<span class="muted">Last checked ${formatDate(waStatus.lastSyncAt)}</span>` : ''}
+        </div>
+        ${waStatus.lastSyncDetail ? `<p class="muted" style="margin-top:4px">${esc(waStatus.lastSyncDetail)}</p>` : ''}
       </section>
 
-      <section class="panel" style="margin-top:16px">
-        <h3>Credential overrides</h3>
-        <p class="muted">Entering a value here overrides the server's .env for that key at runtime, without a restart. Values are encrypted at rest and never shown back to you — only a masked preview.</p>
-        ${CREDENTIAL_GROUPS.map(
+      <section class="panel setup-card ai-card" style="margin-top:16px">
+        <h3>AI</h3>
+        <p class="muted">Your OpenRouter API key powers the assistant's replies.</p>
+        <form id="ai-form">
+          ${pwField('apiKey', 'OpenRouter API Key', null, openRouterSaved)}
+          ${textField('model', 'Model', 'Default: openrouter/free — a free model, no payment method needed.', aiConfig.model)}
+          <div class="toolbar" style="margin-top:8px">
+            <button type="submit" class="btn primary">Save &amp; Test AI</button>
+          </div>
+        </form>
+        <div id="ai-result" class="muted" style="font-size:12px"></div>
+      </section>
+
+      <details class="panel setup-card" style="margin-top:16px">
+        <summary><h3 style="display:inline">Optional integrations</h3></summary>
+        <p class="muted" style="margin-top:10px">Google Calendar is optional. Leave it unconfigured to keep booking replies informational-only.</p>
+        ${OPTIONAL_CREDENTIAL_GROUPS.map(
           (group) => `
-          <h3 style="margin-top:20px">${esc(group.title)}</h3>
           ${group.keys
             .map((key) => {
-              const info = credentials[key] || { source: 'unset', masked: null, lastCheckedAt: null, lastCheckOk: null, lastCheckDetail: null };
-              const lastCheckLine = info.lastCheckedAt
-                ? `<div class="muted" style="font-size:11px;margin-top:4px">Last checked ${formatDate(info.lastCheckedAt)}: <span style="color:${info.lastCheckOk ? '#0e8f68' : '#c0453f'}">${esc(info.lastCheckDetail || '')}</span></div>`
-                : '';
+              const info = credentials[key] || { source: 'unset', masked: null };
               return `
-              <div class="detail-grid" data-key="${key}">
+              <div class="detail-grid" data-key="${key}" style="margin-top:14px">
                 <label class="muted">${esc(key)}</label>
                 <div>
                   <span class="file">${info.masked ? esc(info.masked) : 'not set'}</span>
                   ${badge(info.source, info.source === 'override' ? 'blue' : info.source === 'env' ? 'green' : 'muted')}
-                  ${lastCheckLine}
                 </div>
                 <span></span>
                 <div class="toolbar" style="margin:6px 0">
@@ -731,11 +783,67 @@ route('#/integrations', 'Integrations', 'Configuration status only — opening t
             })
             .join('')}`,
         ).join('')}
-      </section>`;
+      </details>`;
 
-    view.querySelector('#refresh').addEventListener('click', async () => {
-      await draw();
-      toast('Configuration status refreshed', 'success');
+    view.querySelectorAll('.pw-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const input = view.querySelector(`#${btn.dataset.for}`);
+        const showing = input.type === 'text';
+        input.type = showing ? 'password' : 'text';
+        btn.textContent = showing ? 'Show' : 'Hide';
+      });
+    });
+
+    view.querySelector('#wa-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = Object.fromEntries(fd.entries());
+      try {
+        await api('/api/dashboard/whatsapp/configure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast('Configuration saved', 'success');
+        await draw();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+    });
+
+    view.querySelector('#wa-sync').addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      e.target.textContent = 'Syncing…';
+      try {
+        const res = await api('/api/dashboard/whatsapp/sync', { method: 'POST' });
+        toast(res.ok ? 'WhatsApp Connected — LIVE' : `Sync failed: ${res.detail}`, res.ok ? 'success' : 'error');
+      } catch (error) {
+        toast(error.message, 'error');
+      } finally {
+        await draw();
+      }
+    });
+
+    view.querySelector('#ai-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = Object.fromEntries(fd.entries());
+      const result = view.querySelector('#ai-result');
+      result.textContent = 'Testing…';
+      try {
+        const res = await api('/api/dashboard/ai/configure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast(res.ok ? 'AI configured and connected' : 'Saved — connection test failed', res.ok ? 'success' : 'error');
+        await draw();
+        const newResult = view.querySelector('#ai-result');
+        newResult.textContent = res.detail;
+        newResult.style.color = res.ok ? '#0e8f68' : '#c0453f';
+      } catch (error) {
+        result.textContent = error.message;
+      }
     });
 
     view.querySelectorAll('[data-key]').forEach((row) => {

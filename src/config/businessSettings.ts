@@ -41,6 +41,7 @@ export const businessSettingsInputSchema = z
     cancellationPolicy: z.string().max(5000).nullable(),
     humanEscalationInfo: z.string().max(2000).nullable(),
     supportedLanguages: csvOf((l) => /^[a-zA-Z]{2,8}$/.test(l)).nullable(),
+    openRouterModel: z.string().min(1).max(100).nullable(),
   })
   .partial();
 
@@ -61,6 +62,7 @@ export interface BusinessSettings {
   cancellationPolicy: string | null;
   humanEscalationInfo: string | null;
   supportedLanguages: string[];
+  openRouterModel: string;
 }
 
 /** Per-field: true when the value came from a dashboard override, false when it's the env fallback. */
@@ -90,6 +92,7 @@ interface BusinessSettingsRow {
   cancellation_policy: string | null;
   human_escalation_info: string | null;
   supported_languages: string | null;
+  open_router_model: string | null;
 }
 
 function readRow(): BusinessSettingsRow {
@@ -98,7 +101,8 @@ function readRow(): BusinessSettingsRow {
       `SELECT business_name, business_timezone, business_hours_start, business_hours_end,
               business_days, booking_duration_minutes, booking_buffer_minutes,
               restart_keywords, conversation_history_limit, welcome_message,
-              fallback_message, cancellation_policy, human_escalation_info, supported_languages
+              fallback_message, cancellation_policy, human_escalation_info, supported_languages,
+              open_router_model
        FROM business_settings WHERE id = 1`,
     )
     .get() as BusinessSettingsRow | undefined;
@@ -136,6 +140,7 @@ export function getBusinessSettings(): BusinessSettings {
     cancellationPolicy: row.cancellation_policy,
     humanEscalationInfo: row.human_escalation_info,
     supportedLanguages: row.supported_languages ? csvToList(row.supported_languages) : [],
+    openRouterModel: row.open_router_model ?? env.OPENROUTER_MODEL,
   };
 }
 
@@ -157,6 +162,7 @@ export function getBusinessSettingsOverrides(): BusinessSettingsOverrides {
     cancellationPolicy: row.cancellation_policy !== null,
     humanEscalationInfo: row.human_escalation_info !== null,
     supportedLanguages: row.supported_languages !== null,
+    openRouterModel: row.open_router_model !== null,
   };
 }
 
@@ -175,6 +181,7 @@ const COLUMN_MAP: Record<keyof BusinessSettingsPatch, string> = {
   cancellationPolicy: 'cancellation_policy',
   humanEscalationInfo: 'human_escalation_info',
   supportedLanguages: 'supported_languages',
+  openRouterModel: 'open_router_model',
 };
 
 /**

@@ -4,7 +4,14 @@ vi.mock('../../../src/config/env', async () => {
   const actual = await vi.importActual<typeof import('../../../src/config/env')>(
     '../../../src/config/env',
   );
-  return { ...actual, env: { ...actual.env, shouldUseMockProviders: false } };
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      shouldUseMockProviders: false,
+      shouldUseMockCalendarProviders: false,
+    },
+  };
 });
 
 const query = vi.fn();

@@ -17,7 +17,7 @@ export interface BusyInterval {
  * intervals — never guesses or fabricates availability.
  */
 export async function freeBusyQuery(startISO: string, endISO: string): Promise<BusyInterval[]> {
-  if (env.shouldUseMockProviders) {
+  if (env.shouldUseMockCalendarProviders) {
     return freeBusyQueryMock(startISO, endISO);
   }
 
