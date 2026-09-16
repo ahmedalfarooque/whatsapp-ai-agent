@@ -1,0 +1,23 @@
+{
+  "session": "1064caee-f2bf-45b5-b4ed-9f47ff7a7810",
+  "agent": "Claude-Code",
+  "task": "Activate real WhatsApp/OpenRouter providers locally + temporary HTTPS tunnel for first live WhatsApp round-trip",
+  "at": "2026-09-16T20:32:45.607Z",
+  "finished": true,
+  "summary": "Fixed the real WhatsApp Save Configuration bug (not a repeat of the earlier admin-login issue). Root cause found by reading actual server logs, not guessing: all 3 of the user's real Save Configuration attempts returned HTTP 400 because the endpoint required WABA ID, Phone Number ID, Access Token, Verify Token, and App Secret all non-empty on every save, with no way to update the non-secret fields alone. A second bug compounded the confusing symptom: GET /whatsapp/status displayed WABA ID/Phone Number ID via getEffectiveCredential() (falls back to raw .env), so this session's own production-boot placeholder value ('0000000000') was shown as if it were a real saved Phone Number ID whenever nothing had actually been persisted. Fixed both: Save Configuration now treats a blank secret as 'keep existing' (never as 'clear'), and the status endpoint now reads WABA ID/Phone Number ID directly from the encrypted override store. Also discovered and worked around both localtunnel URLs (the original one and the user's) had died — free localtunnel sessions are flaky/ephemeral; started a fresh one.",
+  "reason": "User reported (with exact server-side evidence: fields reverting to blank/000000000 and a 'Configuration incomplete' error) that Save Configuration was broken. Traced the full request lifecycle per their explicit instruction rather than assuming a frontend/autofill issue.",
+  "tests": "npm test: 36 files, 261 tests passed (up from 259) — added a regression test proving a blank-secret save now succeeds (200, not 400) and preserves previously stored secrets, plus a test proving the status endpoint never displays the raw .env placeholder as a saved value. npm run typecheck/lint/build all passed. (Note: had to temporarily move the live .env aside during test runs — its production placeholder values were leaking into dotenv-based tests via a bare npm test call; restored immediately after, no impact on the running server, which does not re-read .env after boot.) Verified live on an isolated port/DB (not the user's live session): fresh admin setup, first save with all 6 real-shaped values succeeded, a second save reproducing the exact reported scenario (WABA ID/Phone/Webhook filled, all 3 secrets blank) returned 200 and left all three secrets 'configured: true' — the exact case that previously failed. Restarted that isolated process and confirmed full persistence.",
+  "nextSteps": "The user's live server (port 3000, untouched throughout this fix) now has the corrected code after a restart. A fresh public tunnel is up at https://vast-cats-create.loca.lt (the two previous tunnel URLs — the original and the user's own — had both died; free localtunnel sessions are known to be unstable). Remaining before a real WhatsApp round-trip: the user needs to (1) log into the live dashboard, (2) re-enter the real WABA ID/Phone Number ID/Access Token/Verify Token/App Secret and the new webhook URL (https://vast-cats-create.loca.lt/webhook) into the WhatsApp Business card, (3) Save Configuration, (4) register that same webhook URL + verify token in Meta's App dashboard, (5) click Sync WhatsApp for the real Graph API verification, (6) send a real WhatsApp message to +966 55 819 0545. None of this has been performed yet in this session since it requires the user's own real Meta credentials, which are correctly never seen by this session.",
+  "changedFiles": [
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}
