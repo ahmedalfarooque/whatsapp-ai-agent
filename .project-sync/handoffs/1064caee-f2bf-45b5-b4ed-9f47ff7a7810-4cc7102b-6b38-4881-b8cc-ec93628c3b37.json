@@ -1,0 +1,27 @@
+{
+  "session": "1064caee-f2bf-45b5-b4ed-9f47ff7a7810",
+  "agent": "Claude-Code",
+  "task": "Fix Integrations form autofill/state bug (WABA ID/Access Token wrongly populated from login state)",
+  "at": "2026-09-16T09:57:25.230Z",
+  "finished": true,
+  "summary": "Fixed the Integrations page's WhatsApp form being autofilled by the browser's own login/password data (WABA ID receiving a saved email, Access Token receiving a saved password) — a structural browser-autofill heuristic (text field immediately before password field, ignoring autocomplete='off'), not a data/state bug from the backend. Added form-unique field ids, autocomplete='new-password' plus per-manager ignore attributes on the three secret fields, a visually-hidden decoy username/password pair placed before the real fields, and switched form submission to read only the six named fields explicitly instead of serializing the whole form (so no decoy or future browser-injected field can leak into the saved payload). Hardened the backend too: WABA ID and Phone Number ID are now rejected server-side unless purely numeric, so a bad value (autofilled or otherwise) can never be persisted even if it gets past client-side defenses.",
+  "reason": "User reported real screenshots of an email address appearing in the WABA ID field and the Access Token field being auto-populated, and asked for the WhatsApp form to be made completely independent from the dashboard login form's autofill surface, with backend state hydration inspected too (not just the HTML).",
+  "tests": "npm test: 36 files, 259 tests passed (up from 258) — added a test confirming a non-numeric WABA ID (e.g. an email) is rejected by the server. npm run typecheck/lint/build all passed. Live browser QA: fresh admin setup, opened Integrations — all six fields blank on first load (no autofill in this environment, and now structurally hardened against it); saved a configuration with numeric WABA ID/Phone Number ID and fake secrets; refreshed the page — WABA ID/Phone Number ID/Webhook URL correctly rehydrated from the saved data, all three secret fields stayed blank with a 'Saved — enter a new value to replace' placeholder (never a repopulated value); ran Sync WhatsApp — still performs a real Meta Graph API call and reports the real failure; logged out and back in — same correct blank-secrets/correct-config state; confirmed all whatsapp/* API routes still 401 when unauthenticated; confirmed the decoy username/password fields are present with autocomplete='username'/'current-password' and the form itself has autocomplete='off'.",
+  "nextSteps": "No further internal engineering work outstanding against this fix's explicit scope. Real-world verification of the fix against an actual instance of Chrome/Edge with a saved password for this admin account (rather than this session's clean automated browser) is the only thing not directly observable here — recommend the user do one manual check on their own machine, in their own browser, with their own saved credentials, to confirm the decoy absorbs the autofill in practice.",
+  "changedFiles": [
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}
