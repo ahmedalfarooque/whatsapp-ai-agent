@@ -42,6 +42,7 @@ import {
   OVERRIDABLE_KEYS,
   isOverridableKey,
   setSecret,
+  getSecret,
   clearSecret,
   listConfiguredOverrideKeys,
   maskSecret,
@@ -401,12 +402,20 @@ export function createDashboardRouter(): Router {
   // what the simplified "WhatsApp Business" card in the dashboard reads.
   router.get('/api/dashboard/whatsapp/status', (req, res) => {
     const state = getWhatsappConnectionState();
+    // WABA ID / Phone Number ID are read directly from the dashboard's own
+    // override store here — NOT via getEffectiveCredential(), which falls
+    // back to raw .env. That .env value only exists to satisfy the
+    // production boot check (see env.ts) and is never a real saved
+    // configuration; showing it here would display a placeholder as if the
+    // administrator had actually configured something.
+    const savedWabaId = getSecret('WHATSAPP_BUSINESS_ACCOUNT_ID');
+    const savedPhoneNumberId = getSecret('WHATSAPP_PHONE_NUMBER_ID');
     const configured = {
-      wabaId: Boolean(getEffectiveCredential('WHATSAPP_BUSINESS_ACCOUNT_ID')),
-      phoneNumberId: Boolean(getEffectiveCredential('WHATSAPP_PHONE_NUMBER_ID')),
-      accessToken: Boolean(getEffectiveCredential('WHATSAPP_ACCESS_TOKEN')),
-      verifyToken: Boolean(getEffectiveCredential('WHATSAPP_VERIFY_TOKEN')),
-      appSecret: Boolean(getEffectiveCredential('META_APP_SECRET')),
+      wabaId: Boolean(savedWabaId),
+      phoneNumberId: Boolean(savedPhoneNumberId),
+      accessToken: Boolean(getSecret('WHATSAPP_ACCESS_TOKEN')),
+      verifyToken: Boolean(getSecret('WHATSAPP_VERIFY_TOKEN')),
+      appSecret: Boolean(getSecret('META_APP_SECRET')),
       webhookUrl: Boolean(state.webhookUrl),
     };
     res.json({
@@ -422,15 +431,19 @@ export function createDashboardRouter(): Router {
       configured,
       // Non-secret configuration values, shown in full (never masked) since
       // they identify the account, not a credential.
-      wabaId: getEffectiveCredential('WHATSAPP_BUSINESS_ACCOUNT_ID') || null,
-      phoneNumberId: getEffectiveCredential('WHATSAPP_PHONE_NUMBER_ID') || null,
+      wabaId: savedWabaId,
+      phoneNumberId: savedPhoneNumberId,
     });
   });
 
   router.post('/api/dashboard/whatsapp/configure', (req, res) => {
     const { wabaId, phoneNumberId, accessToken, verifyToken, appSecret, webhookUrl } = req.body ?? {};
-    const fields: Record<string, string> = { wabaId, phoneNumberId, accessToken, verifyToken, appSecret, webhookUrl };
-    const missing = Object.entries(fields)
+
+    // WABA ID, Phone Number ID, and Webhook URL are always required and
+    // always shown in full (never masked) — the administrator re-enters or
+    // confirms them on every save.
+    const requiredFields: Record<string, string> = { wabaId, phoneNumberId, webhookUrl };
+    const missing = Object.entries(requiredFields)
       .filter(([, v]) => typeof v !== 'string' || v.trim().length === 0)
       .map(([k]) => k);
     if (missing.length > 0) {
@@ -444,7 +457,9 @@ export function createDashboardRouter(): Router {
     // WABA ID and Phone Number ID are Meta-issued numeric identifiers, never
     // email addresses or other text — reject anything else outright, in case
     // a browser autofilled the wrong value into the form before submit.
-    const numericFieldErrors = (['wabaId', 'phoneNumberId'] as const).filter((key) => !/^\d+$/.test(fields[key]!.trim()));
+    const numericFieldErrors = (['wabaId', 'phoneNumberId'] as const).filter(
+      (key) => !/^\d+$/.test(requiredFields[key]!.trim()),
+    );
     if (numericFieldErrors.length > 0) {
       res.status(400).json({ error: 'validation_failed', fields: numericFieldErrors });
       return;
@@ -453,9 +468,21 @@ export function createDashboardRouter(): Router {
     const adminUserId = req.adminUserId as number;
     setSecret('WHATSAPP_BUSINESS_ACCOUNT_ID', wabaId.trim(), adminUserId);
     setSecret('WHATSAPP_PHONE_NUMBER_ID', phoneNumberId.trim(), adminUserId);
-    setSecret('WHATSAPP_ACCESS_TOKEN', accessToken.trim(), adminUserId);
-    setSecret('WHATSAPP_VERIFY_TOKEN', verifyToken.trim(), adminUserId);
-    setSecret('META_APP_SECRET', appSecret.trim(), adminUserId);
+    // Secrets are optional on every save: a blank field means "keep the
+    // previously stored value", NOT "clear it" — only the dedicated Clear
+    // action (DELETE /credentials/:key) removes a stored secret. This lets
+    // the administrator update WABA ID/Phone Number ID/Webhook URL alone
+    // without having to re-enter the Access Token/Verify Token/App Secret
+    // every single time.
+    if (typeof accessToken === 'string' && accessToken.trim().length > 0) {
+      setSecret('WHATSAPP_ACCESS_TOKEN', accessToken.trim(), adminUserId);
+    }
+    if (typeof verifyToken === 'string' && verifyToken.trim().length > 0) {
+      setSecret('WHATSAPP_VERIFY_TOKEN', verifyToken.trim(), adminUserId);
+    }
+    if (typeof appSecret === 'string' && appSecret.trim().length > 0) {
+      setSecret('META_APP_SECRET', appSecret.trim(), adminUserId);
+    }
     markWhatsappConfigurationSaved(webhookUrl.trim());
 
     res.json({ ok: true, status: 'saved' });

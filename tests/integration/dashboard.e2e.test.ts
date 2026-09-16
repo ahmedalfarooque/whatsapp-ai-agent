@@ -624,6 +624,51 @@ describe('dashboard', () => {
     expect(JSON.stringify(statusRes.body)).not.toContain('super-secret');
   });
 
+  it('Save Configuration with blank secret fields updates WABA ID/Phone/Webhook without clearing previously stored secrets', async () => {
+    // Regression test: a real Save Configuration attempt used to be rejected
+    // outright (400 "missing" every one of the six fields) whenever a
+    // secret field was left blank on a later save — even though secrets had
+    // already been saved. Blank must mean "keep the existing value", not
+    // "reject the whole request".
+    const updateRes = await agent.post('/api/dashboard/whatsapp/configure').send({
+      wabaId: '1388480302719892',
+      phoneNumberId: '937660752766640',
+      accessToken: '',
+      verifyToken: '',
+      appSecret: '',
+      webhookUrl: 'https://updated-tunnel.example.com/webhook',
+    });
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body).toEqual({ ok: true, status: 'saved' });
+
+    const statusRes = await agent.get('/api/dashboard/whatsapp/status');
+    expect(statusRes.body.webhookUrl).toBe('https://updated-tunnel.example.com/webhook');
+    // Still configured — the earlier real secret values were preserved, not cleared.
+    expect(statusRes.body.configured).toEqual({
+      wabaId: true,
+      phoneNumberId: true,
+      accessToken: true,
+      verifyToken: true,
+      appSecret: true,
+      webhookUrl: true,
+    });
+  });
+
+  it('never displays the raw .env fallback as a saved WABA ID/Phone Number ID when nothing has been configured', async () => {
+    // Regression test: GET /whatsapp/status used to read these two fields
+    // via getEffectiveCredential(), which falls back to raw process.env —
+    // including the non-empty placeholder env.ts requires at boot in
+    // production. That placeholder must never be displayed as if it were a
+    // real saved configuration value.
+    await agent.delete('/api/dashboard/credentials/WHATSAPP_BUSINESS_ACCOUNT_ID');
+    await agent.delete('/api/dashboard/credentials/WHATSAPP_PHONE_NUMBER_ID');
+    const statusRes = await agent.get('/api/dashboard/whatsapp/status');
+    expect(statusRes.body.wabaId).toBeNull();
+    expect(statusRes.body.phoneNumberId).toBeNull();
+    expect(statusRes.body.configured.wabaId).toBe(false);
+    expect(statusRes.body.configured.phoneNumberId).toBe(false);
+  });
+
   it('Sync WhatsApp performs a real Meta verification and never returns the access token, regardless of outcome', async () => {
     const res = await agent.post('/api/dashboard/whatsapp/sync');
     expect(res.status).toBe(200);
