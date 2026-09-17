@@ -4,6 +4,7 @@ import request from 'supertest';
 
 vi.mock('../../src/whatsapp/client', () => ({
   sendTextMessage: vi.fn().mockResolvedValue({ messages: [{ id: 'wamid.OUT' }] }),
+  sendInteractiveMessage: vi.fn().mockResolvedValue({ messages: [{ id: 'wamid.OUT' }] }),
   markMessageAsRead: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../../src/llm/openRouterClient', () => ({
@@ -15,6 +16,13 @@ vi.mock('../../src/llm/openRouterClient', () => ({
 import { sendTextMessage } from '../../src/whatsapp/client';
 import { createApp } from '../../src/app';
 import { closeDb } from '../../src/memory/db';
+import { getOrCreateCustomer, setCustomerLanguage } from '../../src/memory/customerRepo';
+
+/** These tests exercise the AI reply path directly, so pre-select a language to skip the menu gate. */
+function preselectLanguage(waId: string) {
+  const customer = getOrCreateCustomer(waId, undefined);
+  setCustomerLanguage(customer.id, 'en');
+}
 
 const APP_SECRET = process.env.META_APP_SECRET as string;
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN as string;
@@ -93,6 +101,7 @@ describe('webhook integration', () => {
   });
 
   it('eventually sends a WhatsApp reply after async processing completes', async () => {
+    preselectLanguage('15551110002');
     const payload = inboundTextPayload('15551110002', 'wamid.3', 'Hi, what are your hours?');
     const body = JSON.stringify(payload);
 
@@ -107,6 +116,7 @@ describe('webhook integration', () => {
   });
 
   it('processes a duplicate webhook delivery (same message id) only once', async () => {
+    preselectLanguage('15551110003');
     const payload = inboundTextPayload('15551110003', 'wamid.DUPLICATE', 'Hello');
     const body = JSON.stringify(payload);
     const signature = sign(body);

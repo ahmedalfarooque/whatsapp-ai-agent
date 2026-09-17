@@ -1,10 +1,13 @@
 import type Database from 'better-sqlite3';
 import { getDb } from './db';
 
+export type CustomerLanguage = 'en' | 'ar';
+
 export interface Customer {
   id: number;
   wa_id: string;
   display_name: string | null;
+  language: CustomerLanguage | null;
   created_at: string;
   updated_at: string;
 }
@@ -50,6 +53,19 @@ export function getCustomerByWaId(
   return db
     .prepare('SELECT * FROM customers WHERE wa_id = ?')
     .get(normalizeWaId(waId)) as Customer | undefined;
+}
+
+/** Persists the customer's chosen menu language (or clears it back to unset with null). */
+export function setCustomerLanguage(
+  customerId: number,
+  language: CustomerLanguage | null,
+  db: Database.Database = getDb(),
+): Customer {
+  db.prepare(
+    "UPDATE customers SET language = ?, updated_at = datetime('now') WHERE id = ?",
+  ).run(language, customerId);
+
+  return db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId) as Customer;
 }
 
 export interface CustomerListItem extends Customer {

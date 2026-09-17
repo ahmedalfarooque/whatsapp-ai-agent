@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sendTextMessageMock, markMessageAsReadMock } from '../../../src/whatsapp/mockClient';
+import { sendTextMessageMock, markMessageAsReadMock, sendInteractiveMessageMock } from '../../../src/whatsapp/mockClient';
 
 describe('WhatsApp mock provider', () => {
   it('returns a deterministic, well-shaped response without any network call', async () => {
@@ -11,5 +11,15 @@ describe('WhatsApp mock provider', () => {
 
   it('markMessageAsReadMock resolves without throwing and without a network call', async () => {
     await expect(markMessageAsReadMock('wamid.123')).resolves.toBeUndefined();
+  });
+
+  it('sendInteractiveMessageMock returns a deterministic, well-shaped response', async () => {
+    const result = await sendInteractiveMessageMock('15551234567', {
+      kind: 'buttons',
+      body: 'Pick one',
+      buttons: [{ id: 'a', title: 'A' }],
+    });
+    expect(result.messaging_product).toBe('whatsapp');
+    expect(result.messages[0].id).toMatch(/^mock-wamid-/);
   });
 });

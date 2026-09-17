@@ -8,8 +8,8 @@ import {
   isRetryableHttpError,
   isRetryableForNonIdempotentSend,
 } from '../utils/retry';
-import { sendTextMessageMock, markMessageAsReadMock } from './mockClient';
-import type { SendTextMessageResponse } from './types';
+import { sendTextMessageMock, markMessageAsReadMock, sendInteractiveMessageMock } from './mockClient';
+import type { OutboundInteractiveMessage, SendTextMessageResponse } from './types';
 
 function graphUrl(pathSegment: string): string {
   return `https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${pathSegment}`;
@@ -80,6 +80,60 @@ export async function sendTextMessage(
     return result;
   } catch (error) {
     logger.error({ toWaId, error }, 'failed to send WhatsApp text message');
+    throw error;
+  }
+}
+
+function buildInteractivePayload(message: OutboundInteractiveMessage): Record<string, unknown> {
+  if (message.kind === 'buttons') {
+    return {
+      type: 'button',
+      ...(message.header ? { header: { type: 'text', text: message.header } } : {}),
+      body: { text: message.body },
+      ...(message.footer ? { footer: { text: message.footer } } : {}),
+      action: {
+        buttons: message.buttons.map((b) => ({ type: 'reply', reply: { id: b.id, title: b.title } })),
+      },
+    };
+  }
+  return {
+    type: 'list',
+    ...(message.header ? { header: { type: 'text', text: message.header } } : {}),
+    body: { text: message.body },
+    ...(message.footer ? { footer: { text: message.footer } } : {}),
+    action: {
+      button: message.buttonLabel,
+      sections: message.sections.map((s) => ({
+        ...(s.title ? { title: s.title } : {}),
+        rows: s.rows.map((r) => ({ id: r.id, title: r.title, ...(r.description ? { description: r.description } : {}) })),
+      })),
+    },
+  };
+}
+
+/** Sends an interactive (button or list) message to a customer's WhatsApp number. */
+export async function sendInteractiveMessage(
+  toWaId: string,
+  message: OutboundInteractiveMessage,
+): Promise<SendTextMessageResponse> {
+  if (env.shouldUseMockProviders) {
+    return sendInteractiveMessageMock(toWaId, message);
+  }
+  try {
+    const result = await graphRequest<SendTextMessageResponse>(
+      `${getEffectiveCredential('WHATSAPP_PHONE_NUMBER_ID')}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to: toWaId,
+        type: 'interactive',
+        interactive: buildInteractivePayload(message),
+      },
+      isRetryableForNonIdempotentSend,
+    );
+    logger.info({ toWaId, messageId: result.messages?.[0]?.id }, 'sent WhatsApp interactive message');
+    return result;
+  } catch (error) {
+    logger.error({ toWaId, error }, 'failed to send WhatsApp interactive message');
     throw error;
   }
 }

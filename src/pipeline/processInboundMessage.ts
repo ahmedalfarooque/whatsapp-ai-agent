@@ -2,7 +2,7 @@ import { getBusinessSettings } from '../config/businessSettings';
 import { logger, maskWaId } from '../logger';
 import { GENERIC_ERROR_REPLY, MESSAGE_DIRECTION } from '../config/constants';
 import type { InboundMessage } from '../webhook/parseInboundPayload';
-import { getOrCreateCustomer } from '../memory/customerRepo';
+import { getOrCreateCustomer, setCustomerLanguage, type Customer, type CustomerLanguage } from '../memory/customerRepo';
 import {
   getOrCreateActiveConversation,
   appendMessage,
@@ -13,9 +13,20 @@ import { clearBookingSession } from '../memory/bookingSessionRepo';
 import { isRestartCommand } from '../restart/isRestartCommand';
 import { buildSystemPrompt } from '../llm/buildSystemPrompt';
 import { runAgentLoop } from '../llm/agentLoop';
-import { sendTextMessage } from '../whatsapp/client';
+import { sendTextMessage, sendInteractiveMessage } from '../whatsapp/client';
 import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
+import {
+  MENU_IDS,
+  buildLanguageSelectionMessage,
+  buildWelcomeText,
+  buildMainMenuMessage,
+  buildCategoryMessage,
+  buildLocationMessage,
+  detectLanguageFromText,
+  isMenuKeyword,
+  isChangeLanguageKeyword,
+} from '../automation/menu';
 
 export interface ProcessDependencies {
   knowledge: KnowledgeBase;
@@ -44,7 +55,7 @@ async function processInboundMessageUnlocked(
 ): Promise<void> {
   const maskedId = maskWaId(msg.waId);
 
-  if (msg.type !== 'text' || !msg.text) {
+  if (msg.type !== 'text' && msg.type !== 'interactive') {
     logger.info({ waId: maskedId, type: msg.type }, 'ignoring unsupported inbound message type');
     try {
       await sendTextMessage(
@@ -56,19 +67,23 @@ async function processInboundMessageUnlocked(
     }
     return;
   }
+  if (msg.type === 'text' && !msg.text) {
+    return;
+  }
 
-  const customer = getOrCreateCustomer(msg.waId, msg.contactName);
+  let customer = getOrCreateCustomer(msg.waId, msg.contactName);
   const conversation = getOrCreateActiveConversation(customer.id);
 
-  if (isRestartCommand(msg.text)) {
+  if (msg.type === 'text' && isRestartCommand(msg.text)) {
     appendMessage(conversation.id, {
       role: 'user',
-      content: msg.text,
+      content: msg.text as string,
       whatsappMessageId: msg.messageId,
       direction: MESSAGE_DIRECTION.INBOUND,
       messageType: msg.type,
     });
     clearBookingSession(conversation.id);
+    customer = setCustomerLanguage(customer.id, null);
     const freshConversation = resetConversation(customer.id);
     appendMessage(freshConversation.id, {
       role: 'assistant',
@@ -76,20 +91,24 @@ async function processInboundMessageUnlocked(
       direction: MESSAGE_DIRECTION.OUTBOUND,
     });
     await sendTextMessage(msg.waId, RESTART_CONFIRMATION);
-    logger.info({ waId: maskedId }, 'conversation restarted by customer command');
+    await sendInteractiveMessage(msg.waId, buildLanguageSelectionMessage());
+    logger.info({ waId: maskedId }, 'conversation restarted by customer command, language reset');
     return;
   }
 
+  const handledByMenu = await handleLanguageAndMenu(msg, customer, maskedId);
+  if (handledByMenu) return;
+
   appendMessage(conversation.id, {
     role: 'user',
-    content: msg.text,
+    content: msg.text as string,
     whatsappMessageId: msg.messageId,
     direction: MESSAGE_DIRECTION.INBOUND,
     messageType: msg.type,
   });
 
   const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit);
-  const systemPrompt = buildSystemPrompt(deps.knowledge);
+  const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined);
 
   let finalText: string;
   try {
@@ -120,4 +139,83 @@ async function processInboundMessageUnlocked(
   } catch (error) {
     logger.error({ waId: maskedId, error }, 'failed to send reply to customer after processing');
   }
+}
+
+/**
+ * Language selection + top-level menu navigation, handled entirely outside
+ * the AI loop so it never depends on the LLM and can't drift from the fixed
+ * set of menu IDs. Returns true when this function fully handled the inbound
+ * message (menu/language interaction) and the caller should stop — false
+ * means the message is free text meant for the AI agent loop.
+ */
+async function handleLanguageAndMenu(
+  msg: InboundMessage,
+  customer: Customer,
+  maskedId: string,
+): Promise<boolean> {
+  let language: CustomerLanguage | null = customer.language;
+
+  if (!language) {
+    if (msg.interactiveId === MENU_IDS.LANG_EN) {
+      language = 'en';
+    } else if (msg.interactiveId === MENU_IDS.LANG_AR) {
+      language = 'ar';
+    } else if (msg.type === 'text') {
+      language = detectLanguageFromText(msg.text) ?? null;
+    }
+
+    if (!language) {
+      await sendInteractiveMessage(msg.waId, buildLanguageSelectionMessage());
+      return true;
+    }
+
+    setCustomerLanguage(customer.id, language);
+    await sendTextMessage(msg.waId, buildWelcomeText(language, customer.display_name ?? msg.contactName));
+    await sendInteractiveMessage(msg.waId, buildMainMenuMessage(language));
+    logger.info({ waId: maskedId, language }, 'customer selected language, showed main menu');
+    return true;
+  }
+
+  if (msg.interactiveId) {
+    switch (msg.interactiveId) {
+      case MENU_IDS.CATEGORY_AUDIO:
+        await sendInteractiveMessage(msg.waId, buildCategoryMessage(language, 'audio'));
+        break;
+      case MENU_IDS.CATEGORY_ACCESSORIES:
+        await sendInteractiveMessage(msg.waId, buildCategoryMessage(language, 'accessories'));
+        break;
+      case MENU_IDS.CATEGORY_CARE:
+        await sendInteractiveMessage(msg.waId, buildCategoryMessage(language, 'care'));
+        break;
+      case MENU_IDS.PRICES:
+        await sendInteractiveMessage(msg.waId, buildCategoryMessage(language, 'prices'));
+        break;
+      case MENU_IDS.LOCATION:
+        await sendInteractiveMessage(msg.waId, buildLocationMessage(language));
+        break;
+      case MENU_IDS.CHANGE_LANGUAGE:
+        setCustomerLanguage(customer.id, null);
+        await sendInteractiveMessage(msg.waId, buildLanguageSelectionMessage());
+        break;
+      case MENU_IDS.MAIN_MENU:
+      default:
+        await sendInteractiveMessage(msg.waId, buildMainMenuMessage(language));
+        break;
+    }
+    return true;
+  }
+
+  if (msg.type === 'text') {
+    if (isChangeLanguageKeyword(msg.text, language)) {
+      setCustomerLanguage(customer.id, null);
+      await sendInteractiveMessage(msg.waId, buildLanguageSelectionMessage());
+      return true;
+    }
+    if (isMenuKeyword(msg.text, language)) {
+      await sendInteractiveMessage(msg.waId, buildMainMenuMessage(language));
+      return true;
+    }
+  }
+
+  return false;
 }

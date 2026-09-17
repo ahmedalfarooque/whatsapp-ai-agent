@@ -70,6 +70,41 @@ describe('parseInboundPayload', () => {
     expect(parseInboundPayload('not an object')).toEqual([]);
   });
 
+  it('extracts a button_reply interactive message with its stable ID', () => {
+    const payload = makePayload({
+      messages: [
+        {
+          from: '15551234567',
+          id: 'wamid.BTN',
+          timestamp: '1700000000',
+          type: 'interactive',
+          interactive: { type: 'button_reply', button_reply: { id: 'lang_en', title: 'English' } },
+        },
+      ],
+    });
+    const result = parseInboundPayload(payload);
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe('interactive');
+    expect(result[0].interactiveId).toBe('lang_en');
+    expect(result[0].text).toBeUndefined();
+  });
+
+  it('extracts a list_reply interactive message with its stable ID', () => {
+    const payload = makePayload({
+      messages: [
+        {
+          from: '15551234567',
+          id: 'wamid.LIST',
+          timestamp: '1700000000',
+          type: 'interactive',
+          interactive: { type: 'list_reply', list_reply: { id: 'menu_car_audio', title: 'Car Audio' } },
+        },
+      ],
+    });
+    const result = parseInboundPayload(payload);
+    expect(result[0].interactiveId).toBe('menu_car_audio');
+  });
+
   it('handles multiple messages across multiple entries/changes', () => {
     const payload = {
       object: 'whatsapp_business_account',

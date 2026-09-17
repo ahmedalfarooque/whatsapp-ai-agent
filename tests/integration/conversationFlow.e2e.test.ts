@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../src/whatsapp/client', () => ({
   sendTextMessage: vi.fn().mockResolvedValue({ messages: [{ id: 'wamid.OUT' }] }),
+  sendInteractiveMessage: vi.fn().mockResolvedValue({ messages: [{ id: 'wamid.OUT' }] }),
   markMessageAsRead: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../../src/llm/openRouterClient', () => ({
@@ -20,7 +21,7 @@ import { findFreeSlots } from '../../src/calendar/availability';
 import { createEvent } from '../../src/calendar/booking';
 import { processInboundMessage } from '../../src/pipeline/processInboundMessage';
 import { getRecentMessages, getOrCreateActiveConversation } from '../../src/memory/conversationRepo';
-import { getOrCreateCustomer } from '../../src/memory/customerRepo';
+import { getOrCreateCustomer, setCustomerLanguage } from '../../src/memory/customerRepo';
 import { loadKnowledgeBase } from '../../src/knowledge/loader';
 import path from 'node:path';
 import { DateTime } from 'luxon';
@@ -51,6 +52,12 @@ function inbound(waId: string, messageId: string, text: string) {
   return { waId, messageId, timestamp: Date.now(), type: 'text', text, contactName: 'Alice' };
 }
 
+/** These tests exercise the AI agent loop directly, so pre-select a language to skip the menu gate. */
+function preselectLanguage(waId: string) {
+  const customer = getOrCreateCustomer(waId, 'Alice');
+  setCustomerLanguage(customer.id, 'en');
+}
+
 describe('end-to-end conversation flow (mocked external services)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -58,6 +65,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
 
   it('greets, answers a knowledge question, then completes a booking', async () => {
     const waId = '15552220001';
+    preselectLanguage(waId);
 
     vi.mocked(chatCompletion).mockResolvedValueOnce(textResponse('Hi! How can I help you today?') as never);
     await processInboundMessage(inbound(waId, 'wamid.g1', 'Hi'), { knowledge });
@@ -105,6 +113,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
 
   it('never confirms a booking when the calendar reports a conflict', async () => {
     const waId = '15552220002';
+    preselectLanguage(waId);
 
     vi.mocked(createEvent).mockResolvedValue({ success: false, conflict: true });
     vi.mocked(chatCompletion).mockResolvedValueOnce(
@@ -129,6 +138,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
 
   it('restarts the conversation on the "restart" keyword, clearing memory but not history', async () => {
     const waId = '15552220003';
+    preselectLanguage(waId);
 
     vi.mocked(chatCompletion).mockResolvedValueOnce(textResponse('Sure, I can help with that.') as never);
     await processInboundMessage(inbound(waId, 'wamid.r1', 'Tell me about your policies'), { knowledge });
@@ -148,6 +158,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
 
   it('serializes rapid concurrent messages from the same customer without corrupting state', async () => {
     const waId = '15552220004';
+    preselectLanguage(waId);
     vi.mocked(chatCompletion).mockResolvedValue(textResponse('ok') as never);
 
     await Promise.all([
@@ -165,6 +176,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
 
   it('gracefully handles an agent loop failure with a generic, non-technical reply', async () => {
     const waId = '15552220005';
+    preselectLanguage(waId);
     vi.mocked(chatCompletion).mockRejectedValue(new Error('OpenRouter is down'));
 
     await processInboundMessage(inbound(waId, 'wamid.e1', 'Hello?'), { knowledge });

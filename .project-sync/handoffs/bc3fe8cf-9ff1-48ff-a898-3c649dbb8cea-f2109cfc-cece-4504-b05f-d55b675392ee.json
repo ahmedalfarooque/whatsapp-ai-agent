@@ -1,0 +1,100 @@
+{
+  "session": "bc3fe8cf-9ff1-48ff-a898-3c649dbb8cea",
+  "agent": "Claude-Code",
+  "task": "Implement bilingual AR/EN WhatsApp menu automation",
+  "at": "2026-09-17T01:40:56.079Z",
+  "finished": true,
+  "summary": "Implemented the bilingual (Arabic/English) WhatsApp menu automation on top of the existing pipeline, additively: new migration 010_customer_language.sql adds customers.language (nullable), customerRepo gains setCustomerLanguage; whatsapp/types.ts gains interactive message request/response types; parseInboundPayload.ts now extracts button_reply/list_reply interactiveId from 'interactive' message payloads; whatsapp/client.ts and mockClient.ts gain sendInteractiveMessage(Mock) building the real Graph API button/list interactive payload shapes; new src/automation/menu.ts holds all menu copy/IDs/keyword-matching as pure functions (language selection buttons, localized welcome using the exact Google Maps link https://share.google/QdtvbcoaAlyxfDNZl, main menu list with 5 categories, per-category prompt + Main Menu/Change Language nav buttons, location message). processInboundMessage.ts now gates on customer.language: unset -> always show language buttons first (button tap or a bare 'english'/'arabic' text both work); once set, interactive menu taps are handled entirely outside the AI loop (never invented content), free text that isn't a menu/change-language keyword bypasses the menu unchanged into the existing AI agent loop, and the restart command now also clears the stored language back to the language-selection gate. buildSystemPrompt.ts takes an optional language and instructs the model to always reply in it. knowledge/business.md and knowledge/services.md were updated with the real facts already established for Rowad Alfa Auto Care (name, phone +966 55 819 0545, the three category names, the Maps link) without inventing any granular services or prices that were never supplied — the AI is explicitly told to say pricing/details aren't available yet rather than guess.",
+  "reason": "Continuing the user's explicitly authorized bilingual menu automation task (language selection as first interaction, knowledge-driven menu, natural-language bypass, main-menu/back/change-language navigation, restart resets language, never hallucinate services/prices). Kept the existing architecture (Node/Express/SQLite/OpenRouter/Meta client) untouched — this is purely additive: one new nullable column, one new pure module, and gating logic inserted ahead of the existing AI loop, which is otherwise unchanged.",
+  "tests": "npm test: 297/297 passing (38 files), including a new tests/unit/automation/menu.test.ts (14 tests) and a new tests/unit/pipeline/processInboundMessage.test.ts (14 tests, categories A-N: first-contact language gate, repeated re-prompt until chosen, EN/AR button selection, free-text language fallback, category selection bypassing the AI, Main Menu / Change Language navigation, menu keyword resend, natural-language bypass into the AI loop, restart resets language, unknown interactive ID falls back safely, Prices menu never fabricates a $ price, unsupported message types still get the plain-text fallback). Updated existing tests/unit/memory/customerRepo.test.ts, tests/unit/webhook/parseInboundPayload.test.ts, tests/unit/whatsapp/{client,mockClient}.test.ts for the new language field / interactive parsing / sendInteractiveMessage. Updated tests/integration/conversationFlow.e2e.test.ts and tests/integration/webhook.e2e.test.ts to pre-select a language for their AI-loop-focused customers (a real, non-mocked behavior change: brand-new customers now hit the language gate before the AI loop) and to mock the new sendInteractiveMessage export. npm run typecheck: clean. npm run lint: clean. npm run build: clean (tsc + asset copy including the new migration file). No live Meta/WhatsApp verification was performed in this pass — that remains blocked on the user entering real production credentials into the dashboard, unchanged from the prior handoff, and is unrelated to this feature.",
+  "nextSteps": "Feature is code-complete and fully covered by automated tests, but has not been exercised against a real WhatsApp conversation yet (still blocked on the production Meta credentials per the standing blocker). When credentials are entered and Sync WhatsApp succeeds, verify live: a first-time real WhatsApp number receives the language buttons, tapping English/Arabic sends the welcome (customer's real profile name + exact Maps link) and the 5-item list menu, tapping a category shows the nav-button prompt, a free-text question after language selection reaches the real AI/knowledge answer, and 'restart' resets back to the language buttons. Also: knowledge/services.md and knowledge/business.md still lack granular per-item pricing/hours/street address — the AI will correctly say it doesn't have that yet; add real data to those files whenever the business supplies it (never fabricate it).",
+  "changedFiles": [
+    {
+      "path": "knowledge/business.md",
+      "change": "modified"
+    },
+    {
+      "path": "knowledge/services.md",
+      "change": "modified"
+    },
+    {
+      "path": "src/automation/menu.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/llm/buildSystemPrompt.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/migrations/010_customer_language.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/pipeline/processInboundMessage.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/webhook/parseInboundPayload.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/client.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/mockClient.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/types.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/conversationFlow.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/webhook.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/automation/menu.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/memory/customerRepo.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/pipeline/processInboundMessage.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/webhook/parseInboundPayload.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/whatsapp/client.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/whatsapp/mockClient.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [
+    {
+      "path": "Open Router.docx",
+      "change": "modified"
+    },
+    {
+      "path": "~$en Router.docx",
+      "change": "deleted"
+    }
+  ],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

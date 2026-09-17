@@ -7,6 +7,8 @@ export interface InboundMessage {
   type: string;
   text?: string;
   contactName?: string;
+  /** Stable internal ID from a button/list tap (interactive messages only). */
+  interactiveId?: string;
 }
 
 /**
@@ -35,6 +37,14 @@ export function parseInboundPayload(body: unknown): InboundMessage[] {
       );
 
       for (const message of value.messages) {
+        const interactiveReply = message.type === 'interactive' ? message.interactive : undefined;
+        const interactiveId =
+          interactiveReply?.type === 'button_reply'
+            ? interactiveReply.button_reply?.id
+            : interactiveReply?.type === 'list_reply'
+              ? interactiveReply.list_reply?.id
+              : undefined;
+
         results.push({
           waId: message.from,
           messageId: message.id,
@@ -42,6 +52,7 @@ export function parseInboundPayload(body: unknown): InboundMessage[] {
           type: message.type,
           text: message.type === 'text' ? message.text?.body : undefined,
           contactName: contactsByWaId.get(message.from),
+          interactiveId,
         });
       }
     }

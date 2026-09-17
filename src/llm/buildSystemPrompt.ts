@@ -2,7 +2,15 @@ import { env } from '../config/env';
 import { getBusinessSettings } from '../config/businessSettings';
 import type { KnowledgeBase } from '../knowledge/loader';
 
-export function buildSystemPrompt(knowledge: KnowledgeBase): string {
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: 'English',
+  ar: 'Arabic',
+};
+
+export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string): string {
+  const languageInstruction = language && LANGUAGE_NAMES[language]
+    ? `Always reply in ${LANGUAGE_NAMES[language]}, regardless of the language the customer writes in.`
+    : null;
   const settings = getBusinessSettings();
   const policiesSection = [
     settings.welcomeMessage ? `Welcome message to use for a brand-new conversation: ${settings.welcomeMessage}` : null,
@@ -63,7 +71,7 @@ CONVERSATION STYLE:
 - The customer's WhatsApp number is already known to the system — never ask
   them for their phone number.
 
-BUSINESS TIMEZONE: ${settings.businessTimezone}
+${languageInstruction ? `${languageInstruction}\n` : ''}BUSINESS TIMEZONE: ${settings.businessTimezone}
 BUSINESS HOURS: ${settings.businessHoursStart}-${settings.businessHoursEnd}, days (1=Mon..7=Sun): ${settings.businessDays.join(', ')}
 DEFAULT APPOINTMENT DURATION: ${settings.bookingDurationMinutes} minutes
 ${policiesSection ? `\nBUSINESS POLICIES:\n${policiesSection}\n` : ''}

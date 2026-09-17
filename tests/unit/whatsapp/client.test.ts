@@ -9,7 +9,7 @@ vi.mock('../../../src/config/env', async () => {
   return { ...actual, env: { ...actual.env, shouldUseMockProviders: false } };
 });
 
-import { sendTextMessage, markMessageAsRead } from '../../../src/whatsapp/client';
+import { sendTextMessage, markMessageAsRead, sendInteractiveMessage } from '../../../src/whatsapp/client';
 
 function jsonResponse(status: number, body: unknown) {
   return {
@@ -87,6 +87,43 @@ describe('WhatsApp client — HTTP behavior', () => {
     fetchSpy.mockResolvedValue(jsonResponse(500, { error: { message: 'down' } }));
 
     await expect(markMessageAsRead('wamid.1')).resolves.toBeUndefined();
+  });
+
+  it('sends a button interactive message with the expected Graph API shape', async () => {
+    fetchSpy.mockResolvedValue(
+      jsonResponse(200, { messaging_product: 'whatsapp', contacts: [], messages: [{ id: 'wamid.4' }] }),
+    );
+
+    await sendInteractiveMessage('15551234567', {
+      kind: 'buttons',
+      body: 'Pick one',
+      buttons: [{ id: 'a', title: 'A' }],
+    });
+
+    const [, requestInit] = fetchSpy.mock.calls[0];
+    const sentBody = JSON.parse(requestInit.body as string);
+    expect(sentBody.type).toBe('interactive');
+    expect(sentBody.interactive.type).toBe('button');
+    expect(sentBody.interactive.action.buttons).toEqual([{ type: 'reply', reply: { id: 'a', title: 'A' } }]);
+  });
+
+  it('sends a list interactive message with the expected Graph API shape', async () => {
+    fetchSpy.mockResolvedValue(
+      jsonResponse(200, { messaging_product: 'whatsapp', contacts: [], messages: [{ id: 'wamid.5' }] }),
+    );
+
+    await sendInteractiveMessage('15551234567', {
+      kind: 'list',
+      body: 'Choose',
+      buttonLabel: 'Show options',
+      sections: [{ rows: [{ id: 'x', title: 'X' }] }],
+    });
+
+    const [, requestInit] = fetchSpy.mock.calls[0];
+    const sentBody = JSON.parse(requestInit.body as string);
+    expect(sentBody.interactive.type).toBe('list');
+    expect(sentBody.interactive.action.button).toBe('Show options');
+    expect(sentBody.interactive.action.sections).toEqual([{ rows: [{ id: 'x', title: 'X' }] }]);
   });
 
   it('never logs the access token in a thrown/rejected error', async () => {

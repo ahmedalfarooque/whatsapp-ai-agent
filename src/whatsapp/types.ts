@@ -1,9 +1,16 @@
+export interface WhatsAppInteractiveReply {
+  type: 'button_reply' | 'list_reply';
+  button_reply?: { id: string; title: string };
+  list_reply?: { id: string; title: string; description?: string };
+}
+
 export interface WhatsAppTextMessagePayload {
   from: string;
   id: string;
   timestamp: string;
   type: string;
   text?: { body: string };
+  interactive?: WhatsAppInteractiveReply;
   [key: string]: unknown;
 }
 
@@ -40,3 +47,32 @@ export interface SendTextMessageResponse {
   contacts: { input: string; wa_id: string }[];
   messages: { id: string }[];
 }
+
+export interface InteractiveButton {
+  /** Stable internal ID (never shown to the customer) used to route the button_reply. */
+  id: string;
+  /** Visible label — WhatsApp caps button titles at 20 characters. */
+  title: string;
+}
+
+export interface InteractiveListRow {
+  id: string;
+  title: string;
+  description?: string;
+}
+
+export interface InteractiveListSection {
+  title?: string;
+  rows: InteractiveListRow[];
+}
+
+export type OutboundInteractiveMessage =
+  | { kind: 'buttons'; body: string; buttons: InteractiveButton[]; header?: string; footer?: string }
+  | {
+      kind: 'list';
+      body: string;
+      buttonLabel: string;
+      sections: InteractiveListSection[];
+      header?: string;
+      footer?: string;
+    };
