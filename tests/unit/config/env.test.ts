@@ -1,12 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const PRODUCTION_REQUIRED_KEYS = [
+/** Required in production only when WHATSAPP_CONNECTION_METHOD=meta. */
+const META_CLOUD_API_KEYS = [
   'WHATSAPP_ACCESS_TOKEN',
   'WHATSAPP_PHONE_NUMBER_ID',
   'WHATSAPP_VERIFY_TOKEN',
   'META_APP_SECRET',
-  'OPENROUTER_API_KEY',
 ] as const;
+
+/** Required in production regardless of the WhatsApp transport. */
+const ALWAYS_PRODUCTION_REQUIRED_KEYS = ['OPENROUTER_API_KEY'] as const;
+
+const PRODUCTION_REQUIRED_KEYS = [...META_CLOUD_API_KEYS, ...ALWAYS_PRODUCTION_REQUIRED_KEYS] as const;
 
 /** Snapshots and restores process.env around a test that mutates it. */
 function withEnvSnapshot(fn: () => Promise<void> | void) {
@@ -70,6 +75,51 @@ describe('env validation', () => {
     );
   });
 
+  describe('WHATSAPP_CONNECTION_METHOD', () => {
+    it(
+      'defaults to the QR transport when unset',
+      withEnvSnapshot(async () => {
+        delete process.env.WHATSAPP_CONNECTION_METHOD;
+        const { env } = await import('../../../src/config/env');
+        expect(env.whatsappConnectionMethod).toBe('qr');
+        expect(env.usesMetaCloudApi).toBe(false);
+      }),
+    );
+
+    it(
+      'treats a blank value as the default (qr)',
+      withEnvSnapshot(async () => {
+        process.env.WHATSAPP_CONNECTION_METHOD = '';
+        const { env } = await import('../../../src/config/env');
+        expect(env.whatsappConnectionMethod).toBe('qr');
+        expect(env.usesMetaCloudApi).toBe(false);
+      }),
+    );
+
+    it(
+      'accepts meta',
+      withEnvSnapshot(async () => {
+        process.env.WHATSAPP_CONNECTION_METHOD = 'meta';
+        const { env } = await import('../../../src/config/env');
+        expect(env.whatsappConnectionMethod).toBe('meta');
+        expect(env.usesMetaCloudApi).toBe(true);
+      }),
+    );
+
+    it(
+      'rejects an unknown transport name',
+      withEnvSnapshot(async () => {
+        process.env.WHATSAPP_CONNECTION_METHOD = 'telegram';
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        await expect(import('../../../src/config/env')).rejects.toThrow(
+          /Invalid environment configuration/,
+        );
+        expect(errorSpy.mock.calls.flat().join('\n')).toContain('WHATSAPP_CONNECTION_METHOD');
+        errorSpy.mockRestore();
+      }),
+    );
+  });
+
   describe('production mode', () => {
     function setAllProductionCreds() {
       process.env.NODE_ENV = 'production';
@@ -82,42 +132,127 @@ describe('env validation', () => {
       delete process.env.GOOGLE_PRIVATE_KEY;
     }
 
-    it(
-      'starts successfully and selects real providers when every credential is present',
-      withEnvSnapshot(async () => {
-        setAllProductionCreds();
-        const { env } = await import('../../../src/config/env');
-        expect(env.isProduction).toBe(true);
-        expect(env.shouldUseMockProviders).toBe(false);
-      }),
-    );
+    describe('QR transport (WHATSAPP_CONNECTION_METHOD=qr, the default)', () => {
+      it(
+        'starts successfully with OPENROUTER_API_KEY and NO Meta credentials at all',
+        withEnvSnapshot(async () => {
+          process.env.NODE_ENV = 'production';
+          delete process.env.WHATSAPP_CONNECTION_METHOD;
+          process.env.OPENROUTER_API_KEY = 'real-openrouter-key';
+          for (const key of META_CLOUD_API_KEYS) delete process.env[key];
+          delete process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
+          delete process.env.GOOGLE_CLIENT_EMAIL;
+          delete process.env.GOOGLE_PRIVATE_KEY;
 
-    it.each(PRODUCTION_REQUIRED_KEYS)(
-      'rejects startup when %s is missing',
-      (missingKey) =>
+          const { env } = await import('../../../src/config/env');
+          expect(env.isProduction).toBe(true);
+          expect(env.shouldUseMockProviders).toBe(false);
+          expect(env.whatsappConnectionMethod).toBe('qr');
+          expect(env.usesMetaCloudApi).toBe(false);
+        }),
+      );
+
+      it(
+        'also starts when qr is set explicitly and Meta credentials are absent',
+        withEnvSnapshot(async () => {
+          process.env.NODE_ENV = 'production';
+          process.env.WHATSAPP_CONNECTION_METHOD = 'qr';
+          process.env.OPENROUTER_API_KEY = 'real-openrouter-key';
+          for (const key of META_CLOUD_API_KEYS) delete process.env[key];
+
+          await expect(import('../../../src/config/env')).resolves.toBeDefined();
+        }),
+      );
+
+      it(
+        'still accepts Meta credentials when they happen to be present',
         withEnvSnapshot(async () => {
           setAllProductionCreds();
-          delete process.env[missingKey];
+          process.env.WHATSAPP_CONNECTION_METHOD = 'qr';
+          const { env } = await import('../../../src/config/env');
+          expect(env.isProduction).toBe(true);
+          expect(env.shouldUseMockProviders).toBe(false);
+        }),
+      );
 
-          await expect(import('../../../src/config/env')).rejects.toThrow(
-            /Invalid environment configuration/,
-          );
-        })(),
-    );
+      it.each(ALWAYS_PRODUCTION_REQUIRED_KEYS)(
+        'still rejects startup when %s is missing',
+        (missingKey) =>
+          withEnvSnapshot(async () => {
+            setAllProductionCreds();
+            process.env.WHATSAPP_CONNECTION_METHOD = 'qr';
+            delete process.env[missingKey];
+
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            await expect(import('../../../src/config/env')).rejects.toThrow(
+              /Invalid environment configuration/,
+            );
+            expect(errorSpy.mock.calls.flat().join('\n')).toContain(missingKey);
+            errorSpy.mockRestore();
+          })(),
+      );
+    });
+
+    describe('Meta Cloud API transport (WHATSAPP_CONNECTION_METHOD=meta)', () => {
+      it(
+        'starts successfully and selects real providers when every credential is present',
+        withEnvSnapshot(async () => {
+          setAllProductionCreds();
+          process.env.WHATSAPP_CONNECTION_METHOD = 'meta';
+          const { env } = await import('../../../src/config/env');
+          expect(env.isProduction).toBe(true);
+          expect(env.shouldUseMockProviders).toBe(false);
+          expect(env.usesMetaCloudApi).toBe(true);
+        }),
+      );
+
+      it.each(PRODUCTION_REQUIRED_KEYS)(
+        'rejects startup when %s is missing',
+        (missingKey) =>
+          withEnvSnapshot(async () => {
+            setAllProductionCreds();
+            process.env.WHATSAPP_CONNECTION_METHOD = 'meta';
+            delete process.env[missingKey];
+
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            await expect(import('../../../src/config/env')).rejects.toThrow(
+              /Invalid environment configuration/,
+            );
+            expect(errorSpy.mock.calls.flat().join('\n')).toContain(missingKey);
+            errorSpy.mockRestore();
+          })(),
+      );
+
+      it(
+        'reports every missing credential at once, not just the first',
+        withEnvSnapshot(async () => {
+          process.env.NODE_ENV = 'production';
+          process.env.WHATSAPP_CONNECTION_METHOD = 'meta';
+          for (const key of PRODUCTION_REQUIRED_KEYS) delete process.env[key];
+
+          const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+          await expect(import('../../../src/config/env')).rejects.toThrow();
+
+          const loggedText = errorSpy.mock.calls.flat().join('\n');
+          for (const key of PRODUCTION_REQUIRED_KEYS) {
+            expect(loggedText).toContain(key);
+          }
+          errorSpy.mockRestore();
+        }),
+      );
+    });
 
     it(
-      'reports every missing credential at once, not just the first',
+      'never requires Meta credentials merely because NODE_ENV=production',
       withEnvSnapshot(async () => {
         process.env.NODE_ENV = 'production';
-        for (const key of PRODUCTION_REQUIRED_KEYS) delete process.env[key];
+        delete process.env.WHATSAPP_CONNECTION_METHOD;
+        process.env.OPENROUTER_API_KEY = 'real-openrouter-key';
+        for (const key of META_CLOUD_API_KEYS) delete process.env[key];
 
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-        await expect(import('../../../src/config/env')).rejects.toThrow();
-
-        const loggedText = errorSpy.mock.calls.flat().join('\n');
-        for (const key of PRODUCTION_REQUIRED_KEYS) {
-          expect(loggedText).toContain(key);
-        }
+        await expect(import('../../../src/config/env')).resolves.toBeDefined();
+        expect(errorSpy).not.toHaveBeenCalled();
         errorSpy.mockRestore();
       }),
     );

@@ -19,7 +19,12 @@ if (env.shouldUseMockProviders) {
   logger.warn('Development mode: using mock LLM provider — no real OpenRouter calls will be made');
   logger.warn('Development mode: using mock Calendar provider — no real Google Calendar calls will be made');
 } else {
-  logger.info('Production mode: using real WhatsApp, OpenRouter, and Google Calendar providers');
+  logger.info(
+    { whatsappConnectionMethod: env.whatsappConnectionMethod },
+    env.usesMetaCloudApi
+      ? 'Production mode: using Meta WhatsApp Cloud API, real OpenRouter, and Google Calendar providers'
+      : 'Production mode: using WhatsApp QR (Baileys) transport, real OpenRouter, and Google Calendar providers',
+  );
 }
 
 const app = createApp();

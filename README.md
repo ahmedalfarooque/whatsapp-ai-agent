@@ -78,10 +78,11 @@ to start with a clear error if any are missing.
 
 | Variable | Purpose |
 |---|---|
-| `WHATSAPP_ACCESS_TOKEN` | Meta Graph API token (see §5) |
-| `WHATSAPP_PHONE_NUMBER_ID` | Your WhatsApp Business phone number ID |
-| `WHATSAPP_VERIFY_TOKEN` | A string you choose; entered in the Meta webhook config |
-| `META_APP_SECRET` | Used to validate incoming webhook signatures |
+| `WHATSAPP_CONNECTION_METHOD` | `qr` (default) for the direct WhatsApp Web / QR connection (no Meta credentials needed, see `docs/QR_CONNECTION.md`), or `meta` for the Meta WhatsApp Cloud API (see §5) |
+| `WHATSAPP_ACCESS_TOKEN` | Meta Graph API token (see §5). Required in production only when `WHATSAPP_CONNECTION_METHOD=meta` |
+| `WHATSAPP_PHONE_NUMBER_ID` | Your WhatsApp Business phone number ID (Meta mode only) |
+| `WHATSAPP_VERIFY_TOKEN` | A string you choose; entered in the Meta webhook config (Meta mode only) |
+| `META_APP_SECRET` | Used to validate incoming webhook signatures (Meta mode only) |
 | `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | LLM provider + model (see §6) |
 | `GOOGLE_CLIENT_EMAIL` / `GOOGLE_PRIVATE_KEY` / `GOOGLE_CALENDAR_ID` | Service account + target calendar (see §7) |
 | `BUSINESS_NAME`, `BUSINESS_TIMEZONE`, `BUSINESS_HOURS_START/END`, `BUSINESS_DAYS` | Business context used in the system prompt and availability calculation |
@@ -101,6 +102,9 @@ to `.env`. `BUSINESS_NAME`/`BUSINESS_TIMEZONE`/etc. in `.env` remain the
 fallback and the seed values for a fresh install.
 
 ## 5. Setting up Meta WhatsApp Cloud API
+
+This section applies only when `WHATSAPP_CONNECTION_METHOD=meta`. The default
+`qr` transport needs none of it — see `docs/QR_CONNECTION.md`.
 
 1. Create an app at [developers.facebook.com](https://developers.facebook.com/apps) → add the **WhatsApp** product.
 2. Under **WhatsApp → API Setup**, note your **Phone number ID** and generate

@@ -10,21 +10,38 @@ const csvList = (value: string | undefined): string[] =>
     .filter((s) => s.length > 0);
 
 /**
- * Credentials required for real external integrations. These are OPTIONAL
- * at the schema level (so development can start without them) but are
- * enforced as mandatory by the `.superRefine` below whenever
- * NODE_ENV=production. They must never be required in development/test —
- * that's what lets `npm run dev` start with mock providers (see
- * src/whatsapp/client.ts, src/llm/openRouterClient.ts,
- * src/calendar/availability.ts / booking.ts) and no real credentials.
+ * The two optional WhatsApp transports. `qr` (default) is the Baileys /
+ * WhatsApp Web QR connection, which needs no Meta credentials at all — the
+ * scanned phone number becomes the agent number. `meta` is the Meta WhatsApp
+ * Cloud API (webhook + Graph API), which needs the Meta credentials below.
+ * The selected transport decides which credentials are mandatory in
+ * production; NODE_ENV alone never does.
  */
-const PRODUCTION_REQUIRED_KEYS = [
+export const WHATSAPP_CONNECTION_METHODS = ['qr', 'meta'] as const;
+export type WhatsappConnectionMethod = (typeof WHATSAPP_CONNECTION_METHODS)[number];
+
+/**
+ * Meta WhatsApp Cloud API credentials. OPTIONAL at the schema level and
+ * enforced as mandatory by the `.superRefine` below ONLY when
+ * NODE_ENV=production AND WHATSAPP_CONNECTION_METHOD=meta. A production
+ * deployment on the QR transport must start and run without any of them.
+ */
+export const META_CLOUD_API_REQUIRED_KEYS = [
   'WHATSAPP_ACCESS_TOKEN',
   'WHATSAPP_PHONE_NUMBER_ID',
   'WHATSAPP_VERIFY_TOKEN',
   'META_APP_SECRET',
-  'OPENROUTER_API_KEY',
 ] as const;
+
+/**
+ * Credentials required for the real AI provider regardless of the WhatsApp
+ * transport. OPTIONAL at the schema level (so development can start without
+ * them) but mandatory whenever NODE_ENV=production. They must never be
+ * required in development/test — that's what lets `npm run dev` start with
+ * mock providers (see src/whatsapp/client.ts, src/llm/openRouterClient.ts,
+ * src/calendar/availability.ts / booking.ts) and no real credentials.
+ */
+const PRODUCTION_REQUIRED_KEYS = ['OPENROUTER_API_KEY'] as const;
 
 const envSchema = z
   .object({
@@ -33,7 +50,15 @@ const envSchema = z
     LOG_LEVEL: z.string().default('info'),
     DATABASE_PATH: z.string().default('./data/app.db'),
 
-    // Optional at the schema level — see PRODUCTION_REQUIRED_KEYS above.
+    // Which WhatsApp transport this deployment uses. See
+    // WHATSAPP_CONNECTION_METHODS above. Defaults to the QR transport; a
+    // blank value (e.g. `WHATSAPP_CONNECTION_METHOD=` in .env) means default.
+    WHATSAPP_CONNECTION_METHOD: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+      z.enum(WHATSAPP_CONNECTION_METHODS).default('qr'),
+    ),
+
+    // Optional at the schema level — see META_CLOUD_API_REQUIRED_KEYS above.
     WHATSAPP_ACCESS_TOKEN: z.string().optional().default(''),
     WHATSAPP_PHONE_NUMBER_ID: z.string().optional().default(''),
     // Not required to send/receive messages (only the phone number ID is),
@@ -97,7 +122,9 @@ const envSchema = z
       });
     }
 
-    // WhatsApp and OpenRouter credentials are mandatory ONLY in production.
+    // OpenRouter credentials are mandatory ONLY in production. Meta Cloud API
+    // credentials are mandatory ONLY in production AND only when the Meta
+    // transport is selected — the QR transport never needs them.
     // Google Calendar is optional for deployments that do not enable it; in
     // that case calendar operations deliberately remain on the mock provider.
     // Development and
@@ -113,6 +140,18 @@ const envSchema = z
           code: z.ZodIssueCode.custom,
           path: [key],
           message: `${key} is required when NODE_ENV=production`,
+        });
+      }
+    }
+
+    if (data.WHATSAPP_CONNECTION_METHOD !== 'meta') return;
+
+    for (const key of META_CLOUD_API_REQUIRED_KEYS) {
+      if (!data[key]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is required when NODE_ENV=production and WHATSAPP_CONNECTION_METHOD=meta`,
         });
       }
     }
@@ -162,6 +201,13 @@ export const env = {
   isProduction: raw.NODE_ENV === 'production',
   isDevelopment: raw.NODE_ENV === 'development',
   isTest: raw.NODE_ENV === 'test',
+  /**
+   * Selected WhatsApp transport ('qr' by default, or 'meta'). Only decides
+   * which credentials env validation demands in production; the QR socket
+   * and the Meta webhook/Graph client themselves are untouched by this flag.
+   */
+  whatsappConnectionMethod: raw.WHATSAPP_CONNECTION_METHOD as WhatsappConnectionMethod,
+  usesMetaCloudApi: raw.WHATSAPP_CONNECTION_METHOD === 'meta',
   /**
    * true for every mode except 'production'. Real integration clients
    * (WhatsApp, OpenRouter, Google Calendar) check this flag and delegate to

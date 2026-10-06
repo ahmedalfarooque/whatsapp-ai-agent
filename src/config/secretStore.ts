@@ -6,10 +6,12 @@ import { getSecretEncryptionKey } from './masterKey';
  * The exact set of credential fields that may be overridden from the
  * dashboard, at runtime, on top of (never instead of) the process's real
  * .env-derived production-required credentials. This is a SUPERSET of
- * PRODUCTION_REQUIRED_KEYS in src/config/env.ts — every production-required
- * key is overridable here, plus a couple of fields (WABA ID) that are not
- * required to run the app but are used by the dashboard's Sync WhatsApp
- * verification step.
+ * PRODUCTION_REQUIRED_KEYS and META_CLOUD_API_REQUIRED_KEYS in
+ * src/config/env.ts — every key that production can require (for either
+ * WhatsApp transport) is overridable here, plus a couple of fields (WABA ID)
+ * that are not required to run the app but are used by the dashboard's Sync
+ * WhatsApp verification step. The Meta keys stay overridable on the QR
+ * transport too, so the dashboard can be prepared for a later switch.
  */
 export const OVERRIDABLE_KEYS = [
   'WHATSAPP_ACCESS_TOKEN',
