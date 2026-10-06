@@ -1,6 +1,10 @@
 // Loaded before every test file (see vitest.config.ts setupFiles). Provides
 // safe fake values for every required env var so env.ts validation passes
 // without any real third-party credentials.
+import { vi } from 'vitest';
+
+// Tests supply their own environment. Never reload production secrets from .env.
+vi.mock('dotenv', () => ({ config: vi.fn() }));
 process.env.NODE_ENV = 'test';
 process.env.PORT = process.env.PORT ?? '3999';
 process.env.LOG_LEVEL = process.env.LOG_LEVEL ?? 'silent';

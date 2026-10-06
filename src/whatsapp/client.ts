@@ -1,4 +1,5 @@
 import { env } from '../config/env';
+import { replyTransport } from './replyTransport';
 import { getEffectiveCredential } from '../config/effectiveConfig';
 import { logger } from '../logger';
 import {
@@ -57,6 +58,8 @@ export async function sendTextMessage(
   toWaId: string,
   body: string,
 ): Promise<SendTextMessageResponse> {
+  const transport = replyTransport.getStore();
+  if (transport) return transport.text(toWaId, body);
   if (env.shouldUseMockProviders) {
     return sendTextMessageMock(toWaId, body);
   }
@@ -116,6 +119,8 @@ export async function sendInteractiveMessage(
   toWaId: string,
   message: OutboundInteractiveMessage,
 ): Promise<SendTextMessageResponse> {
+  const transport = replyTransport.getStore();
+  if (transport) return transport.interactive(toWaId, message);
   if (env.shouldUseMockProviders) {
     return sendInteractiveMessageMock(toWaId, message);
   }

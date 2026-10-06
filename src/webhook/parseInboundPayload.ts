@@ -9,6 +9,8 @@ export interface InboundMessage {
   contactName?: string;
   /** Stable internal ID from a button/list tap (interactive messages only). */
   interactiveId?: string;
+  /** Transport the message arrived on: 'cloud' (Meta webhook, default) or 'qr' (linked device). */
+  channel?: string;
 }
 
 /**

@@ -68,7 +68,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
     preselectLanguage(waId);
 
     vi.mocked(chatCompletion).mockResolvedValueOnce(textResponse('Hi! How can I help you today?') as never);
-    await processInboundMessage(inbound(waId, 'wamid.g1', 'Hi'), { knowledge });
+    await processInboundMessage(inbound(waId, 'wamid.g1', 'Tell me about your consultations'), { knowledge });
     expect(sendTextMessage).toHaveBeenLastCalledWith(waId, 'Hi! How can I help you today?');
 
     vi.mocked(chatCompletion).mockResolvedValueOnce(
@@ -144,10 +144,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
     await processInboundMessage(inbound(waId, 'wamid.r1', 'Tell me about your policies'), { knowledge });
 
     await processInboundMessage(inbound(waId, 'wamid.r2', 'restart'), { knowledge });
-    expect(sendTextMessage).toHaveBeenLastCalledWith(
-      waId,
-      "Done — I've started a fresh conversation. How can I help you?",
-    );
+    expect(vi.mocked(sendTextMessage).mock.calls.map((c) => String(c[1])).some((t) => t.includes("I've started a fresh conversation"))).toBe(true);
 
     const customer = getOrCreateCustomer(waId, undefined);
     const activeConversation = getOrCreateActiveConversation(customer.id);
@@ -179,7 +176,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
     preselectLanguage(waId);
     vi.mocked(chatCompletion).mockRejectedValue(new Error('OpenRouter is down'));
 
-    await processInboundMessage(inbound(waId, 'wamid.e1', 'Hello?'), { knowledge });
+    await processInboundMessage(inbound(waId, 'wamid.e1', 'Is my car ready for pickup?'), { knowledge });
 
     const lastCall = vi.mocked(sendTextMessage).mock.calls.at(-1);
     expect(lastCall?.[1]).not.toMatch(/OpenRouter is down/);

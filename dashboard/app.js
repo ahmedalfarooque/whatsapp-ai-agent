@@ -99,6 +99,7 @@ function stateTone(state) {
 // ---------------------------------------------------------------------
 
 const routes = [];
+let disposeView = () => {};
 function route(pattern, title, subtitle, render) {
   routes.push({ pattern, title, subtitle, render });
 }
@@ -116,7 +117,10 @@ function matchRoute(hash) {
 }
 
 async function renderRoute() {
+  disposeView();
+  disposeView = () => {};
   const hash = location.hash || '#/';
+  document.body.classList.toggle('auth-page', hash === '#/login');
   const matched = matchRoute(hash);
   const view = document.querySelector('#view');
   document.querySelectorAll('#nav a').forEach((a) => a.classList.remove('active'));
@@ -188,6 +192,7 @@ async function boot() {
   }
   if (location.hash === '#/login') location.hash = '#/';
   await loadHeader();
+  document.dispatchEvent(new Event('workspace:authenticated'));
   await renderRoute();
 }
 
@@ -200,23 +205,41 @@ route('#/login', 'Sign in', '', async (view) => {
   const isSetup = !status.hasAdmin;
 
   view.innerHTML = `
-    <section class="panel detail" style="max-width:420px;margin:40px auto">
-      <h3>${isSetup ? 'Create the admin account' : 'Sign in'}</h3>
-      <p class="muted">${isSetup ? 'No admin account exists yet. Create one to unlock the dashboard.' : 'Enter your admin credentials to continue.'}</p>
+    <div class="auth-layout"><section class="auth-story">
+      <p class="eyebrow light">ROWAD ALFA · AI WORKSPACE</p>
+      <h2>A better conversation.<br>A closer connection.</h2>
+      <p>One workspace for your WhatsApp conversations, customer care, and appointments.</p>
+      <div class="auth-visual" aria-hidden="true"><span class="chat-bubble">Hello. How can we help?</span><span class="chat-bubble answer" dir="rtl">أهلاً بك، كيف نقدر نخدمك؟</span><div class="auth-signal">◎ <span>People first. Powered by AI.</span></div></div>
+      <small>Your business. Your conversations. One clear view.</small>
+    </section><section class="panel detail auth-card">
+      <span class="auth-logo" aria-hidden="true">◎</span><p class="eyebrow">WELCOME TO YOUR WORKSPACE</p>
+      <h3>${isSetup ? 'Set up your workspace' : 'Welcome back'}</h3>
+      <p class="muted">${isSetup ? 'Create an administrator account to get started.' : 'Sign in to manage your AI assistant.'}</p>
       <form id="auth-form">
         <label class="muted" for="username">Username</label>
         <input id="username" type="text" autocomplete="username" required style="width:100%;margin:6px 0 14px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe" />
         <label class="muted" for="password">Password${isSetup ? ' (min 12 characters)' : ''}</label>
-        <input id="password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" required style="width:100%;margin:6px 0 14px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe" />
+        <div class="password-wrap"><input id="password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" ${isSetup ? 'minlength="12"' : ''} required /><button type="button" id="show-password" aria-controls="password" aria-pressed="false">Show</button></div>
         <div id="auth-error" class="form-error" hidden></div>
         <button type="submit" class="btn primary" style="width:100%">${isSetup ? 'Create account & sign in' : 'Sign in'}</button>
       </form>
-    </section>`;
+      <p class="auth-footnote">Secure administrator access</p>
+    </section></div>`;
+
+  view.querySelector('#show-password').addEventListener('click', (event) => {
+    const input = view.querySelector('#password');
+    const reveal = input.type === 'password';
+    input.type = reveal ? 'text' : 'password';
+    event.currentTarget.textContent = reveal ? 'Hide' : 'Show';
+    event.currentTarget.setAttribute('aria-pressed', String(reveal));
+  });
 
   const errorBox = view.querySelector('#auth-error');
   view.querySelector('#auth-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     errorBox.hidden = true;
+    const submit = view.querySelector('[type=submit]');
+    submit.disabled = true;
     const username = view.querySelector('#username').value.trim();
     const password = view.querySelector('#password').value;
     try {
@@ -237,6 +260,8 @@ route('#/login', 'Sign in', '', async (view) => {
     } catch {
       errorBox.hidden = false;
       errorBox.textContent = 'Could not reach the server.';
+    } finally {
+      submit.disabled = false;
     }
   });
 });
@@ -264,8 +289,9 @@ route('#/', 'Dashboard', 'A clear view of your customer conversations and agent 
     <section class="hero">
       <div>
         <p class="eyebrow light">SYSTEM OVERVIEW</p>
-        <h2>Your agent is ready to help.</h2>
-        <p>${status.providerMode === 'mock' ? 'Running locally with safe mock providers and persistent SQLite memory.' : 'Production provider mode is active — real WhatsApp/OpenRouter/Google Calendar calls are made.'}</p>
+        <h2>Every conversation starts here.</h2>
+        <p>${status.providerMode === 'mock' ? 'Your development workspace. Connections use test providers.' : 'Keep your customers, conversations, and assistant in sync.'}</p>
+        <a class="btn primary" style="margin-top:16px" href="#/whatsapp">Open WhatsApp Connection ↗</a>
       </div>
       <div class="hero-orb">✦</div>
     </section>
@@ -490,6 +516,11 @@ route('#/bookings', 'Bookings', 'Real appointment records from the booking syste
         }
         <div class="pager"><span class="muted">${data.total} total</span><div><button id="prev" class="btn" ${state.offset === 0 ? 'disabled' : ''}>← Prev</button><button id="next" class="btn" ${state.offset + state.limit >= data.total ? 'disabled' : ''}>Next →</button></div></div>
       </section>`;
+    if (window.renderWhatsappRequests) {
+      const host = document.createElement('div');
+      view.appendChild(host);
+      await window.renderWhatsappRequests(host);
+    }
 
     view.querySelector('#status-filter').addEventListener('change', (e) => {
       state.status = e.target.value;
@@ -733,7 +764,7 @@ function connectionDot(live) {
   return `<span class="dot ${live ? 'green' : ''}"></span>`;
 }
 
-route('#/integrations', 'Integrations', 'Connect your production WhatsApp Business number and AI provider.', async (view) => {
+route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus the optional Meta Cloud API path kept for reference. The active WhatsApp channel is the QR-linked device.', async (view) => {
   async function draw() {
     const [waStatus, aiConfig, credentials] = await Promise.all([
       api('/api/dashboard/whatsapp/status'),
@@ -753,7 +784,7 @@ route('#/integrations', 'Integrations', 'Connect your production WhatsApp Busine
     view.innerHTML = `
       <section class="summary-row">
         <div class="summary-chip">
-          <span class="summary-name">WhatsApp Business</span>
+          <span class="summary-name">Meta Cloud API (legacy)</span>
           ${badge(waLive ? 'LIVE' : 'NOT CONNECTED', waLive ? 'green' : 'muted')}
         </div>
         <div class="summary-chip">
@@ -763,7 +794,7 @@ route('#/integrations', 'Integrations', 'Connect your production WhatsApp Busine
       </section>
 
       <section class="panel setup-card">
-        <h3>WhatsApp Business</h3>
+        <p class="eyebrow">LEGACY · META CLOUD API (NOT THE ACTIVE CHANNEL)</p><h3>Business API connection</h3><p class="muted">Kept for reference only. Customer messaging runs through the <a href="#/whatsapp">QR-linked WhatsApp session</a>; nothing here is required for it.</p>
         <p class="muted">Enter your production WhatsApp Business details below, save, then click Sync WhatsApp to verify the connection with Meta.</p>
 
         <form id="wa-form" autocomplete="off">

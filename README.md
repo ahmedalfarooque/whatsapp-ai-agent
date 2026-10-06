@@ -47,6 +47,9 @@ from for design rationale.
 
 ## 3. Local development
 
+> **Ports.** This application (API + dashboard + WhatsApp linked-device runtime) listens on **http://localhost:3000** (`PORT`). Anything on **localhost:3005** is the separate Antigravity/reference application and is not part of this project — do not use it for health checks, logs, or verification of this app.
+
+
 ```bash
 npm install
 cp .env.example .env      # fill in real or test values, see section 4

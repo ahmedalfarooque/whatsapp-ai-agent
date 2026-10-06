@@ -1,5 +1,7 @@
 import { env } from '../config/env';
-import { getBusinessSettings } from '../config/businessSettings';
+import { getBusinessSettings, formatBusinessHours, formatAddress } from '../config/businessSettings';
+import { listCustomerVisibleOffers, renderOfferLine } from '../offers/offerRepo';
+import { documentsForAiContext } from '../documents/documentStore';
 import type { KnowledgeBase } from '../knowledge/loader';
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -24,7 +26,36 @@ export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string): 
     .filter((line): line is string => Boolean(line))
     .join('\n');
 
+  // Published business profile, location, offers and documents — the same
+  // resolvers the WhatsApp templates and the dashboard use, so the AI can
+  // never contradict them or mention unpublished offers.
+  const profileLines = [
+    settings.businessNameAr ? `Arabic name: ${settings.businessNameAr}` : null,
+    settings.businessCategory ? `Category: ${settings.businessCategory}` : null,
+    settings.descriptionEn ? `About (EN): ${settings.descriptionEn}` : null,
+    settings.descriptionAr ? `About (AR): ${settings.descriptionAr}` : null,
+    formatAddress(settings, 'en') ? `Address: ${formatAddress(settings, 'en')}` : null,
+    `Google Maps: ${settings.googleMapsUrl}`,
+    `Opening hours:\n${formatBusinessHours(settings, 'en')}`,
+    settings.locationNotesEn ? `Location notes: ${settings.locationNotesEn}` : null,
+  ].filter((line): line is string => Boolean(line)).join('\n');
+  let offersSection = 'CURRENT OFFERS: none. If asked about offers or discounts, say there are no current promotions and offer a custom quotation.';
+  let documentsSection = '';
+  try {
+    const offers = listCustomerVisibleOffers();
+    if (offers.length) offersSection = `CURRENT OFFERS (the ONLY offers you may mention; never invent others):\n${offers.map((o) => renderOfferLine(o, 'en')).join('\n\n')}`;
+    const docs = documentsForAiContext();
+    if (docs.length) documentsSection = `\nBUSINESS DOCUMENTS (uploaded by staff; ${docs.filter((d) => d.customerVisible).length} may be mentioned to customers by title):\n${docs.map((d) => `--- ${d.title}${d.customerVisible ? ' (customer-visible)' : ' (internal reference only)'} ---\n${d.text}`).join('\n')}`;
+  } catch {
+    /* offers/documents tables may not exist in very old test databases */
+  }
+
   return `You are the WhatsApp customer assistant for ${settings.businessName}.
+
+BUSINESS PROFILE (published by staff — authoritative):
+${profileLines}
+
+${offersSection}${documentsSection}
 
 SCOPE AND HONESTY RULES (never break these):
 - Only answer using the "BUSINESS KNOWLEDGE" section below. Never invent

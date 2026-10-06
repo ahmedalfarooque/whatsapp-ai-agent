@@ -19,6 +19,12 @@ RUN npm run build \
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+ENV WHATSAPP_BROWSER_PATH=/usr/bin/chromium
+
+# QR linking runs a browser in the persistent app container.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends chromium \
+  && rm -rf /var/lib/apt/lists/*
 
 # Non-root runtime user.
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app

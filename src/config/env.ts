@@ -54,7 +54,7 @@ const envSchema = z
     GOOGLE_CALENDAR_ID: z.string().default('primary'),
     GOOGLE_PROJECT_ID: z.string().optional().default(''),
 
-    BUSINESS_NAME: z.string().default('The Business'),
+    BUSINESS_NAME: z.string().default('Rowad Alfa Auto Care'),
     BUSINESS_TIMEZONE: z.string().default('UTC'),
     BUSINESS_PHONE: z.string().optional().default(''),
     BUSINESS_EMAIL: z.string().optional().default(''),

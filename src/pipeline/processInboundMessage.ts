@@ -1,8 +1,17 @@
 import { getBusinessSettings } from '../config/businessSettings';
 import { logger, maskWaId } from '../logger';
-import { GENERIC_ERROR_REPLY, MESSAGE_DIRECTION } from '../config/constants';
+import { MESSAGE_DIRECTION } from '../config/constants';
 import type { InboundMessage } from '../webhook/parseInboundPayload';
-import { getOrCreateCustomer, setCustomerLanguage, type Customer, type CustomerLanguage } from '../memory/customerRepo';
+import {
+  getOrCreateCustomer,
+  setCustomerLanguage,
+  setCustomerMenuState,
+  getCustomerFlowData,
+  pauseCustomerAutomation,
+  resumeCustomerAutomation,
+  type Customer,
+  type CustomerLanguage,
+} from '../memory/customerRepo';
 import {
   getOrCreateActiveConversation,
   appendMessage,
@@ -10,111 +19,161 @@ import {
   resetConversation,
 } from '../memory/conversationRepo';
 import { clearBookingSession } from '../memory/bookingSessionRepo';
+import { createCustomerRequest } from '../memory/customerRequestRepo';
+import { notifyBusinessNewRequest } from '../requests/requestService';
 import { isRestartCommand } from '../restart/isRestartCommand';
 import { buildSystemPrompt } from '../llm/buildSystemPrompt';
 import { runAgentLoop } from '../llm/agentLoop';
-import { sendTextMessage, sendInteractiveMessage } from '../whatsapp/client';
+import { sendTextMessage } from '../whatsapp/client';
 import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
-import {
-  MENU_IDS,
-  buildLanguageSelectionMessage,
-  buildWelcomeText,
-  buildMainMenuMessage,
-  buildCategoryMessage,
-  buildLocationMessage,
-  detectLanguageFromText,
-  isMenuKeyword,
-  isChangeLanguageKeyword,
-} from '../automation/menu';
+import { MENU_IDS, isHardRestart, isHumanSupportRequest, isMenuKeyword } from '../automation/menu';
+import { MENU_STATES, DATA_DRIVEN_FALLBACKS, routeMenu, type RouteResult } from '../automation/menuRouter';
+import { renderCustomerOffers } from '../offers/offerRepo';
+import { resolveTemplate, type TemplateVars } from '../templates/templateRepo';
+import { getAutomationSettings, recordReplyActivity, type ReplyActivityKind } from '../automation/settingsRepo';
 
 export interface ProcessDependencies {
   knowledge: KnowledgeBase;
 }
 
-const RESTART_CONFIRMATION =
-  "Done — I've started a fresh conversation. How can I help you?";
-
 /**
- * Full processing pipeline for one inbound WhatsApp message: resolve
- * customer identity from the WhatsApp number, handle restart commands,
- * persist the message, run the LLM tool-calling loop, persist and send the
- * reply. Runs serialized per-customer via withCustomerLock to avoid race
- * conditions from concurrent/duplicate deliveries.
+ * Full processing pipeline for one inbound WhatsApp message: resolve the
+ * customer, store the message, apply automation settings and human-handoff
+ * pauses, handle restart commands, run the language-first guided menu
+ * (templates only — no generated text), and hand free text to the AI
+ * tool-calling loop. Every outbound bubble is persisted to the conversation
+ * so the dashboard shows exactly what the customer received. Runs serialized
+ * per customer via withCustomerLock; replies leave through whatever transport
+ * the inbound message arrived on.
  */
-export async function processInboundMessage(
-  msg: InboundMessage,
-  deps: ProcessDependencies,
-): Promise<void> {
+export async function processInboundMessage(msg: InboundMessage, deps: ProcessDependencies): Promise<void> {
   return withCustomerLock(msg.waId, () => processInboundMessageUnlocked(msg, deps));
 }
 
-async function processInboundMessageUnlocked(
-  msg: InboundMessage,
-  deps: ProcessDependencies,
-): Promise<void> {
+interface ReplyContext {
+  msg: InboundMessage;
+  customer: Customer;
+  conversationId: number;
+  channel: string;
+  language: CustomerLanguage;
+}
+
+/** Persists an outbound bubble, sends it, and records the activity. One call = one WhatsApp message. */
+async function reply(ctx: ReplyContext, text: string, kind: ReplyActivityKind, templateKey?: string, detail?: string): Promise<void> {
+  appendMessage(ctx.conversationId, {
+    role: 'assistant',
+    content: text,
+    direction: MESSAGE_DIRECTION.OUTBOUND,
+    messageType: 'text',
+    metadata: templateKey ? { templateKey } : undefined,
+  });
+  await sendTextMessage(ctx.msg.waId, text);
+  recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind, templateKey, detail });
+}
+
+async function replyTemplate(ctx: ReplyContext, key: string, kind: ReplyActivityKind = 'rule', vars: TemplateVars = {}, detail?: string): Promise<void> {
+  const text = resolveTemplate(key, ctx.language, { name: ctx.customer.display_name ?? ctx.msg.contactName ?? '', ...vars });
+  await reply(ctx, text, kind, key, detail);
+}
+
+function storeInbound(conversationId: number, msg: InboundMessage): void {
+  appendMessage(conversationId, {
+    role: 'user',
+    content: msg.text ?? (msg.interactiveId ? `[${msg.interactiveId}]` : `[${msg.type}]`),
+    whatsappMessageId: msg.messageId,
+    direction: MESSAGE_DIRECTION.INBOUND,
+    messageType: msg.type,
+  });
+}
+
+async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessDependencies): Promise<void> {
   const maskedId = maskWaId(msg.waId);
+  const channel = msg.channel ?? 'cloud';
+  const settings = getAutomationSettings();
+
+  let customer = getOrCreateCustomer(msg.waId, msg.contactName);
+  const conversation = getOrCreateActiveConversation(customer.id);
+  const language: CustomerLanguage = customer.language ?? 'en';
+  const ctx: ReplyContext = { msg, customer, conversationId: conversation.id, channel, language };
+
+  if (!settings.autoRepliesEnabled) {
+    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: 'Automatic replies are disabled' });
+    logger.info({ waId: maskedId }, 'automatic replies disabled — inbound message stored only');
+    if (msg.text || msg.interactiveId) storeInbound(conversation.id, msg);
+    return;
+  }
 
   if (msg.type !== 'text' && msg.type !== 'interactive') {
     logger.info({ waId: maskedId, type: msg.type }, 'ignoring unsupported inbound message type');
+    storeInbound(conversation.id, msg);
     try {
-      await sendTextMessage(
-        msg.waId,
-        "I can currently only read text messages — could you send that as text?",
-      );
+      await replyTemplate(ctx, 'unsupported_message');
     } catch (error) {
       logger.error({ waId: maskedId, error }, 'failed to notify customer of unsupported message type');
     }
     return;
   }
-  if (msg.type === 'text' && !msg.text) {
-    return;
-  }
+  if (msg.type === 'text' && !msg.text) return;
 
-  let customer = getOrCreateCustomer(msg.waId, msg.contactName);
-  const conversation = getOrCreateActiveConversation(customer.id);
+  storeInbound(conversation.id, msg);
 
-  if (msg.type === 'text' && isRestartCommand(msg.text)) {
-    appendMessage(conversation.id, {
-      role: 'user',
-      content: msg.text as string,
-      whatsappMessageId: msg.messageId,
-      direction: MESSAGE_DIRECTION.INBOUND,
-      messageType: msg.type,
-    });
+  // Restart: forget language, menu position, and booking state; the next turn starts from the welcome.
+  if (msg.type === 'text' && (isRestartCommand(msg.text) || isHardRestart(msg.text))) {
     clearBookingSession(conversation.id);
     customer = setCustomerLanguage(customer.id, null);
-    const freshConversation = resetConversation(customer.id);
-    appendMessage(freshConversation.id, {
-      role: 'assistant',
-      content: RESTART_CONFIRMATION,
-      direction: MESSAGE_DIRECTION.OUTBOUND,
-    });
-    await sendTextMessage(msg.waId, RESTART_CONFIRMATION);
-    await sendInteractiveMessage(msg.waId, buildLanguageSelectionMessage());
+    setCustomerMenuState(customer.id, null, null);
+    const fresh = resetConversation(customer.id);
+    const restartCtx: ReplyContext = { ...ctx, customer, conversationId: fresh.id };
+    await replyTemplate(restartCtx, 'restart_confirmation');
+    await replyTemplate(restartCtx, 'language_selection');
+    setCustomerMenuState(customer.id, MENU_STATES.AWAITING_LANGUAGE, null);
     logger.info({ waId: maskedId }, 'conversation restarted by customer command, language reset');
     return;
   }
 
-  const handledByMenu = await handleLanguageAndMenu(msg, customer, maskedId);
-  if (handledByMenu) return;
+  // Human takeover: stay silent until staff resume or the customer asks for the menu again.
+  if (customer.automation_paused === 1) {
+    if (msg.interactiveId === MENU_IDS.MAIN_MENU || (msg.type === 'text' && isMenuKeyword(msg.text))) {
+      customer = resumeCustomerAutomation(customer.id);
+      setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
+      await replyTemplate({ ...ctx, customer }, 'main_menu', 'rule', {}, 'Customer returned from human support');
+      return;
+    }
+    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: 'Human support mode — automation paused for this customer' });
+    logger.info({ waId: maskedId }, 'automation paused for customer (human support mode)');
+    return;
+  }
 
-  appendMessage(conversation.id, {
-    role: 'user',
-    content: msg.text as string,
-    whatsappMessageId: msg.messageId,
-    direction: MESSAGE_DIRECTION.INBOUND,
-    messageType: msg.type,
-  });
+  if (msg.type === 'text' && isHumanSupportRequest(msg.text)) {
+    pauseCustomerAutomation(customer.id, 'Customer requested a human');
+    setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
+    await replyTemplate(ctx, 'human_support', 'human_handoff');
+    return;
+  }
+
+  if (settings.ruleRepliesEnabled) {
+    const route = routeMenu({ text: msg.text, interactiveId: msg.interactiveId, customer });
+    if (route) {
+      await applyRoute(ctx, route);
+      return;
+    }
+  }
+
+  // Free text → AI agent loop (OpenRouter tool calling), unchanged behaviour.
+  if (!settings.aiRepliesEnabled) {
+    await replyTemplate(ctx, 'ai_disabled');
+    return;
+  }
 
   const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit);
   const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined);
 
   let finalText: string;
+  let kind: 'ai' | 'error' = 'ai';
   try {
     const loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
     finalText = loopResult.finalText;
-
     for (const generated of loopResult.generatedMessages) {
       appendMessage(conversation.id, {
         role: generated.role,
@@ -126,96 +185,55 @@ async function processInboundMessageUnlocked(
     }
   } catch (error) {
     logger.error({ waId: maskedId, error }, 'agent loop failed for inbound message');
-    finalText = GENERIC_ERROR_REPLY;
-    appendMessage(conversation.id, {
-      role: 'assistant',
-      content: finalText,
-      direction: MESSAGE_DIRECTION.OUTBOUND,
-    });
+    kind = 'error';
+    finalText = resolveTemplate('fallback_error', language);
+    appendMessage(conversation.id, { role: 'assistant', content: finalText, direction: MESSAGE_DIRECTION.OUTBOUND });
   }
 
   try {
     await sendTextMessage(msg.waId, finalText);
+    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? 'AI failed; fallback sent' : undefined });
   } catch (error) {
+    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: 'Reply could not be sent' });
     logger.error({ waId: maskedId, error }, 'failed to send reply to customer after processing');
   }
 }
 
-/**
- * Language selection + top-level menu navigation, handled entirely outside
- * the AI loop so it never depends on the LLM and can't drift from the fixed
- * set of menu IDs. Returns true when this function fully handled the inbound
- * message (menu/language interaction) and the caller should stop — false
- * means the message is free text meant for the AI agent loop.
- */
-async function handleLanguageAndMenu(
-  msg: InboundMessage,
-  customer: Customer,
-  maskedId: string,
-): Promise<boolean> {
-  let language: CustomerLanguage | null = customer.language;
-
-  if (!language) {
-    if (msg.interactiveId === MENU_IDS.LANG_EN) {
-      language = 'en';
-    } else if (msg.interactiveId === MENU_IDS.LANG_AR) {
-      language = 'ar';
-    } else if (msg.type === 'text') {
-      language = detectLanguageFromText(msg.text) ?? null;
-    }
-
-    if (!language) {
-      await sendInteractiveMessage(msg.waId, buildLanguageSelectionMessage());
-      return true;
-    }
-
-    setCustomerLanguage(customer.id, language);
-    await sendTextMessage(msg.waId, buildWelcomeText(language, customer.display_name ?? msg.contactName));
-    await sendInteractiveMessage(msg.waId, buildMainMenuMessage(language));
-    logger.info({ waId: maskedId, language }, 'customer selected language, showed main menu');
-    return true;
+/** Applies a router decision: state/language changes first, then the templates as separate bubbles, in order. */
+async function applyRoute(ctx: ReplyContext, route: RouteResult): Promise<void> {
+  let customer = ctx.customer;
+  if (route.language !== undefined) customer = setCustomerLanguage(customer.id, route.language);
+  if (route.state !== undefined || route.flowData !== undefined) {
+    const flowData = route.flowData === undefined ? getCustomerFlowData(customer) : route.flowData;
+    customer = setCustomerMenuState(customer.id, route.state === undefined ? customer.menu_state : route.state, flowData);
   }
+  if (route.kind === 'human_handoff') customer = pauseCustomerAutomation(customer.id, 'Customer chose "Talk to staff"');
 
-  if (msg.interactiveId) {
-    switch (msg.interactiveId) {
-      case MENU_IDS.CATEGORY_AUDIO:
-        await sendInteractiveMessage(msg.waId, buildCategoryMessage(language, 'audio'));
-        break;
-      case MENU_IDS.CATEGORY_ACCESSORIES:
-        await sendInteractiveMessage(msg.waId, buildCategoryMessage(language, 'accessories'));
-        break;
-      case MENU_IDS.CATEGORY_CARE:
-        await sendInteractiveMessage(msg.waId, buildCategoryMessage(language, 'care'));
-        break;
-      case MENU_IDS.PRICES:
-        await sendInteractiveMessage(msg.waId, buildCategoryMessage(language, 'prices'));
-        break;
-      case MENU_IDS.LOCATION:
-        await sendInteractiveMessage(msg.waId, buildLocationMessage(language));
-        break;
-      case MENU_IDS.CHANGE_LANGUAGE:
-        setCustomerLanguage(customer.id, null);
-        await sendInteractiveMessage(msg.waId, buildLanguageSelectionMessage());
-        break;
-      case MENU_IDS.MAIN_MENU:
-      default:
-        await sendInteractiveMessage(msg.waId, buildMainMenuMessage(language));
-        break;
-    }
-    return true;
-  }
-
-  if (msg.type === 'text') {
-    if (isChangeLanguageKeyword(msg.text, language)) {
-      setCustomerLanguage(customer.id, null);
-      await sendInteractiveMessage(msg.waId, buildLanguageSelectionMessage());
-      return true;
-    }
-    if (isMenuKeyword(msg.text, language)) {
-      await sendInteractiveMessage(msg.waId, buildMainMenuMessage(language));
-      return true;
+  const vars: TemplateVars = { ...route.vars };
+  if (route.request) {
+    const request = createCustomerRequest({ customerId: customer.id, waId: ctx.msg.waId, kind: route.request.kind, payload: route.request.payload });
+    vars.reference = request.reference;
+    logger.info({ waId: maskWaId(ctx.msg.waId), kind: route.request.kind, reference: request.reference }, 'customer request recorded from WhatsApp menu');
+    try {
+      notifyBusinessNewRequest(request);
+    } catch (error) {
+      logger.error({ error, reference: request.reference }, 'could not queue the staff alert for a new request');
     }
   }
 
-  return false;
+  const language: CustomerLanguage = (route.language ?? customer.language) || 'en';
+  const nextCtx: ReplyContext = { ...ctx, customer, language };
+  for (const key of route.send) {
+    await replyTemplate(nextCtx, resolveDataDrivenKey(key, language, vars), route.kind, vars);
+  }
+}
+
+/** Swaps a data-driven template for its fallback when there is no live data to show (e.g. no offers). */
+export function resolveDataDrivenKey(key: string, language: CustomerLanguage, vars: TemplateVars): string {
+  const rule = DATA_DRIVEN_FALLBACKS[key];
+  if (!rule) return key;
+  const offers = vars.offers ?? renderCustomerOffers(language);
+  if (!offers.trim()) return rule.fallback;
+  vars.offers = offers;
+  return key;
 }

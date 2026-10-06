@@ -7,6 +7,13 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+data/whatsapp-session/
+# Baileys linked-device credentials — these ARE the WhatsApp login. Never commit.
+data/baileys-auth/
+data/qa/
+data/runtime/
+.wwebjs_cache/
+.wwebjs_auth/
 !data/.gitkeep
 
 # Secrets — never commit
@@ -39,3 +46,13 @@ caddy_config/
 knowledge/.backups/
 
 .vercel
+
+# Local DB backups taken before migrations
+data/*.bak-*
+data/baileys-auth.corrupt-*/
+data/baileys-auth.loggedout-*/
+data/baileys-version.json
+
+data/baileys-auth*.json
+
+data/baileys-auth*.json

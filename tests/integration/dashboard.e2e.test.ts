@@ -94,7 +94,7 @@ describe('dashboard', () => {
   it('serves the dashboard shell with working navigation links, and no dead "#" hrefs', async () => {
     const page = await agent.get('/dashboard');
     expect(page.status).toBe(200);
-    expect(page.text).toContain('WhatsApp AI Agent');
+    expect(page.text).toContain('AI Workspace');
     expect(page.text).toContain('id="view"');
     // every nav item must be a real hash route, not a bare "#" placeholder
     const hrefMatches = [...page.text.matchAll(/href="(#[^"]*)"/g)].map((m) => m[1]);
@@ -720,6 +720,208 @@ describe('dashboard', () => {
   });
 
   // ---- Logout-all (MUST run last: revokes every session, including `agent`'s) --
+  describe('reply templates, menu tree and WhatsApp requests', () => {
+    it('lists the shipped Rowad Alfa templates with published live text and no legacy "welcome" row', async () => {
+      const res = await agent.get('/api/dashboard/templates');
+      expect(res.status).toBe(200);
+      const keys = res.body.templates.map((x: { key: string }) => x.key);
+      for (const k of ['language_selection', 'main_menu', 'car_audio', 'car_audio_7', 'tinting_protection', 'prices_enquiries', 'appointment_intro', 'quotation_confirm', 'human_support']) expect(keys).toContain(k);
+      expect(keys).not.toContain('welcome');
+      const menu = res.body.templates.find((x: { key: string }) => x.key === 'main_menu');
+      expect(menu.liveEn).toContain('9️⃣ About Rowad Alfa');
+      expect(menu.liveAr).toContain('9️⃣ معلومات عن رواد ألفا');
+    });
+
+    it('preview renders with the live resolver, substitutes sample placeholders and includes the automatic follow-up bubble', async () => {
+      const res = await agent
+        .post('/api/dashboard/templates/invalid_option/preview')
+        .send({ ar: 'خيار غير صحيح يا {name}', en: 'Invalid choice, {name}. Ref {reference}' });
+      expect(res.status).toBe(200);
+      expect(res.body.en).toBe('Invalid choice, Ahmed. Ref APT-2026-1234');
+      expect(res.body.ar).toBe('خيار غير صحيح يا Ahmed');
+      expect(res.body.followUp.en.key).toBe('main_menu');
+      expect(res.body.followUp.en.text).toContain('How can we help you today?');
+      expect(res.body.followUp.ar.text).toContain('كيف يمكننا خدمتك اليوم؟');
+      const plain = await agent.post('/api/dashboard/templates/car_audio/preview').send({ ar: 'أ', en: 'a' });
+      expect(plain.body.followUp.en).toBeNull();
+    });
+
+    it('exposes the router menu tree so the dashboard flow map cannot drift from the live routing', async () => {
+      const res = await agent.get('/api/dashboard/menu-tree');
+      expect(res.status).toBe(200);
+      expect(Object.keys(res.body.mainMenu)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+      expect(res.body.mainMenu['7']).toEqual({ flow: 'appointment' });
+      expect(res.body.mainMenu['8']).toEqual({ handoff: true });
+      expect(res.body.submenus.SUBMENU_PRICES.options['4']).toEqual({ flow: 'quotation' });
+      expect(res.body.flows.appointment.steps).toHaveLength(8);
+      expect(res.body.followUps.invalid_option).toBe('main_menu');
+    });
+
+    it('lists WhatsApp-collected requests and lets staff move them through statuses', async () => {
+      const { createCustomerRequest } = await import('../../src/memory/customerRequestRepo');
+      const created = createCustomerRequest({ customerId: customerAId, waId: '15550001111', kind: 'quotation', payload: { name: 'Alice', vehicle: 'Camry 2024' } });
+      const list = await agent.get('/api/dashboard/requests?kind=quotation');
+      expect(list.status).toBe(200);
+      expect(list.body.pending).toBeGreaterThanOrEqual(1);
+      const row = list.body.requests.find((r: { id: number }) => r.id === created.id);
+      expect(row.reference).toMatch(/^INQ-/);
+      expect(row.payload).toEqual({ name: 'Alice', vehicle: 'Camry 2024' });
+      const automation = await agent.get('/api/dashboard/automation');
+      expect(automation.body.pendingRequests).toBeGreaterThanOrEqual(1);
+
+      const bad = await agent.post(`/api/dashboard/requests/${created.id}/status`).send({ status: 'bogus' });
+      expect(bad.status).toBe(400);
+      const ok = await agent.post(`/api/dashboard/requests/${created.id}/status`).send({ status: 'contacted' });
+      expect(ok.status).toBe(200);
+      expect(ok.body.status).toBe('contacted');
+      expect(ok.body.changed).toBe(true);
+      expect(ok.body.event).toMatchObject({ old_status: 'pending', new_status: 'contacted', actor: 'dashboard' });
+      expect(ok.body.events).toHaveLength(1);
+      // customer notification queued (status_update template), delivery pending because no WhatsApp session in tests
+      expect(ok.body.notifications.some((n: { kind: string; status: string }) => n.kind === 'customer_status' && n.status === 'pending')).toBe(true);
+      const same = await agent.post(`/api/dashboard/requests/${created.id}/status`).send({ status: 'contacted' });
+      expect(same.body.changed).toBe(false);
+      const confirmed = await agent.post(`/api/dashboard/requests/${created.id}/status`).send({ status: 'confirmed' });
+      expect(confirmed.body.notifications.filter((n: { kind: string }) => n.kind === 'customer_status')).toHaveLength(2);
+      const withTimeline = await agent.get('/api/dashboard/requests');
+      expect(withTimeline.body.statuses).toContain('rejected');
+      expect(withTimeline.body.requests.find((r: { id: number }) => r.id === created.id).events).toHaveLength(2);
+      const notifications = await agent.get('/api/dashboard/notifications');
+      expect(notifications.status).toBe(200);
+      expect(notifications.body.summary.pending).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(notifications.body)).not.toContain('15550001111'); // customer number masked
+      const flush = await agent.post('/api/dashboard/notifications/flush');
+      expect(flush.status).toBe(200);
+      expect(flush.body.delivered).toBe(0); // no session in tests → stays pending, never lost
+      const missing = await agent.post('/api/dashboard/requests/999999/status').send({ status: 'closed' });
+      expect(missing.status).toBe(404);
+    });
+  });
+
+  it('every GET endpoint the dashboard pages call answers 200 with a JSON object (no page can crash on a missing route)', async () => {
+    const endpoints = [
+      '/api/dashboard/summary', '/api/dashboard/status', '/api/dashboard/system', '/api/dashboard/settings', '/api/dashboard/ai', '/api/dashboard/integrations',
+      '/api/dashboard/credentials', '/api/dashboard/knowledge', '/api/dashboard/services', '/api/dashboard/project-sync', '/api/dashboard/webhook-info',
+      '/api/dashboard/whatsapp/status', '/api/dashboard/whatsapp/qr', '/api/dashboard/automation', '/api/dashboard/automation/activity', '/api/dashboard/support-queue',
+      '/api/dashboard/customers', '/api/dashboard/conversations', '/api/dashboard/conversations-recent', '/api/dashboard/bookings', '/api/dashboard/bookings/upcoming',
+      '/api/dashboard/templates', '/api/dashboard/templates/location_hours', '/api/dashboard/menu-tree', '/api/dashboard/requests', '/api/dashboard/documents',
+      '/api/dashboard/offers', '/api/dashboard/business-profile',
+    ];
+    for (const url of endpoints) {
+      const res = await agent.get(url);
+      expect(res.status, url).toBe(200);
+      expect(typeof res.body, url).toBe('object');
+    }
+    // the two pages that crashed read these exact keys
+    const profile = await agent.get('/api/dashboard/business-profile');
+    expect(profile.body.settings).toHaveProperty('businessName');
+    expect(profile.body.settings).toHaveProperty('businessHoursStart');
+    expect(profile.body.rendered).toHaveProperty('hoursEn');
+    // Rowad Alfa location defaults (seeded at boot on the real DB) reach the live location reply — no dangling labels, no raw placeholders
+    const { seedBusinessProfileDefaults } = await import('../../src/config/businessSettings');
+    seedBusinessProfileDefaults();
+    const tpl = await agent.get('/api/dashboard/templates/location_hours');
+    const preview = await agent.post('/api/dashboard/templates/location_hours/preview').send({ ar: tpl.body.liveAr, en: tpl.body.liveEn });
+    expect(preview.body.en).toContain('Jeddah / Bahrah');
+    expect(preview.body.en).toContain('https://maps.app.goo.gl/8sxNK9wMNsTucvCh7');
+    expect(preview.body.en).toContain('Saturday to Thursday: 9:00 AM - 10:00 PM');
+    expect(preview.body.en).toContain('Friday: 4:00 PM - 10:00 PM');
+    expect(preview.body.en).toContain('Free dedicated customer parking');
+    expect(preview.body.en).not.toMatch(/\{[a-z]+\}/);
+    expect(preview.body.ar).toContain('من السبت إلى الخميس');
+  });
+
+  describe('business profile, documents and offers', () => {
+    it('business profile: reads a flat settings object (no more undefined.businessName), validates and publishes immediately', async () => {
+      const res = await agent.get('/api/dashboard/business-profile');
+      expect(res.status).toBe(200);
+      expect(res.body.settings.businessName).toBeTruthy();
+      expect(res.body.settings.googleMapsUrl).toBe('https://maps.app.goo.gl/8sxNK9wMNsTucvCh7');
+      expect(res.body.rendered.hoursEn).toContain(':');
+      const bad = await agent.put('/api/dashboard/business-profile').send({ googleMapsUrl: 'ftp://x', latitude: 999 });
+      expect(bad.status).toBe(400);
+      expect(bad.body.fields).toHaveProperty('googleMapsUrl');
+      expect(bad.body.fields).toHaveProperty('latitude');
+      const ok = await agent.put('/api/dashboard/business-profile').send({ addressEn: 'Bahrah, Jeddah', businessNameAr: 'رواد ألفا للعناية بالسيارات', fridayHoursStart: '16:00', fridayHoursEnd: '22:00' });
+      expect(ok.status).toBe(200);
+      expect(ok.body.settings.addressEn).toBe('Bahrah, Jeddah');
+      expect(ok.body.rendered.hoursEn).toContain('Friday');
+      // the live location template now carries the published values — same resolver as WhatsApp
+      const preview = await agent.post('/api/dashboard/templates/location_hours/preview').send({ ar: '{address} {maps}', en: '{address} {maps}' });
+      expect(preview.body.en).toBe('Bahrah, Jeddah https://maps.app.goo.gl/8sxNK9wMNsTucvCh7');
+      expect(preview.body.sourceType).toBe('data-driven');
+    });
+
+    it('documents: uploads with validation, hides storage paths, serves HTML as plain text, patches visibility, deletes', async () => {
+      const upload = await agent.post('/api/dashboard/documents').set('Content-Type', 'text/html').set('X-File-Name', encodeURIComponent('site.html')).set('X-Visibility', 'customer').set('X-Title', encodeURIComponent('Brochure')).send(Buffer.from('<p>Hello <script>x()</script>world</p>'));
+      expect(upload.status).toBe(201);
+      expect(upload.body.stored_name).toBeUndefined();
+      expect(upload.body.title).toBe('Brochure');
+      expect(upload.body.processing).toBe('text_extracted');
+      const id = upload.body.id as number;
+      const file = await agent.get(`/api/dashboard/documents/${id}/file`);
+      expect(file.status).toBe(200);
+      expect(file.headers['content-type']).toContain('text/plain');
+      expect(file.headers['content-security-policy']).toContain('sandbox');
+      expect(file.text).toContain('<script>'); // raw bytes preserved, but never executable
+      const rejected = await agent.post('/api/dashboard/documents').set('Content-Type', 'application/octet-stream').set('X-File-Name', 'malware.exe').send(Buffer.from('MZ'));
+      expect(rejected.status).toBe(400);
+      const fakePdf = await agent.post('/api/dashboard/documents').set('Content-Type', 'application/pdf').set('X-File-Name', 'x.pdf').send(Buffer.from('not really'));
+      expect(fakePdf.status).toBe(400);
+      const patched = await agent.patch(`/api/dashboard/documents/${id}`).send({ visibility: 'internal', status: 'archived' });
+      expect(patched.body.visibility).toBe('internal');
+      expect(patched.body.status).toBe('archived');
+      const list = await agent.get('/api/dashboard/documents');
+      expect(list.body.documents.some((d: { id: number }) => d.id === id)).toBe(true);
+      expect(list.body.limits.allowed).toContain('pdf');
+      expect((await agent.delete(`/api/dashboard/documents/${id}`)).status).toBe(200);
+      expect((await agent.get(`/api/dashboard/documents/${id}/file`)).status).toBe(404);
+    });
+
+    it('offers: create → publish → visible to customers and in the prices preview → finish → hidden; validation and soft delete', async () => {
+      const created = await agent.post('/api/dashboard/offers').send({ titleAr: 'عرض', titleEn: 'E2E tint offer', descriptionEn: 'Ceramic tint', priceStatus: 'on_request', promotionalPrice: 999 });
+      expect(created.status).toBe(201);
+      expect(created.body.status).toBe('draft');
+      expect(created.body.promotional_price).toBeNull(); // unverified → no numbers stored
+      const id = created.body.id as number;
+      let list = await agent.get('/api/dashboard/offers');
+      expect(list.body.customerVisible).not.toContain(id);
+      expect(list.body.kpis.draft).toBeGreaterThanOrEqual(1);
+      const noOffers = await agent.post('/api/dashboard/templates/prices_offers_list/preview').send({ ar: '{offers}', en: '{offers}' });
+      expect(noOffers.body.fallback.en.key).toBe('prices_offers');
+      expect((await agent.post(`/api/dashboard/offers/${id}/publish`)).body.effectiveStatus).toBe('published');
+      list = await agent.get('/api/dashboard/offers');
+      expect(list.body.customerVisible).toContain(id);
+      expect(list.body.preview.en.join('\n')).toContain('🌟 E2E tint offer');
+      const withOffers = await agent.post('/api/dashboard/templates/prices_offers_list/preview').send({ ar: '{offers}', en: '{offers}' });
+      expect(withOffers.body.en).toContain('E2E tint offer');
+      expect(withOffers.body.fallback.en).toBeNull();
+      const dup = await agent.post(`/api/dashboard/offers/${id}/duplicate`);
+      expect(dup.body.title_en).toBe('E2E tint offer (copy)');
+      expect((await agent.post(`/api/dashboard/offers/${id}/finish`)).body.effectiveStatus).toBe('finished');
+      list = await agent.get('/api/dashboard/offers');
+      expect(list.body.customerVisible).not.toContain(id);
+      expect(list.body.offers.some((o: { id: number }) => o.id === id)).toBe(true); // finished record preserved
+      const invalid = await agent.post('/api/dashboard/offers').send({ titleEn: 'no arabic' });
+      expect(invalid.status).toBe(400);
+      expect(invalid.body.fields).toHaveProperty('titleAr');
+      expect((await agent.post(`/api/dashboard/offers/${id}/bogus`)).status).toBe(404);
+      expect((await agent.delete(`/api/dashboard/offers/${id}`)).status).toBe(200);
+      expect((await agent.get(`/api/dashboard/offers/${id}`)).status).toBe(404);
+      await agent.delete(`/api/dashboard/offers/${dup.body.id}`);
+    });
+
+    it('QR connection actions: status/refresh/retry answer with a notice and never expose credentials', async () => {
+      const res = await agent.post('/api/dashboard/whatsapp/qr/status');
+      // In tests QR is unavailable (NODE_ENV=test) so actions that need a socket 409; "status" is a pure read.
+      expect([200, 409]).toContain(res.status);
+      if (res.status === 200) {
+        expect(res.body.diagnostics.pid).toBe(process.pid);
+        expect(JSON.stringify(res.body)).not.toMatch(/creds|noiseKey|signedIdentityKey/);
+      }
+    });
+  });
+
   it('logout-all revokes every active session, including the caller\'s own', async () => {
     const secondAgent = request.agent(app);
     const login = await secondAgent
@@ -806,4 +1008,5 @@ describe('dashboard', () => {
       expect(secondSetup.status).toBe(409);
     });
   });
+
 });

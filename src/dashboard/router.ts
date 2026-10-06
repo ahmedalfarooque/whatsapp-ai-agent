@@ -28,6 +28,7 @@ import {
   adminCount,
   createAdminUser,
   verifyAdminCredentials,
+  verifySessionToken,
   createSession,
   destroySessionByToken,
   destroyAllSessions,
@@ -57,6 +58,46 @@ import {
 } from '../config/businessSettings';
 import { getWhatsappConnectionState, markWhatsappConfigurationSaved } from '../config/whatsappConnection';
 import { syncWhatsapp } from './whatsappSync';
+import { getQrStatus, startQrConnection, stopQrConnection, refreshQrConnection, retryQrConnection } from '../whatsapp/qrConnection';
+import { getBusinessSettings, getBusinessSettingsOverrides, formatBusinessHours, formatAddress } from '../config/businessSettings';
+import { getQrSession } from '../memory/qrSessionRepo';
+import {
+  saveDocument, listDocuments, getDocument, updateDocument, replaceDocumentFile, deleteDocument, documentPath, serveContentType,
+  DocumentValidationError, MAX_DOCUMENT_BYTES, ALLOWED_TYPES, type DocumentVisibility, type DocumentStatus,
+} from '../documents/documentStore';
+import {
+  listOffers, getOffer, createOffer, updateOffer, setOfferStatus, duplicateOffer, deleteOffer, offerKpis,
+  listCustomerVisibleOffers, renderOfferLine, OfferValidationError, type OfferStatus,
+} from '../offers/offerRepo';
+import {
+  listTemplates,
+  getTemplate,
+  saveTemplateDraft,
+  publishTemplate,
+  discardTemplateDraft,
+  resetTemplateToDefault,
+  renderTemplateText,
+  resolveTemplate,
+  PREVIEW_VARS,
+  templateSourceType,
+  TemplateValidationError,
+} from '../templates/templateRepo';
+import { FOLLOW_UP_TEMPLATES, MAIN_MENU_OPTIONS, SUBMENUS, FLOWS, DATA_DRIVEN_FALLBACKS } from '../automation/menuRouter';
+import {
+  listCustomerRequests,
+  countCustomerRequests,
+  REQUEST_STATUSES,
+  type CustomerRequestKind,
+} from '../memory/customerRequestRepo';
+import { changeRequestStatus, requestTimeline, isRequestStatus, businessNotificationJid } from '../requests/requestService';
+import { listOutbox, outboxSummary, flushOutbox, retryNotification } from '../notifications/outbox';
+import {
+  getAutomationSettings,
+  updateAutomationSettings,
+  listReplyActivity,
+  type ReplyActivityKind,
+} from '../automation/settingsRepo';
+import { listPausedCustomers, pauseCustomerAutomation, resumeCustomerAutomation } from '../memory/customerRepo';
 
 function parsePageParams(req: Request): { limit: number; offset: number } {
   const limit = Number.parseInt(String(req.query.limit ?? '25'), 10);
@@ -84,7 +125,7 @@ export function createDashboardRouter(): Router {
   router.get('/api/dashboard/auth/status', (_req, res) => {
     const hasAdmin = adminCount() > 0;
     const token = readSessionToken(_req);
-    res.json({ hasAdmin, authenticated: hasAdmin && Boolean(token) });
+    res.json({ hasAdmin, authenticated: hasAdmin && Boolean(token && verifySessionToken(token)) });
   });
 
   router.post('/api/dashboard/auth/setup', setupLimiter, (req, res) => {
@@ -176,6 +217,331 @@ export function createDashboardRouter(): Router {
   });
 
   // ---- Overview -------------------------------------------------------
+  // ---- WhatsApp linked-device (QR) connection ---------------------------
+  router.get('/api/dashboard/whatsapp/qr', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(getQrStatus());
+  });
+  const qrLimiter = rateLimit({ windowMs: 60_000, limit: 12, standardHeaders: true, legacyHeaders: false });
+  router.post('/api/dashboard/whatsapp/qr/:action', qrLimiter, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      let notice: string | null = null;
+      if (req.params.action === 'connect') await startQrConnection();
+      else if (req.params.action === 'refresh') notice = (await refreshQrConnection()).notice;
+      else if (req.params.action === 'retry') notice = (await retryQrConnection()).notice;
+      else if (req.params.action === 'status') notice = 'status';
+      else if (req.params.action === 'disconnect') await stopQrConnection();
+      else { res.status(404).json({ error: 'Unknown connection action' }); return; }
+      res.json({ ...getQrStatus(), notice });
+    } catch (error) {
+      logger.warn({ error }, 'QR connection action failed');
+      res.status(409).json({ error: 'QR connection could not change. Use a persistent Node server and try again.' });
+    }
+  });
+
+  // ---- Business profile & location (one resolver: WhatsApp {business}/{maps}/{hours}/{address}, preview, AI) ----
+  function businessProfileView() {
+    const settings = getBusinessSettings();
+    const session = getQrSession();
+    return {
+      settings,
+      overrides: getBusinessSettingsOverrides(),
+      activeNumber: session.phoneNumber,
+      activeProfileName: session.displayName,
+      rendered: {
+        hoursAr: formatBusinessHours(settings, 'ar'),
+        hoursEn: formatBusinessHours(settings, 'en'),
+        addressAr: formatAddress(settings, 'ar'),
+        addressEn: formatAddress(settings, 'en'),
+      },
+      updatedAt: (getDb().prepare('SELECT updated_at FROM business_settings WHERE id = 1').get() as { updated_at: string } | undefined)?.updated_at ?? null,
+    };
+  }
+  router.get('/api/dashboard/business-profile', (_req, res) => {
+    res.json(businessProfileView());
+  });
+  router.put('/api/dashboard/business-profile', (req, res) => {
+    try {
+      updateBusinessSettings(req.body ?? {});
+      res.json(businessProfileView());
+    } catch (error) {
+      if (error instanceof BusinessSettingsValidationError) { res.status(error.status).json({ error: 'validation_failed', fields: error.fields }); return; }
+      logger.error({ error }, 'dashboard: failed to save business profile');
+      res.status(500).json({ error: 'internal_server_error' });
+    }
+  });
+
+  // ---- Business documents (uploads) -----------------------------------------
+  const rawUpload = express.raw({ type: () => true, limit: MAX_DOCUMENT_BYTES + 1024 });
+  function documentError(res: Response, error: unknown): void {
+    if (error instanceof DocumentValidationError) { res.status(error.status).json({ error: error.message }); return; }
+    if ((error as { type?: string })?.type === 'entity.too.large') { res.status(413).json({ error: `File exceeds ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB` }); return; }
+    logger.error({ error }, 'document operation failed');
+    res.status(500).json({ error: 'Document operation failed' });
+  }
+  function publicDoc(d: ReturnType<typeof getDocument>) {
+    if (!d) return null;
+    // stored_name / filesystem details never leave the server.
+    const { stored_name: _hidden, extracted_text, ...rest } = d;
+    return { ...rest, hasExtractedText: Boolean(extracted_text), fileUrl: `/api/dashboard/documents/${d.id}/file` };
+  }
+  router.get('/api/dashboard/documents', (req, res) => {
+    const status = typeof req.query.status === 'string' && ['active', 'archived'].includes(req.query.status) ? (req.query.status as DocumentStatus) : undefined;
+    res.json({ documents: listDocuments({ status }).map(publicDoc), limits: { maxBytes: MAX_DOCUMENT_BYTES, allowed: Object.keys(ALLOWED_TYPES) } });
+  });
+  router.post('/api/dashboard/documents', rawUpload, (req, res) => {
+    try {
+      const name = decodeURIComponent(String(req.header('x-file-name') ?? 'upload'));
+      const visibility = String(req.header('x-visibility') ?? 'internal') as DocumentVisibility;
+      const title = req.header('x-title') ? decodeURIComponent(String(req.header('x-title'))) : null;
+      const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      const doc = saveDocument({ originalName: name, mimeType: String(req.header('content-type') ?? ''), bytes, visibility, title, uploadedBy: actor(req) });
+      res.status(201).json(publicDoc(doc));
+    } catch (error) { documentError(res, error); }
+  });
+  router.get('/api/dashboard/documents/:id/file', (req, res) => {
+    const doc = getDocument(Number.parseInt(req.params.id, 10));
+    if (!doc) { res.status(404).json({ error: 'Document not found' }); return; }
+    try {
+      const filePath = documentPath(doc);
+      res.setHeader('Content-Type', serveContentType(doc));
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+      res.setHeader('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="${encodeURIComponent(doc.original_name)}"`);
+      res.sendFile(filePath);
+    } catch (error) { documentError(res, error); }
+  });
+  router.patch('/api/dashboard/documents/:id', (req, res) => {
+    try {
+      const body = (req.body ?? {}) as { title?: string | null; visibility?: DocumentVisibility; status?: DocumentStatus };
+      const doc = updateDocument(Number.parseInt(req.params.id, 10), body);
+      if (!doc) { res.status(404).json({ error: 'Document not found' }); return; }
+      res.json(publicDoc(doc));
+    } catch (error) { documentError(res, error); }
+  });
+  router.put('/api/dashboard/documents/:id/file', rawUpload, (req, res) => {
+    try {
+      const name = decodeURIComponent(String(req.header('x-file-name') ?? 'upload'));
+      const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      const doc = replaceDocumentFile(Number.parseInt(req.params.id, 10), { originalName: name, mimeType: String(req.header('content-type') ?? ''), bytes });
+      if (!doc) { res.status(404).json({ error: 'Document not found' }); return; }
+      res.json(publicDoc(doc));
+    } catch (error) { documentError(res, error); }
+  });
+  router.delete('/api/dashboard/documents/:id', (req, res) => {
+    if (!deleteDocument(Number.parseInt(req.params.id, 10))) { res.status(404).json({ error: 'Document not found' }); return; }
+    res.json({ ok: true });
+  });
+
+  // ---- Offers & discounts -----------------------------------------------------
+  function offerError(res: Response, error: unknown): void {
+    if (error instanceof OfferValidationError) { res.status(error.status).json({ error: 'validation_failed', fields: error.fields }); return; }
+    logger.error({ error }, 'offer operation failed');
+    res.status(500).json({ error: 'Offer operation failed' });
+  }
+  router.get('/api/dashboard/offers', (_req, res) => {
+    const offers = listOffers();
+    res.json({
+      offers,
+      kpis: offerKpis(),
+      customerVisible: listCustomerVisibleOffers().map((o) => o.id),
+      preview: { ar: listCustomerVisibleOffers().map((o) => renderOfferLine(o, 'ar')), en: listCustomerVisibleOffers().map((o) => renderOfferLine(o, 'en')) },
+    });
+  });
+  router.get('/api/dashboard/offers/:id', (req, res) => {
+    const offer = getOffer(Number.parseInt(req.params.id, 10));
+    if (!offer) { res.status(404).json({ error: 'Offer not found' }); return; }
+    res.json({ ...offer, preview: { ar: renderOfferLine(offer, 'ar'), en: renderOfferLine(offer, 'en') } });
+  });
+  router.post('/api/dashboard/offers', (req, res) => {
+    try { res.status(201).json(createOffer(req.body, actor(req))); } catch (error) { offerError(res, error); }
+  });
+  router.put('/api/dashboard/offers/:id', (req, res) => {
+    try {
+      const offer = updateOffer(Number.parseInt(req.params.id, 10), req.body, actor(req));
+      if (!offer) { res.status(404).json({ error: 'Offer not found' }); return; }
+      res.json(offer);
+    } catch (error) { offerError(res, error); }
+  });
+  router.post('/api/dashboard/offers/:id/:action', (req, res) => {
+    try {
+      const id = Number.parseInt(req.params.id, 10);
+      const map: Record<string, OfferStatus> = { publish: 'published', unpublish: 'draft', finish: 'finished', archive: 'archived', restore: 'draft' };
+      let offer;
+      if (req.params.action === 'duplicate') offer = duplicateOffer(id, actor(req));
+      else if (map[req.params.action]) offer = setOfferStatus(id, map[req.params.action]!, actor(req));
+      else { res.status(404).json({ error: 'Unknown offer action' }); return; }
+      if (!offer) { res.status(404).json({ error: 'Offer not found' }); return; }
+      res.json(offer);
+    } catch (error) { offerError(res, error); }
+  });
+  router.delete('/api/dashboard/offers/:id', (req, res) => {
+    if (!deleteOffer(Number.parseInt(req.params.id, 10), actor(req))) { res.status(404).json({ error: 'Offer not found' }); return; }
+    res.json({ ok: true });
+  });
+
+  // ---- Reply templates (default / draft / live) ---------------------------
+  function templateError(res: Response, error: unknown): void {
+    if (error instanceof TemplateValidationError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    logger.error({ error }, 'template operation failed');
+    res.status(500).json({ error: 'Template operation failed' });
+  }
+  function actor(req: Request): string {
+    const token = readSessionToken(req);
+    const session = token ? verifySessionToken(token) : null;
+    return session ? `admin#${session.adminUserId}` : 'admin';
+  }
+  router.get('/api/dashboard/templates', (_req, res) => {
+    res.json({
+      templates: listTemplates().map((t) => ({ ...t, sourceType: templateSourceType(t.liveAr + t.liveEn), fallbackOf: Object.entries(DATA_DRIVEN_FALLBACKS).find(([, r]) => r.fallback === t.key)?.[0] ?? null, dataFallback: DATA_DRIVEN_FALLBACKS[t.key]?.fallback ?? null })),
+      followUps: FOLLOW_UP_TEMPLATES,
+    });
+  });
+  router.get('/api/dashboard/templates/:key', (req, res) => {
+    const template = getTemplate(req.params.key);
+    if (!template) { res.status(404).json({ error: 'Template not found' }); return; }
+    res.json(template);
+  });
+  // Preview = exactly what the customer would receive: the same renderer the
+  // live sender uses, plus any follow-up bubble the router always sends next
+  // (rendered from LIVE text, since that is what actually goes out).
+  router.post('/api/dashboard/templates/:key/preview', (req, res) => {
+    const body = (req.body ?? {}) as { ar?: unknown; en?: unknown };
+    const followKey = FOLLOW_UP_TEMPLATES[req.params.key];
+    const followUp = (lang: 'ar' | 'en') => {
+      if (!followKey) return null;
+      try { return { key: followKey, text: resolveTemplate(followKey, lang, PREVIEW_VARS) }; } catch { return null; }
+    };
+    const rule = DATA_DRIVEN_FALLBACKS[req.params.key];
+    const fallbackFor = (lang: 'ar' | 'en') => {
+      if (!rule) return null;
+      const offers = listCustomerVisibleOffers();
+      if (offers.length) return null;
+      try { return { key: rule.fallback, text: resolveTemplate(rule.fallback, lang, PREVIEW_VARS), reason: 'No customer-visible offers right now — customers receive this template instead.' }; } catch { return null; }
+    };
+    res.json({
+      ar: typeof body.ar === 'string' ? renderTemplateText(body.ar, { ...PREVIEW_VARS, language: 'ar' }) : '',
+      en: typeof body.en === 'string' ? renderTemplateText(body.en, { ...PREVIEW_VARS, language: 'en' }) : '',
+      followUp: { ar: followUp('ar'), en: followUp('en') },
+      fallback: { ar: fallbackFor('ar'), en: fallbackFor('en') },
+      sourceType: templateSourceType(`${typeof body.ar === 'string' ? body.ar : ''}${typeof body.en === 'string' ? body.en : ''}`),
+      sampleVars: PREVIEW_VARS,
+    });
+  });
+  /** The menu structure the router enforces (numbers → actions); the dashboard flow map is built from this. */
+  router.get('/api/dashboard/menu-tree', (_req, res) => {
+    res.json({ mainMenu: MAIN_MENU_OPTIONS, submenus: SUBMENUS, flows: {
+      appointment: { intro: FLOWS.appointment.intro, confirm: FLOWS.appointment.confirm, fields: FLOWS.appointment.fields, steps: FLOWS.appointment.fields.map((_, i) => (i === 0 ? FLOWS.appointment.intro : FLOWS.appointment.stepTemplate(i + 1))) },
+      quotation: { intro: FLOWS.quotation.intro, confirm: FLOWS.quotation.confirm, fields: FLOWS.quotation.fields, steps: FLOWS.quotation.fields.map((_, i) => (i === 0 ? FLOWS.quotation.intro : FLOWS.quotation.stepTemplate(i + 1))) },
+    }, followUps: FOLLOW_UP_TEMPLATES });
+  });
+
+  // ---- WhatsApp-collected requests (appointment / quotation) ----------------
+  router.get('/api/dashboard/requests', (req, res) => {
+    const kind = typeof req.query.kind === 'string' && ['appointment', 'quotation'].includes(req.query.kind) ? (req.query.kind as CustomerRequestKind) : undefined;
+    const status = isRequestStatus(req.query.status) ? req.query.status : undefined;
+    const limit = Number.parseInt(String(req.query.limit ?? '50'), 10);
+    const requests = listCustomerRequests({ kind, status, limit: Number.isFinite(limit) ? limit : 50 }).map((rq) => ({ ...rq, ...requestTimeline(rq.id) }));
+    res.json({
+      requests,
+      pending: countCustomerRequests('pending'),
+      statuses: REQUEST_STATUSES,
+      outbox: outboxSummary(),
+      staffTarget: businessNotificationJid() ? 'linked' : 'none',
+    });
+  });
+  router.post('/api/dashboard/requests/:id/status', (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    const status = (req.body as { status?: unknown })?.status;
+    if (!isRequestStatus(status)) {
+      res.status(400).json({ error: `status must be one of: ${REQUEST_STATUSES.join(', ')}` });
+      return;
+    }
+    const result = changeRequestStatus(id, status, { type: 'dashboard', detail: actor(req) });
+    if (!result) { res.status(404).json({ error: 'Request not found' }); return; }
+    res.json({ ...result.request, changed: result.changed, event: result.event, queued: result.notifications.length, ...requestTimeline(id) });
+  });
+  router.get('/api/dashboard/notifications', (req, res) => {
+    const status = typeof req.query.status === 'string' && ['pending', 'sent', 'failed'].includes(req.query.status) ? (req.query.status as 'pending' | 'sent' | 'failed') : undefined;
+    res.json({ notifications: listOutbox({ status, limit: 100 }).map((n) => ({ ...n, target_jid: n.target_jid.replace(/^(\d{0,4})\d+(?=\d{4}@)/, '$1****') })), summary: outboxSummary() });
+  });
+  router.post('/api/dashboard/notifications/flush', async (_req, res) => {
+    const delivered = await flushOutbox();
+    res.json({ delivered, summary: outboxSummary() });
+  });
+  router.post('/api/dashboard/notifications/:id/retry', async (req, res) => {
+    if (!retryNotification(Number.parseInt(req.params.id, 10))) { res.status(404).json({ error: 'Notification not found or already sent' }); return; }
+    const delivered = await flushOutbox();
+    res.json({ delivered, summary: outboxSummary() });
+  });
+  router.post('/api/dashboard/templates/:key/draft', (req, res) => {
+    try {
+      const body = (req.body ?? {}) as { ar?: unknown; en?: unknown };
+      res.json(saveTemplateDraft(req.params.key, { ar: body.ar, en: body.en }, actor(req)));
+    } catch (error) { templateError(res, error); }
+  });
+  router.post('/api/dashboard/templates/:key/publish', (req, res) => {
+    try {
+      const body = (req.body ?? {}) as { ar?: unknown; en?: unknown };
+      const explicit = typeof body.ar === 'string' || typeof body.en === 'string' ? { ar: body.ar, en: body.en } : undefined;
+      res.json(publishTemplate(req.params.key, explicit, actor(req)));
+    } catch (error) { templateError(res, error); }
+  });
+  router.post('/api/dashboard/templates/:key/discard-draft', (req, res) => {
+    try { res.json(discardTemplateDraft(req.params.key)); } catch (error) { templateError(res, error); }
+  });
+  router.post('/api/dashboard/templates/:key/reset', (req, res) => {
+    try { res.json(resetTemplateToDefault(req.params.key, actor(req))); } catch (error) { templateError(res, error); }
+  });
+
+  // ---- Automatic reply control center --------------------------------------
+  router.get('/api/dashboard/automation', (_req, res) => {
+    const qr = getQrStatus();
+    res.json({
+      settings: getAutomationSettings(),
+      connection: { phase: qr.phase, phoneNumber: qr.phoneNumber, detail: qr.detail },
+      pausedCustomers: listPausedCustomers().length,
+      pendingRequests: countCustomerRequests('pending'),
+      templates: listTemplates().map((t) => ({ key: t.key, titleEn: t.titleEn, titleAr: t.titleAr, status: t.status, hasDraft: t.hasDraft, isModified: t.isModified })),
+    });
+  });
+  router.patch('/api/dashboard/automation', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Record<string, boolean> = {};
+    for (const key of ['autoRepliesEnabled', 'ruleRepliesEnabled', 'aiRepliesEnabled'] as const) {
+      if (key in body) {
+        if (typeof body[key] !== 'boolean') { res.status(400).json({ error: `${key} must be true or false` }); return; }
+        patch[key] = body[key] as boolean;
+      }
+    }
+    res.json(updateAutomationSettings(patch));
+  });
+  router.get('/api/dashboard/automation/activity', (req, res) => {
+    const kind = typeof req.query.kind === 'string' ? (req.query.kind as ReplyActivityKind) : undefined;
+    const limit = Number.parseInt(String(req.query.limit ?? '50'), 10);
+    res.json({ activity: listReplyActivity({ kind, limit: Number.isFinite(limit) ? limit : 50 }) });
+  });
+
+  // ---- Human support queue --------------------------------------------------
+  router.get('/api/dashboard/support-queue', (_req, res) => {
+    res.json({ queue: listPausedCustomers() });
+  });
+  router.post('/api/dashboard/customers/:id/pause', (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!getCustomerById(id)) { res.status(404).json({ error: 'Customer not found' }); return; }
+    const reason = typeof (req.body as { reason?: unknown })?.reason === 'string' ? String((req.body as { reason: string }).reason).slice(0, 200) : 'Paused by staff';
+    res.json(pauseCustomerAutomation(id, reason));
+  });
+  router.post('/api/dashboard/customers/:id/resume', (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!getCustomerById(id)) { res.status(404).json({ error: 'Customer not found' }); return; }
+    res.json(resumeCustomerAutomation(id));
+  });
+
   router.get('/api/dashboard/summary', (_req, res) => {
     res.json(getDashboardSummary());
   });
@@ -184,7 +550,7 @@ export function createDashboardRouter(): Router {
     res.json({
       environment: env.NODE_ENV,
       providerMode: env.shouldUseMockProviders ? 'mock' : 'production',
-      services: getServiceStatuses(),
+      services: [...getServiceStatuses(), { name: 'WhatsApp (QR)', state: getQrStatus().phase, detail: getQrStatus().detail }],
       knowledge: getKnowledgeStatus(),
     });
   });
