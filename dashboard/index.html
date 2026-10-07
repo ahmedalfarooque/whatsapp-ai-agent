@@ -8,9 +8,14 @@
   <link rel="stylesheet" href="/dashboard/theme.css">
 </head>
 <body>
-  <aside class="sidebar">
+  <a class="skip-link" href="#view">Skip to content</a>
+  <aside class="sidebar" id="sidebar">
     <div class="brand"><span class="brand-mark">◎</span><span id="brand-name">Rowad Alfa<br><small>AI WORKSPACE</small></span></div>
     <nav id="nav" aria-label="Main">
+      <div class="nav-group">WHATSAPP ACCOUNTS</div>
+      <div id="account-list" class="account-list" aria-label="WhatsApp accounts"><span class="muted">Loading…</span></div>
+      <a href="#/accounts" data-add-account>＋ <span>Add WhatsApp account</span></a>
+      <a data-route="#/accounts" href="#/accounts">⊕ <span>Manage Accounts</span></a>
       <div class="nav-group">OVERVIEW</div>
       <a data-route="#/" href="#/">▦ <span>Dashboard</span></a>
       <a data-route="#/whatsapp" href="#/whatsapp">◎ <span>WhatsApp Connection</span></a>
@@ -42,11 +47,14 @@
     </nav>
     <div class="sidebar-note"><span class="dot green"></span><span>Workspace<br><small id="sidebar-mode">Loading…</small></span></div>
   </aside>
+  <button type="button" class="nav-scrim" id="nav-scrim" aria-label="Close navigation" tabindex="-1"></button>
   <main class="main">
     <header>
-      <div><p class="eyebrow" id="page-eyebrow">ROWAD ALFA AUTO CARE</p><h1 id="page-title">Dashboard</h1><p class="muted" id="page-subtitle"></p></div>
+      <button type="button" class="icon-btn nav-toggle" id="nav-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <div class="page-heading"><p class="crumb" id="page-eyebrow"></p><h1 id="page-title">Dashboard</h1><p class="muted" id="page-subtitle"></p></div>
       <div class="header-actions">
         <a class="wa-pill off" id="wa-pill" href="#/whatsapp" title="WhatsApp connection"><span class="dot"></span><span id="wa-pill-text">WhatsApp: checking…</span></a>
+        <span class="scope-chip" id="account-chip" hidden title="Selected WhatsApp account">Account <b id="account-chip-name">—</b></span>
         <span class="scope-chip" id="scope-chip" hidden>Active number <b id="scope-number">—</b></span>
         <span class="env-badge" id="environment">Loading…</span>
         <button id="logout-btn" class="btn small" style="display:none">Log out</button>
@@ -54,9 +62,11 @@
       </div>
     </header>
     <div id="toast-host"></div>
-    <div id="view">Loading…</div>
+    <div id="view" tabindex="-1">Loading…</div>
     <footer>Rowad Alfa AI Workspace · Live application database · <a href="/health">Health</a> · <a href="/readiness">Readiness</a></footer>
   </main>
   <script src="/dashboard/app.js"></script>
   <script src="/dashboard/pages-automation.js"></script>
+  <script src="/dashboard/pages-accounts.js"></script>
+  <script src="/dashboard/pages-setup.js"></script>
 </body></html>

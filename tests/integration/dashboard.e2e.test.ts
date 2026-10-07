@@ -107,6 +107,11 @@ describe('dashboard', () => {
     expect(script.status).toBe(200);
     const style = await agent.get('/dashboard/styles.css');
     expect(style.status).toBe(200);
+    // every script and stylesheet the shell loads must actually be served
+    const html = (await agent.get('/dashboard')).text;
+    const assets = [...html.matchAll(/(?:src|href)="(\/dashboard\/[^"]+\.(?:js|css))"/g)].map((m) => m[1]);
+    expect(assets).toEqual(expect.arrayContaining(['/dashboard/pages-setup.js', '/dashboard/pages-accounts.js', '/dashboard/theme.css']));
+    for (const asset of assets) expect((await agent.get(asset!)).status, asset).toBe(200);
   });
 
   it('does not change health and readiness routes', async () => {

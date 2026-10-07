@@ -34,6 +34,7 @@
     "localtunnel": "^2.0.2",
     "luxon": "^3.5.0",
     "mcp-remote": "^0.14.0",
+    "pdf-parse": "1.1.1",
     "pino": "^9.5.0",
     "pino-http": "^10.3.0",
     "qrcode": "^1.5.4",

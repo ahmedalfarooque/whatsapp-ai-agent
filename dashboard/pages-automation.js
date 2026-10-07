@@ -543,12 +543,15 @@ async function renderReplyEditor(view, selectedKey) {
     const working = state.working[state.lang];
     const label = state.dirty ? 'Unsaved draft' : t.hasDraft ? 'Saved draft · not live' : 'Published · live';
     const tone = state.dirty || t.hasDraft ? 'amber' : 'green';
+    // The preview speaks as the SELECTED business, never as another one.
+    const previewBusinessName = () => { const a = currentAccount(); return (isAr && a && a.nameAr) || (a && a.name) || 'Business'; };
+    const previewInitials = () => previewBusinessName().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => Array.from(w)[0]).join('').toUpperCase();
     const when = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const paint = (text, followUp, confirmed) => {
       previewEl.innerHTML = `
         <div class="wa-head">
-          <span class="wa-avatar">RA</span>
-          <span class="wa-title"><b>Rowad Alfa Auto Care</b><small>Business account · ${isAr ? 'العربية · RTL' : 'English · LTR'}</small></span>
+          <span class="wa-avatar">${esc(previewInitials())}</span>
+          <span class="wa-title"><b dir="auto">${esc(previewBusinessName())}</b><small>Business account · ${isAr ? 'العربية · RTL' : 'English · LTR'}</small></span>
           ${badge(label, tone)}${confirmed && state.previewMeta ? badge(state.previewMeta.sourceType === 'data-driven' ? 'Data-driven' : 'Static', state.previewMeta.sourceType === 'data-driven' ? 'purple' : '') : ''}
         </div>
         <div class="wa-body ${isAr ? 'rtl' : 'ltr'}">
@@ -1057,7 +1060,7 @@ route('#/security', 'Security & Tenant', 'Access controls for this workspace.', 
   const sys = await api('/api/dashboard/system');
   view.innerHTML = `
     <div class="cc-grid">
-      <section class="panel"><p class="eyebrow">TENANT</p><h3>Single business workspace</h3><dl class="detail-grid"><dt>Database</dt><dd class="file">${esc(sys.databasePath)}</dd><dt>Environment</dt><dd>${esc(sys.environment)}</dd><dt>Isolation</dt><dd>One business per deployment. Multi-tenant scoping is not implemented.</dd></dl></section>
+      <section class="panel"><p class="eyebrow">TENANCY</p><h3>Multi-business workspace</h3><dl class="detail-grid"><dt>Database</dt><dd class="file">${esc(sys.databasePath)}</dd><dt>Environment</dt><dd>${esc(sys.environment)}</dd><dt>Isolation</dt><dd>One login and one database; every WhatsApp account is a separate business with its own profile, customers, conversations, requests, offers, documents, knowledge, replies, menu and WhatsApp session. Each dashboard request names its account and the server checks it.</dd></dl></section>
       <section class="panel"><p class="eyebrow">ADMIN ACCESS</p><h3>Sessions</h3><p class="muted">Dashboard access uses a single administrator account with httpOnly session cookies (12 h sliding, 7 day cap). API routes return 401 without a session.</p><div class="toolbar" style="margin-top:12px"><button class="btn danger" id="logout-all">Log out everywhere</button></div></section>
       <section class="panel"><p class="eyebrow">SECRETS</p><h3>What never leaves the server</h3><ul class="plan-list"><li>WhatsApp linked-device credentials (data/baileys-auth) — gitignored, never returned by any API</li><li>OpenRouter / Google keys — AES-256-GCM encrypted at rest, masked in the UI</li><li>Customer phone numbers are masked in logs and activity views</li></ul></section>
     </div>`;

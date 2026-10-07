@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getDb } from '../memory/db';
 import { env } from './env';
+import { currentAccountId, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -62,6 +63,8 @@ export const businessSettingsInputSchema = z
     locationNotesEn: z.string().max(1000).nullable(),
     logoDocumentId: z.number().int().positive().nullable(),
     staffWhatsappNumber: z.string().regex(/^\+?\d{8,15}$/, 'must be an international number like +9665XXXXXXXX').nullable(),
+    contactPhone: z.string().max(40).regex(/^\+?[\d\s().-]{5,40}$/, 'must be a phone number').nullable(),
+    contactEmail: z.string().max(200).regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'must be an email address').nullable(),
   })
   .partial();
 
@@ -89,7 +92,7 @@ export interface BusinessSettings {
   descriptionEn: string | null;
   addressAr: string | null;
   addressEn: string | null;
-  /** Always set: dashboard value, else the confirmed default link. */
+  /** Dashboard value; the confirmed default link only for the original business; '' for any other business without one. */
   googleMapsUrl: string;
   latitude: number | null;
   longitude: number | null;
@@ -101,6 +104,13 @@ export interface BusinessSettings {
   logoDocumentId: number | null;
   /** Optional dedicated number for staff alerts (E.164). Empty = the linked business number's own chat. */
   staffWhatsappNumber: string | null;
+  /** Public contact details shown to customers (never the staff alert number). */
+  contactPhone: string | null;
+  contactEmail: string | null;
+  /** True when opening hours were entered for this business (always true for the original business). Never invented. */
+  hoursConfigured: boolean;
+  /** True when a Google Maps link was entered (or this is the original business, which has a confirmed default). */
+  googleMapsConfigured: boolean;
 }
 
 /** Official Google Maps link for Rowad Alfa Auto Care (overridable from the dashboard). */
@@ -149,26 +159,35 @@ interface BusinessSettingsRow {
   location_notes_en: string | null;
   logo_document_id: number | null;
   staff_whatsapp_number: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
 }
 
-function readRow(): BusinessSettingsRow {
-  const row = getDb()
-    .prepare(
-      `SELECT business_name, business_timezone, business_hours_start, business_hours_end,
-              business_days, booking_duration_minutes, booking_buffer_minutes,
-              restart_keywords, conversation_history_limit, welcome_message,
-              fallback_message, cancellation_policy, human_escalation_info, supported_languages,
-              open_router_model,
-              business_name_ar, business_category, description_ar, description_en, address_ar, address_en,
-              google_maps_url, latitude, longitude, friday_hours_start, friday_hours_end,
-              location_notes_ar, location_notes_en, logo_document_id, staff_whatsapp_number
-       FROM business_settings WHERE id = 1`,
-    )
-    .get() as BusinessSettingsRow | undefined;
-  // The seed row (INSERT OR IGNORE) is created by the migration itself, so
-  // this should always exist — but never silently invent defaults here if
-  // it's somehow missing; that would be a schema/migration bug to surface.
-  if (!row) throw new Error('business_settings row (id=1) is missing — migrations did not run correctly');
+/** business_settings.id == whatsapp account id (one profile per business). */
+function readRow(accountId: number): BusinessSettingsRow {
+  const db = getDb();
+  const select = db.prepare(
+    `SELECT business_name, business_timezone, business_hours_start, business_hours_end,
+            business_days, booking_duration_minutes, booking_buffer_minutes,
+            restart_keywords, conversation_history_limit, welcome_message,
+            fallback_message, cancellation_policy, human_escalation_info, supported_languages,
+            open_router_model,
+            business_name_ar, business_category, description_ar, description_en, address_ar, address_en,
+            google_maps_url, latitude, longitude, friday_hours_start, friday_hours_end,
+            location_notes_ar, location_notes_en, logo_document_id, staff_whatsapp_number,
+            contact_phone, contact_email
+     FROM business_settings WHERE id = ?`,
+  );
+  let row = select.get(accountId) as BusinessSettingsRow | undefined;
+  if (!row && db.prepare('SELECT 1 FROM whatsapp_accounts WHERE id = ?').get(accountId)) {
+    // An account whose profile row was never created (e.g. inserted by hand) gets an empty one — env defaults apply.
+    db.prepare('INSERT OR IGNORE INTO business_settings (id) VALUES (?)').run(accountId);
+    row = select.get(accountId) as BusinessSettingsRow | undefined;
+  }
+  // Account 1's seed row is created by the migrations themselves, so this
+  // should always exist — never silently invent defaults for an unknown
+  // account; that would be a schema/migration bug to surface.
+  if (!row) throw new Error(`business_settings row for account ${accountId} is missing — unknown account or migrations did not run correctly`);
   return row;
 }
 
@@ -182,10 +201,14 @@ function csvToList(value: string | null): string[] {
 
 /** Reads settings fresh from SQLite every call — no in-process cache, so a
  * dashboard write is reflected immediately without a process restart. */
-export function getBusinessSettings(): BusinessSettings {
-  const row = readRow();
+export function getBusinessSettings(accountId: number = currentAccountId()): BusinessSettings {
+  const row = readRow(accountId);
+  // The env fallbacks (BUSINESS_NAME / hours / the Rowad Alfa maps link) describe the ORIGINAL business only.
+  // Any other business never inherits them: unset stays unset ("Not provided") instead of leaking another company's facts.
+  const isLegacy = accountId === LEGACY_ACCOUNT_ID;
+  const accountName = isLegacy ? null : (getDb().prepare('SELECT name FROM whatsapp_accounts WHERE id = ?').get(accountId) as { name: string } | undefined)?.name ?? null;
   return {
-    businessName: row.business_name ?? env.BUSINESS_NAME,
+    businessName: row.business_name ?? accountName ?? env.BUSINESS_NAME,
     businessTimezone: row.business_timezone ?? env.BUSINESS_TIMEZONE,
     businessHoursStart: row.business_hours_start ?? env.BUSINESS_HOURS_START,
     businessHoursEnd: row.business_hours_end ?? env.BUSINESS_HOURS_END,
@@ -206,7 +229,11 @@ export function getBusinessSettings(): BusinessSettings {
     descriptionEn: row.description_en,
     addressAr: row.address_ar,
     addressEn: row.address_en,
-    googleMapsUrl: row.google_maps_url ?? DEFAULT_GOOGLE_MAPS_URL,
+    googleMapsUrl: row.google_maps_url ?? (isLegacy ? DEFAULT_GOOGLE_MAPS_URL : ''),
+    googleMapsConfigured: isLegacy || row.google_maps_url !== null,
+    hoursConfigured: isLegacy || (row.business_hours_start !== null && row.business_hours_end !== null),
+    contactPhone: row.contact_phone,
+    contactEmail: row.contact_email,
     latitude: row.latitude,
     longitude: row.longitude,
     fridayHoursStart: row.friday_hours_start,
@@ -240,6 +267,7 @@ export function formatClock(hhmm: string, language: 'ar' | 'en'): string {
  * placeholder, the dashboard Location page and the AI prompt — one source.
  */
 export function formatBusinessHours(settings: BusinessSettings, language: 'ar' | 'en'): string {
+  if (!settings.hoursConfigured) return '';
   const days = settings.businessDays.filter((d) => d >= 1 && d <= 7);
   const friday = 5;
   const fridayStart = settings.fridayHoursStart ?? settings.businessHoursStart;
@@ -271,8 +299,8 @@ export function formatAddress(settings: BusinessSettings, language: 'ar' | 'en')
 }
 
 /** Per-field override status, for the dashboard's "using default from env" hints. */
-export function getBusinessSettingsOverrides(): BusinessSettingsOverrides {
-  const row = readRow();
+export function getBusinessSettingsOverrides(accountId: number = currentAccountId()): BusinessSettingsOverrides {
+  const row = readRow(accountId);
   return {
     businessName: row.business_name !== null,
     businessTimezone: row.business_timezone !== null,
@@ -304,6 +332,10 @@ export function getBusinessSettingsOverrides(): BusinessSettingsOverrides {
     locationNotesEn: row.location_notes_en !== null,
     logoDocumentId: row.logo_document_id !== null,
     staffWhatsappNumber: row.staff_whatsapp_number !== null,
+    contactPhone: row.contact_phone !== null,
+    contactEmail: row.contact_email !== null,
+    hoursConfigured: row.business_hours_start !== null && row.business_hours_end !== null,
+    googleMapsConfigured: row.google_maps_url !== null,
   };
 }
 
@@ -338,6 +370,8 @@ const COLUMN_MAP: Record<keyof BusinessSettingsPatch, string> = {
   locationNotesEn: 'location_notes_en',
   logoDocumentId: 'logo_document_id',
   staffWhatsappNumber: 'staff_whatsapp_number',
+  contactPhone: 'contact_phone',
+  contactEmail: 'contact_email',
 };
 
 /**
@@ -345,7 +379,7 @@ const COLUMN_MAP: Record<keyof BusinessSettingsPatch, string> = {
  * env default"), then performs one atomic UPDATE. Writes nothing at all if
  * any field fails validation.
  */
-export function updateBusinessSettings(patch: unknown): BusinessSettings {
+export function updateBusinessSettings(patch: unknown, accountId: number = currentAccountId()): BusinessSettings {
   const result = businessSettingsInputSchema.safeParse(patch);
   if (!result.success) {
     const fields: Record<string, string> = {};
@@ -355,14 +389,15 @@ export function updateBusinessSettings(patch: unknown): BusinessSettings {
     throw new BusinessSettingsValidationError(fields);
   }
 
+  readRow(accountId); // asserts the account exists (and creates its empty profile row if needed)
   const entries = Object.entries(result.data).filter(([, v]) => v !== undefined) as [
     keyof BusinessSettingsPatch,
     string | number | string[] | null,
   ][];
-  if (entries.length === 0) return getBusinessSettings();
+  if (entries.length === 0) return getBusinessSettings(accountId);
 
   const setClauses: string[] = [];
-  const params: Record<string, string | number | null> = {};
+  const params: Record<string, string | number | null> = { accountId };
   for (const [field, value] of entries) {
     const column = COLUMN_MAP[field];
     setClauses.push(`${column} = @${column}`);
@@ -370,11 +405,21 @@ export function updateBusinessSettings(patch: unknown): BusinessSettings {
   }
   setClauses.push("updated_at = datetime('now')");
 
-  getDb()
-    .prepare(`UPDATE business_settings SET ${setClauses.join(', ')} WHERE id = 1`)
-    .run(params);
+  const db = getDb();
+  const run = db.transaction(() => {
+    db.prepare(`UPDATE business_settings SET ${setClauses.join(', ')} WHERE id = @accountId`).run(params);
+    // The account list shows the same name/category the profile publishes.
+    if ('business_name' in params || 'business_name_ar' in params || 'business_category' in params) {
+      const mirror: string[] = [];
+      if ('business_name' in params && params.business_name) mirror.push('name = @business_name');
+      if ('business_name_ar' in params) mirror.push('name_ar = @business_name_ar');
+      if ('business_category' in params) mirror.push('business_category = @business_category');
+      if (mirror.length) db.prepare(`UPDATE whatsapp_accounts SET ${mirror.join(', ')}, updated_at = datetime('now') WHERE id = @accountId`).run(params);
+    }
+  });
+  run();
 
-  return getBusinessSettings();
+  return getBusinessSettings(accountId);
 }
 
 /**
@@ -402,8 +447,9 @@ export function seedBusinessProfileDefaults(): string[] {
   const db = getDb();
   const seeded: string[] = [];
   const run = db.transaction(() => {
+    // Only the legacy business (account 1) carries the Rowad Alfa defaults; other accounts start blank.
     for (const [column, value] of Object.entries(ROWAD_ALFA_PROFILE_DEFAULTS)) {
-      const r = db.prepare(`UPDATE business_settings SET ${column} = ? WHERE id = 1 AND ${column} IS NULL`).run(value);
+      const r = db.prepare(`UPDATE business_settings SET ${column} = ? WHERE id = ? AND ${column} IS NULL`).run(value, LEGACY_ACCOUNT_ID);
       if (r.changes > 0) seeded.push(column);
     }
   });

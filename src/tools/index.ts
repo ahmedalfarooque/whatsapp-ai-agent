@@ -1,4 +1,5 @@
 import { TOOL_NAMES } from '../config/constants';
+import { LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 import { checkAvailabilitySchema, checkAvailabilityHandler } from './checkAvailability';
 import { bookAppointmentSchema, bookAppointmentHandler } from './bookAppointment';
 
@@ -31,3 +32,18 @@ export const toolRegistry: Record<string, ToolDefinition> = {
 };
 
 export const toolSchemas = Object.values(toolRegistry).map((t) => t.schema);
+
+/**
+ * The calendar integration (Google Calendar service account + calendar id) is
+ * configured once, for the original business. Other businesses have no
+ * calendar of their own yet, so the booking tools are never offered to their
+ * AI — otherwise their customers could read or write another company's
+ * calendar. Their appointment requests go through the guided menu to staff.
+ */
+export function accountHasCalendar(accountId: number): boolean {
+  return accountId === LEGACY_ACCOUNT_ID;
+}
+
+export function toolSchemasForAccount(accountId: number): typeof toolSchemas {
+  return accountHasCalendar(accountId) ? toolSchemas : [];
+}

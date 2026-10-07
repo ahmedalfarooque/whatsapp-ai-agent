@@ -1,0 +1,119 @@
+{
+  "session": "e7e0cad3-f557-404a-972b-e20de3ec7b38",
+  "agent": "Claude-Code",
+  "task": "Diagnose: QR connected but no auto reply",
+  "at": "2026-09-21T09:16:54.396Z",
+  "finished": false,
+  "summary": "Rowad Alfa WhatsApp QR / auto-reply / content-sync repair (Claude Code). ROOT CAUSES fixed: (1) replies were re-addressed from the incoming @lid chat to the phone JID (key.senderPn); Baileys 6.7.24 keys Signal sessions by address, so every phone-JID send forked the session -> next inbound 'Bad MAC' -> 6-7 s WhatsApp retry (the 'delay') -> retry lacked senderPn -> customer keyed by LID digits = second customer record -> welcome/language flow repeated ('Hello, welcome to The Business'), and eventually 'Waiting for this message' on the phone. Now: reply ALWAYS to key.remoteJid as received; customer identity = phone JID via senderPn or the new whatsapp_lid_map table (LID<->phone pairings learned from messages and contacts.upsert/update). (2) Dashboard text != WhatsApp text: menu.ts generated option lists/footers in code and preview hard-coded options. Now templates carry the full Antigravity content (61 templates: welcome/language, 9-option main menu, 4 submenus + 25 detail texts, prices/offers menu + 4 info texts, location, about, appointment 8-step flow, quotation 4-step flow, support/error texts) and are sent verbatim; option number -> action lives in src/automation/menuRouter.ts (MAIN_MENU_OPTIONS/SUBMENUS/FLOWS/FOLLOW_UP_TEMPLATES); preview endpoint uses the live renderer and returns the follow-up bubble. (3) Bot replies were not persisted in the menu path -> every inbound/outbound bubble now stored (dashboard conversations complete). (4) BUSINESS_NAME env default 'The Business' -> 'Rowad Alfa Auto Care'. (5) Stale offline-backlog messages (>10 min old) are stored as suppressed, never auto-answered. (6) Appointment/quotation requests persisted in customer_requests with APT-/INQ- references; dashboard Bookings page lists them with status control; /api/dashboard/requests, /menu-tree added; flow map rebuilt from the router tree; WhatsApp-style preview (RTL/LTR, follow-up bubble, draft/live badge). Template upgrade logic: default text refreshed, live text moved only when unmodified, retired 'welcome' removed when unmodified. Migration 012 (additive): whatsapp_lid_map, customer_requests, customers.menu_state/flow_data/reply_jid. Baileys stays 6.7.24 (Antigravity uses ^6.7.19). No Meta API. No numeric prices (zero-fabricated-pricing). Antigravity reference project untouched; its server on port 3005 left running and untouched per user instruction.",
+  "reason": "User reported: delays, duplicated welcome/menus, missing customer messages, generic 'Car Audio - ask me about...' texts, dashboard preview differing from WhatsApp, only +966558190545 working. Runtime log analysis (5 consecutive cycles) proved every phone-JID send caused the next inbound to fail decryption; Antigravity replies to remoteJid and never had it. User demanded Antigravity content as source of truth, single content path (preview == live), per-customer idempotency/order, complete menus, WhatsApp-style editor preview, preserved AI path, no destructive DB changes.",
+  "tests": "Baseline before changes: 44 files / 331 tests passed. After: npm test 46 files / 348 tests passed (new: menu router 18, pipeline 21 incl. persistence/appointment/legacy-ID/identity cases, qrConnection 9 incl. LID reply-address + LID->phone mapping + stale-backlog + contacts.upsert regression tests, lidMapRepo 3, customerRequestRepo 4, templateRepo upgrade test, dashboard e2e preview/menu-tree/requests 4). tsc --noEmit clean; eslint clean; npm run build OK; dashboard JS node --check OK. Runtime: port 3000 server restarted (old PID 16952 stopped, new PID 31736), migration 012 applied on live DB (backup data/app.db.bak-20260921-121152), 61 templates seeded with live == default, saved Baileys session resumed as +966558190545, stderr empty. NOT yet verified: physical receipt on a customer phone after the fix (no inbound since restart at the time of this checkpoint); dashboard UI screenshots (login wall - credentials are the user's; not entered by the agent); scanning with a different phone number.",
+  "nextSteps": "1) User signs into http://localhost:3000/dashboard, opens Manual Reply Editor / Flow Map / Bookings to visually confirm. 2) Live WhatsApp test from another phone: '00' (restart -> bilingual welcome), '2' (English main menu, 9 options), '1' (Car Audio submenu), '2' (Android screens detail), '0' (main menu), '7' + 8 answers (appointment request appears on Bookings page), 'agent' (handover, then silence), 'menu' (resumes). Verify in data/runtime/server.log: [WA-INBOUND] accepted shows replyTo ...@lid and customer ...@s.whatsapp.net, [WA-OUTBOUND] finalSendTarget ...@lid, [WA-ACK] status 3/4, and zero 'Bad MAC' in server-error.log. 3) Optional: scan with a different number after 'Log out & unlink' to confirm dynamic number switching. 4) Commit (nothing committed since 1beafa4; ask user one commit vs split). 5) Products/offers/price-book tables remain 'planned' pages (no verified data). 6) Antigravity server on port 3005 must not be paired to the same number during tests (would create a second replying device).",
+  "changedFiles": [
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/pages-automation.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/theme.css",
+      "change": "modified"
+    },
+    {
+      "path": "docs/QR_CONNECTION.md",
+      "change": "modified"
+    },
+    {
+      "path": "src/automation/menu.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/automation/menuRouter.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/config/env.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/index.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRequestRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/lidMapRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/migrations/012_lid_map_flow_state_requests.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/pipeline/processInboundMessage.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/templates/defaults.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/templates/templateRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/jid.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/qrConnection.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/conversationFlow.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/automation/menu.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/memory/customerRequestRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/memory/lidMapRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/pipeline/processInboundMessage.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/templates/templateRepo.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/whatsapp/qrConnection.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

@@ -1,0 +1,179 @@
+{
+  "session": "e7e0cad3-f557-404a-972b-e20de3ec7b38",
+  "agent": "Claude-Code",
+  "task": "Diagnose: QR connected but no auto reply",
+  "at": "2026-09-22T13:48:03.079Z",
+  "finished": false,
+  "summary": "Rowad Alfa WhatsApp QR / auto-reply / content-sync repair (Claude Code). ROOT CAUSES fixed: (1) replies were re-addressed from the incoming @lid chat to the phone JID (key.senderPn); Baileys 6.7.24 keys Signal sessions by address, so every phone-JID send forked the session -> next inbound 'Bad MAC' -> 6-7 s WhatsApp retry (the 'delay') -> retry lacked senderPn -> customer keyed by LID digits = second customer record -> welcome/language flow repeated ('Hello, welcome to The Business'), and eventually 'Waiting for this message' on the phone. Now: reply ALWAYS to key.remoteJid as received; customer identity = phone JID via senderPn or the new whatsapp_lid_map table (LID<->phone pairings learned from messages and contacts.upsert/update). (2) Dashboard text != WhatsApp text: menu.ts generated option lists/footers in code and preview hard-coded options. Now templates carry the full Antigravity content (61 templates: welcome/language, 9-option main menu, 4 submenus + 25 detail texts, prices/offers menu + 4 info texts, location, about, appointment 8-step flow, quotation 4-step flow, support/error texts) and are sent verbatim; option number -> action lives in src/automation/menuRouter.ts (MAIN_MENU_OPTIONS/SUBMENUS/FLOWS/FOLLOW_UP_TEMPLATES); preview endpoint uses the live renderer and returns the follow-up bubble. (3) Bot replies were not persisted in the menu path -> every inbound/outbound bubble now stored (dashboard conversations complete). (4) BUSINESS_NAME env default 'The Business' -> 'Rowad Alfa Auto Care'. (5) Stale offline-backlog messages (>10 min old) are stored as suppressed, never auto-answered. (6) Appointment/quotation requests persisted in customer_requests with APT-/INQ- references; dashboard Bookings page lists them with status control; /api/dashboard/requests, /menu-tree added; flow map rebuilt from the router tree; WhatsApp-style preview (RTL/LTR, follow-up bubble, draft/live badge). Template upgrade logic: default text refreshed, live text moved only when unmodified, retired 'welcome' removed when unmodified. Migration 012 (additive): whatsapp_lid_map, customer_requests, customers.menu_state/flow_data/reply_jid. Baileys stays 6.7.24 (Antigravity uses ^6.7.19). No Meta API. No numeric prices (zero-fabricated-pricing). Antigravity reference project untouched; its server on port 3005 left running and untouched per user instruction. NOTE: between 12:12 and 12:20 the saved Baileys session disappeared (only code path: WhatsApp loggedOut handler or dashboard Log out); user re-scanned at ~12:21; a warn log line was added to the loggedOut branch for future evidence. ROUND 3 (production-readiness): QR page — root cause of \"Preparing session…\" was routine 428 socket drops followed by a reconnect whose Baileys version lookup had no timeout (one 2.5-min gap observed 12:46→12:48); fixed with a 5 s cap, 1 s first reconnect, socket timeouts, 515 shown as pairing, isNewLogin → pairing state, Refresh QR Code / Refresh Status / Retry Connection actions with guards (never logout, never second socket), diagnostics (pid/port/cwd/socket generation/active sockets/owner pid/last QR & connection events) in API + UI. Business Profile and Location pages crashed because they read `s.settings` from /api/dashboard/settings (shape is {business,booking,agent,content,overrides}); new /api/dashboard/business-profile returns flat settings + rendered hours/address; both pages rebuilt as editable forms (AR/EN names, category, descriptions, address AR/EN, Google Maps link default https://maps.app.goo.gl/8sxNK9wMNsTucvCh7, lat/lng with embedded map preview, days, hours, Friday hours, notes). {maps}/{hours}/{address}/{business} placeholders now resolve from published settings per language; location_hours template rewritten to use them; AI prompt gets the same profile facts. Business documents module (business_documents table, data/uploads, allowlist ext+MIME+magic bytes, 10 MB cap, UUID storage names, HTML served as text/plain with sandbox CSP, visibility internal/ai_knowledge/customer, archive/replace/delete, text extraction for txt/md/html feeding the AI prompt). Offers module (offers table; draft/published/finished/archived + derived scheduled/expired; numeric prices stored only when price_status=verified; customer resolver listCustomerVisibleOffers used by WhatsApp {offers} (prices → 3 sends prices_offers_list or falls back to prices_offers when empty), preview, AI prompt; dashboard page with KPIs, search/filters, grid/list, edit/duplicate/publish/unpublish/finish/archive/restore/delete). Migration 013 additive. README + docs/QR_CONNECTION.md state ports (3000 ours, 3005 Antigravity). ROUND 4: {notes} placeholder + boot-time seeding of Rowad Alfa location defaults (only NULL columns; live DB already had dashboard-set values → nothing overwritten); empty placeholders no longer leave dangling labels; offer editor uploads images/documents directly; regression tests for consecutive LID messages with/without senderPn, duplicate Baileys events, history-sync append batches, cross-generation reconnect isolation; e2e sweep of all 28 GET endpoints the dashboard calls. Runtime 14:29-14:31: network-level 408 timeouts, sockets 17→22 with backoff, recovered automatically; zero Bad MAC/stubs/dups/unhandled since 12:21. ROUND 5 (two-way requests): requestService (idempotent status transitions, audit request_events, per-status customer notification dedupe, staff alerts), notification_outbox with retry/backoff/not-connected deferral/manual retry, operator WhatsApp commands (fromMe-only authorization, EN/AR, duplicate-safe), 6 new editable templates (request_confirmed/rejected/cancelled/status_update, staff_new_request, staff_status_changed), staffWhatsappNumber setting, dashboard Appointments panel with 7 statuses, notification badges, audit timeline, retry button. Migration 014 additive. Fixed a real outbox in-flight-marker race found by tests. NOTE: a debug script with hoisted imports wrote one junk outbox row (dedupe k1, body x, fake sender) to the live DB on 09-21 13:05Z; no WhatsApp message was sent; the row was deleted. ROUND 6 (QR connection failure returned, 2026-09-22 ~15:51-16:24 local): diagnosis from runtime logs, NOT a code regression. Timeline (UTC): 12:51-12:58 repeated 408 (keep-alive lost) / 428 (socket closed) closes plus 5 s Baileys version-lookup timeouts = unstable network path from this host (Wi-Fi) to WhatsApp/GitHub; 12:58:38 WhatsApp sent 401 loggedOut -> code deleted the saved session by design -> QR pairing loop until the user re-scanned at 13:10:48 (515 then connected 13:10:51); 13:12-13:24 nine more 408/428 drops, each followed by exactly one reconnect (socket generations 32-43, no storm); stable on generation 43 from 13:24; customer test messages Hi/1/2/0/7 answered on the @lid address with sub-second sends. stderr Bad MAC/MessageCounterError x6 for LID ...3661 are dated 09:59Z (file mtime), fromMe stubType-2 mirrors of the business phone own messages, self-healed by prekey bundle; zero customer decryption failures today. Smallest safe fix: (1) WhatsApp Web version cached in memory + data/baileys-version.json, reused on every reconnect and when the lookup times out (removes a 5 s stall per reconnect on a flapping network); (2) 401 loggedOut now ARCHIVES data/baileys-auth to data/baileys-auth.loggedout-<ts> (last 3 kept, never copied) instead of deleting, lastError logged_out_by_whatsapp_401; (3) diagnostics gained connectedSince, dropsLast10Min, networkUnstable (>=3 drops/10 min), lastCloseAt, versionSource; reconnecting detail and dashboard title/explain say unstable network instead of routine; troubleshooting text for 408/428 and 401. No change to PN/LID reply logic, menus, templates, outbox or port 3005.",
+  "reason": "User reported: delays, duplicated welcome/menus, missing customer messages, generic 'Car Audio - ask me about...' texts, dashboard preview differing from WhatsApp, only +966558190545 working. Runtime log analysis (5 consecutive cycles) proved every phone-JID send caused the next inbound to fail decryption; Antigravity replies to remoteJid and never had it. User demanded Antigravity content as source of truth, single content path (preview == live), per-customer idempotency/order, complete menus, WhatsApp-style editor preview, preserved AI path, no destructive DB changes.",
+  "tests": "npm test 49 files / 392 tests passed (2 new: cached version on reconnect + timeout fallback; 3 drops in 10 min -> networkUnstable, one reconnect per drop, quiet stretch clears; existing 401 test now asserts archive-not-delete and no reconnect after 401). tsc clean, eslint clean, build OK. Port 3000 restarted 2026-09-22 16:46 local: old pid 8544 stopped, new pid 49348 (same hermes node binary), single process, owner marker pid 49348, saved session resumed and connected as +966558190545 in 7 s (version fetched in 4.5 s, cache file written), stderr unchanged. Not yet verified live after the restart: the 00 / 2 / 0 / 6 phone sequence (asked the user), dashboard diagnostics rendering (login wall).",
+  "nextSteps": "User phone run: 00, 2, 0, 6 -> inspect [WA-INBOUND] accepted / [WA-OUTBOUND] success / [WA-ACK] 3-4, zero Bad MAC, one reply per message. If drops recur, diagnostics.dropsLast10Min/networkUnstable on the connection page will say so; the host Wi-Fi/VPN is the thing to check. Then two-way appointment live test, finish project-sync lock and commit.",
+  "changedFiles": [
+    {
+      "path": ".gitignore",
+      "change": "modified"
+    },
+    {
+      "path": "README.md",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/pages-automation.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/theme.css",
+      "change": "modified"
+    },
+    {
+      "path": "docs/QR_CONNECTION.md",
+      "change": "modified"
+    },
+    {
+      "path": "knowledge/faq.md",
+      "change": "modified"
+    },
+    {
+      "path": "src/automation/menu.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/automation/menuRouter.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/config/businessSettings.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/config/env.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/documents/documentStore.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/index.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/llm/buildSystemPrompt.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRequestRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/lidMapRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/migrations/012_lid_map_flow_state_requests.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/migrations/013_business_profile_documents_offers.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/migrations/014_request_events_outbox.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/notifications/outbox.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/offers/offerRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/pipeline/processInboundMessage.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/requests/requestService.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/templates/defaults.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/templates/templateRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/jid.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/qrConnection.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/conversationFlow.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/automation/menu.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/config/businessSettings.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/documents/documentStore.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/memory/customerRequestRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/memory/lidMapRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/offers/offerRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/pipeline/processInboundMessage.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/requests/requestService.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/templates/templateRepo.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/whatsapp/qrConnection.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

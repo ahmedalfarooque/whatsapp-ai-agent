@@ -20,10 +20,31 @@ function formatDate(value) {
   return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+// ---------------------------------------------------------------------
+// Selected WhatsApp account (business). Every API call carries it in the
+// X-Whatsapp-Account header; the server validates it and scopes the data.
+// ---------------------------------------------------------------------
+
+const ACCOUNT_STORAGE_KEY = 'workspace.selectedAccount';
+let selectedAccountId = (() => {
+  try { const v = Number.parseInt(localStorage.getItem(ACCOUNT_STORAGE_KEY) || '', 10); return Number.isFinite(v) && v > 0 ? v : null; } catch { return null; }
+})();
+let knownAccounts = [];
+
+function getSelectedAccountId() {
+  return selectedAccountId;
+}
+
+function currentAccount() {
+  return knownAccounts.find((a) => a.id === selectedAccountId) || null;
+}
+
 async function api(url, options) {
   let response;
   try {
-    response = await fetch(url, { credentials: 'include', ...options });
+    const headers = { ...((options && options.headers) || {}) };
+    if (selectedAccountId) headers['X-Whatsapp-Account'] = String(selectedAccountId);
+    response = await fetch(url, { credentials: 'include', ...options, headers });
   } catch {
     // The browser's own network-layer failure (server not running,
     // connection refused, DNS failure) — its native message is the terse
@@ -41,6 +62,10 @@ async function api(url, options) {
   if (response.status === 401 && location.hash !== '#/login') {
     location.hash = '#/login';
     throw new Error('unauthenticated');
+  }
+  if ((response.status === 404 || response.status === 403) && body && /WhatsApp account/i.test(body.error || '') && selectedAccountId) {
+    // The remembered account no longer exists or is no longer ours: fall back to the server default.
+    selectAccount(null, { silent: true });
   }
   if (!response.ok) {
     const message = (body && body.error) || `Request failed (${response.status})`;
@@ -155,6 +180,109 @@ window.addEventListener('hashchange', () => {
 });
 
 // ---------------------------------------------------------------------
+// WhatsApp accounts: sidebar list + switcher
+// ---------------------------------------------------------------------
+
+const ACCOUNT_STATUS = {
+  connected: { label: 'Connected', dot: 'green' },
+  connecting: { label: 'Connecting', dot: 'amber' },
+  qr_required: { label: 'QR required', dot: 'amber' },
+  disconnected: { label: 'Disconnected', dot: 'red' },
+  disabled: { label: 'Disabled', dot: '' },
+  error: { label: 'Error', dot: 'red' },
+};
+
+function accountStatusInfo(status) {
+  return ACCOUNT_STATUS[status] || { label: status || 'Unknown', dot: '' };
+}
+
+function renderAccountList() {
+  const host = document.querySelector('#account-list');
+  if (!host) return;
+  if (!knownAccounts.length) { host.innerHTML = '<span class="muted">No accounts yet</span>'; return; }
+  host.innerHTML = knownAccounts.map((a) => {
+    const info = accountStatusInfo(a.uiStatus);
+    const active = a.id === selectedAccountId;
+    return `<button type="button" class="account-item ${active ? 'active' : ''} ${a.enabled ? '' : 'off'}" data-account="${a.id}" title="${esc(a.name)} · ${esc(info.label)}" aria-pressed="${active}">
+      <span class="dot ${info.dot}"></span>
+      <span class="account-text"><span class="account-name" dir="auto">${esc(a.name)}</span><small>${esc(a.phoneNumber || info.label)}</small></span>
+    </button>`;
+  }).join('');
+  host.querySelectorAll('[data-account]').forEach((btn) => btn.addEventListener('click', () => selectAccount(Number(btn.dataset.account))));
+  const chip = document.querySelector('#account-chip');
+  const current = currentAccount();
+  if (chip) {
+    chip.hidden = !current;
+    if (current) document.querySelector('#account-chip-name').textContent = current.name;
+  }
+  const eyebrow = document.querySelector('#page-eyebrow');
+  if (eyebrow && current) eyebrow.textContent = current.name;
+}
+
+/** Loads the accounts the signed-in admin may see and settles the selection (remembered id when still valid, else the server default). */
+async function loadAccounts() {
+  try {
+    const data = await api('/api/dashboard/accounts');
+    knownAccounts = data.accounts || [];
+    const valid = knownAccounts.some((a) => a.id === selectedAccountId);
+    if (!valid) {
+      selectedAccountId = data.selected || (knownAccounts[0] ? knownAccounts[0].id : null);
+      try { if (selectedAccountId) localStorage.setItem(ACCOUNT_STORAGE_KEY, String(selectedAccountId)); } catch { /* storage unavailable */ }
+    }
+    renderAccountList();
+    document.dispatchEvent(new CustomEvent('workspace:accounts', { detail: { accounts: knownAccounts, selected: selectedAccountId } }));
+  } catch (error) {
+    const host = document.querySelector('#account-list');
+    if (host) host.innerHTML = `<span class="muted">${esc(error.message)}</span>`;
+  }
+}
+
+/** Switches the whole dashboard to another business: same pages, that account's data. */
+function selectAccount(accountId, opts = {}) {
+  const changed = accountId !== selectedAccountId;
+  selectedAccountId = accountId;
+  try {
+    if (accountId) localStorage.setItem(ACCOUNT_STORAGE_KEY, String(accountId));
+    else localStorage.removeItem(ACCOUNT_STORAGE_KEY);
+  } catch { /* storage unavailable */ }
+  if (opts.silent) return;
+  renderAccountList();
+  const current = currentAccount();
+  if (changed && current) toast(`Switched to ${current.name}`, 'success');
+  document.dispatchEvent(new CustomEvent('workspace:account-changed', { detail: { selected: selectedAccountId } }));
+  if (changed) renderRoute();
+}
+
+let accountsTimer;
+async function pollAccounts() {
+  clearTimeout(accountsTimer);
+  await loadAccounts();
+  accountsTimer = setTimeout(pollAccounts, 10000);
+}
+
+// ---------------------------------------------------------------------
+// Small-screen navigation drawer (the sidebar is off-canvas at <= 900px)
+// ---------------------------------------------------------------------
+
+(function navDrawer() {
+  const toggle = document.querySelector('#nav-toggle');
+  const scrim = document.querySelector('#nav-scrim');
+  const side = document.querySelector('#sidebar');
+  if (!toggle || !scrim || !side) return;
+  const set = (open) => {
+    document.body.classList.toggle('nav-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+    if (open) { const first = side.querySelector('a, button'); if (first) first.focus(); } else if (side.contains(document.activeElement)) toggle.focus();
+  };
+  toggle.addEventListener('click', () => set(!document.body.classList.contains('nav-open')));
+  scrim.addEventListener('click', () => set(false));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) set(false); });
+  window.addEventListener('hashchange', () => set(false));
+  side.addEventListener('click', (e) => { if (e.target.closest('a, button')) set(false); });
+})();
+
+// ---------------------------------------------------------------------
 // Shared header bits (environment badge, sidebar mode note)
 // ---------------------------------------------------------------------
 
@@ -191,8 +319,11 @@ async function boot() {
     return;
   }
   if (location.hash === '#/login') location.hash = '#/';
+  await loadAccounts(); // settles the selected account before any account-scoped request
   await loadHeader();
   document.dispatchEvent(new Event('workspace:authenticated'));
+  clearTimeout(accountsTimer);
+  accountsTimer = setTimeout(pollAccounts, 10000);
   await renderRoute();
 }
 

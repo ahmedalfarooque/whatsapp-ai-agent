@@ -1,6 +1,8 @@
 // Loaded before every test file (see vitest.config.ts setupFiles). Provides
 // safe fake values for every required env var so env.ts validation passes
 // without any real third-party credentials.
+import os from 'node:os';
+import path from 'node:path';
 import { vi } from 'vitest';
 
 // Tests supply their own environment. Never reload production secrets from .env.
@@ -9,6 +11,8 @@ process.env.NODE_ENV = 'test';
 process.env.PORT = process.env.PORT ?? '3999';
 process.env.LOG_LEVEL = process.env.LOG_LEVEL ?? 'silent';
 process.env.DATABASE_PATH = ':memory:';
+// Per-business knowledge/uploads of a test run live in a throw-away folder, never next to the real data.
+process.env.KNOWLEDGE_ACCOUNTS_DIR = path.join(os.tmpdir(), `whatsapp-ai-agent-test-knowledge-${process.pid}`);
 
 process.env.WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN ?? 'test-whatsapp-token';
 process.env.WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID ?? '1234567890';

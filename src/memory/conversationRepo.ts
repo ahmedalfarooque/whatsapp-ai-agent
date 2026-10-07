@@ -1,10 +1,12 @@
 import type Database from 'better-sqlite3';
 import { getDb } from './db';
 import { CONVERSATION_STATUS } from '../config/constants';
+import { currentAccountId } from '../accounts/accountContext';
 
 export interface Conversation {
   id: number;
   customer_id: number;
+  whatsapp_account_id: number;
   status: 'active' | 'ended';
   started_at: string;
   ended_at: string | null;
@@ -44,12 +46,18 @@ export function getOrCreateActiveConversation(
   if (existing) return existing;
 
   const result = db
-    .prepare('INSERT INTO conversations (customer_id, status) VALUES (?, ?)')
-    .run(customerId, CONVERSATION_STATUS.ACTIVE);
+    .prepare('INSERT INTO conversations (customer_id, status, whatsapp_account_id) VALUES (?, ?, ?)')
+    .run(customerId, CONVERSATION_STATUS.ACTIVE, customerAccountId(customerId, db));
 
   return db
     .prepare('SELECT * FROM conversations WHERE id = ?')
     .get(result.lastInsertRowid) as Conversation;
+}
+
+/** A conversation belongs to the same business as its customer. */
+function customerAccountId(customerId: number, db: Database.Database): number {
+  const row = db.prepare('SELECT whatsapp_account_id FROM customers WHERE id = ?').get(customerId) as { whatsapp_account_id: number } | undefined;
+  return row?.whatsapp_account_id ?? currentAccountId();
 }
 
 export interface AppendMessageInput {
@@ -131,13 +139,13 @@ export interface ConversationListItem {
 const MAX_PAGE_SIZE = 100;
 
 export function listConversations(
-  params: { status?: 'active' | 'ended'; limit?: number; offset?: number } = {},
+  params: { status?: 'active' | 'ended'; limit?: number; offset?: number; accountId?: number } = {},
   db: Database.Database = getDb(),
 ): { items: ConversationListItem[]; total: number } {
   const limit = Math.max(1, Math.min(params.limit ?? 25, MAX_PAGE_SIZE));
   const offset = Math.max(0, params.offset ?? 0);
-  const whereClause = params.status ? 'WHERE c.status = @status' : '';
-  const args = params.status ? { status: params.status } : {};
+  const whereClause = `WHERE c.whatsapp_account_id = @accountId${params.status ? ' AND c.status = @status' : ''}`;
+  const args = { accountId: params.accountId ?? currentAccountId(), status: params.status };
 
   const total = (
     db.prepare(`SELECT COUNT(*) AS count FROM conversations c ${whereClause}`).get(args) as {
@@ -162,9 +170,11 @@ export function listConversations(
   return { items, total };
 }
 
+/** Scoped to the account: a conversation id from another business is "not found". */
 export function getConversationById(
   id: number,
   db: Database.Database = getDb(),
+  accountId: number = currentAccountId(),
 ): ConversationListItem | undefined {
   return db
     .prepare(
@@ -174,9 +184,9 @@ export function getConversationById(
               (SELECT MAX(m2.created_at) FROM conversation_messages m2 WHERE m2.conversation_id = c.id) AS lastMessageAt
        FROM conversations c
        JOIN customers cu ON cu.id = c.customer_id
-       WHERE c.id = ?`,
+       WHERE c.id = ? AND c.whatsapp_account_id = ?`,
     )
-    .get(id) as ConversationListItem | undefined;
+    .get(id, accountId) as ConversationListItem | undefined;
 }
 
 /** Full chronological message history for a conversation, for admin display (not the LLM-shaped subset). */
@@ -199,8 +209,8 @@ export function resetConversation(
   ).run(customerId);
 
   const result = db
-    .prepare('INSERT INTO conversations (customer_id, status) VALUES (?, ?)')
-    .run(customerId, CONVERSATION_STATUS.ACTIVE);
+    .prepare('INSERT INTO conversations (customer_id, status, whatsapp_account_id) VALUES (?, ?, ?)')
+    .run(customerId, CONVERSATION_STATUS.ACTIVE, customerAccountId(customerId, db));
 
   return db
     .prepare('SELECT * FROM conversations WHERE id = ?')

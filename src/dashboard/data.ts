@@ -4,9 +4,10 @@ import { env } from '../config/env';
 import { getDb } from '../memory/db';
 import { maskWaId } from '../logger';
 import { listBookingLocks } from '../memory/bookingLockRepo';
-import { listKnowledgeFiles } from './knowledgeAdmin';
+import { listKnowledgeFiles, knowledgeDirForAccount } from './knowledgeAdmin';
 import { getEffectiveCredential } from '../config/effectiveConfig';
 import { getBusinessSettings, getBusinessSettingsOverrides } from '../config/businessSettings';
+import { currentAccountId } from '../accounts/accountContext';
 
 export interface DashboardSummary {
   customers: number;
@@ -21,18 +22,25 @@ export interface ServiceStatus {
   detail: string;
 }
 
-function count(sql: string): number {
-  return (getDb().prepare(sql).get() as { count: number }).count;
+function count(sql: string, accountId: number): number {
+  return (getDb().prepare(sql).get(accountId) as { count: number }).count;
 }
 
-export function getDashboardSummary(): DashboardSummary {
+/** Counts for ONE business (the selected WhatsApp account). */
+export function getDashboardSummary(accountId: number = currentAccountId()): DashboardSummary {
   return {
-    customers: count('SELECT COUNT(*) AS count FROM customers'),
-    conversations: count('SELECT COUNT(*) AS count FROM conversations'),
+    customers: count('SELECT COUNT(*) AS count FROM customers WHERE whatsapp_account_id = ?', accountId),
+    conversations: count('SELECT COUNT(*) AS count FROM conversations WHERE whatsapp_account_id = ?', accountId),
     // booking_locks (not booking_sessions) is where the real booking flow
     // (src/calendar/booking.ts) actually records a confirmed appointment.
-    bookings: count("SELECT COUNT(*) AS count FROM booking_locks WHERE status = 'confirmed'"),
-    aiRequests: count("SELECT COUNT(*) AS count FROM conversation_messages WHERE role = 'assistant'"),
+    bookings: count(
+      "SELECT COUNT(*) AS count FROM booking_locks bl JOIN conversations c ON c.id = bl.conversation_id WHERE bl.status = 'confirmed' AND c.whatsapp_account_id = ?",
+      accountId,
+    ),
+    aiRequests: count(
+      "SELECT COUNT(*) AS count FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.role = 'assistant' AND c.whatsapp_account_id = ?",
+      accountId,
+    ),
   };
 }
 
@@ -59,8 +67,8 @@ export function getServiceStatuses(): ServiceStatus[] {
   ];
 }
 
-export function getKnowledgeStatus(): Array<{ name: string; status: string }> {
-  return listKnowledgeFiles().map((f) => ({ name: f.name, status: f.exists ? 'Available' : 'Missing' }));
+export function getKnowledgeStatus(accountId: number = currentAccountId()): Array<{ name: string; status: string }> {
+  return listKnowledgeFiles(accountId).map((f) => ({ name: f.name, status: f.exists ? 'Available' : 'Missing' }));
 }
 
 export interface RecentConversationItem {
@@ -71,7 +79,7 @@ export interface RecentConversationItem {
   updatedAt: string | null;
 }
 
-export function getRecentConversations(limit = 8): RecentConversationItem[] {
+export function getRecentConversations(limit = 8, accountId: number = currentAccountId()): RecentConversationItem[] {
   const rows = getDb()
     .prepare(
       `SELECT c.id, c.status, c.started_at,
@@ -81,11 +89,12 @@ export function getRecentConversations(limit = 8): RecentConversationItem[] {
        FROM conversations c
        JOIN customers cu ON cu.id = c.customer_id
        LEFT JOIN conversation_messages m ON m.conversation_id = c.id
+       WHERE c.whatsapp_account_id = ?
        GROUP BY c.id
        ORDER BY COALESCE(last_message_at, c.started_at) DESC
        LIMIT ?`,
     )
-    .all(Math.max(1, Math.min(limit, 50))) as Array<{
+    .all(accountId, Math.max(1, Math.min(limit, 50))) as Array<{
     id: number;
     status: string;
     display_name: string | null;
@@ -272,12 +281,13 @@ export interface ServicesView {
   content: string | null;
 }
 
-/** Services are derived from knowledge/services.md — there is no separate services database. */
-export function getServicesView(): ServicesView {
-  const dir = path.join(__dirname, '..', '..', 'knowledge');
-  const filePath = path.join(dir, 'services.md');
+/** Services are derived from the account's knowledge/services.md — there is no separate services database. */
+export function getServicesView(accountId: number = currentAccountId()): ServicesView {
+  const filePath = path.join(knowledgeDirForAccount(accountId), 'services.md');
   if (!fs.existsSync(filePath)) {
     return { sourceFile: 'services.md', available: false, content: null };
   }
-  return { sourceFile: 'services.md', available: true, content: fs.readFileSync(filePath, 'utf-8') };
+  // The markers that let Analyze & Generate refresh its own block are bookkeeping, not content for people to read.
+  const content = fs.readFileSync(filePath, 'utf-8').replace(/<!-- setup:(?:begin v1 hash=[0-9a-f]+|end) -->\n?/g, '');
+  return { sourceFile: 'services.md', available: true, content };
 }

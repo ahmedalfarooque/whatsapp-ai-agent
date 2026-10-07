@@ -1,17 +1,21 @@
 import type Database from 'better-sqlite3';
 import { getDb } from './db';
+import { currentAccountId } from '../accounts/accountContext';
+import {
+  getAccount,
+  setAccountStatus,
+  recordAccountConnected,
+  clearAccountIdentity,
+  type AccountSessionStatus,
+} from '../accounts/accountRepo';
 
-export type QrSessionStatus =
-  | 'idle'
-  | 'starting'
-  | 'scan'
-  | 'qr_expired'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'disconnected'
-  | 'logged_out'
-  | 'error';
+/**
+ * Linked-device session state, per WhatsApp account. Since migration 015 the
+ * state lives on whatsapp_accounts; these helpers keep the original names
+ * (and the legacy single-account call shape) for existing callers and tests.
+ */
+
+export type QrSessionStatus = AccountSessionStatus;
 
 export interface QrSessionRecord {
   phoneNumber: string | null;
@@ -24,29 +28,18 @@ export interface QrSessionRecord {
   updatedAt: string;
 }
 
-interface Row {
-  phone_number: string | null;
-  jid: string | null;
-  display_name: string | null;
-  status: string;
-  connected_at: string | null;
-  disconnected_at: string | null;
-  last_error: string | null;
-  updated_at: string;
-}
-
-export function getQrSession(db: Database.Database = getDb()): QrSessionRecord {
-  const row = db.prepare('SELECT * FROM whatsapp_qr_session WHERE id = 1').get() as Row | undefined;
-  if (!row) throw new Error('whatsapp_qr_session row (id=1) is missing — migrations did not run correctly');
+export function getQrSession(db: Database.Database = getDb(), accountId: number = currentAccountId()): QrSessionRecord {
+  const account = getAccount(accountId, db);
+  if (!account) throw new Error(`whatsapp account ${accountId} is missing — migrations did not run correctly`);
   return {
-    phoneNumber: row.phone_number,
-    jid: row.jid,
-    displayName: row.display_name,
-    status: row.status as QrSessionStatus,
-    connectedAt: row.connected_at,
-    disconnectedAt: row.disconnected_at,
-    lastError: row.last_error,
-    updatedAt: row.updated_at,
+    phoneNumber: account.phoneNumber,
+    jid: account.jid,
+    displayName: account.displayName,
+    status: account.status,
+    connectedAt: account.connectedAt,
+    disconnectedAt: account.disconnectedAt,
+    lastError: account.lastError,
+    updatedAt: account.updatedAt,
   };
 }
 
@@ -54,36 +47,21 @@ export function setQrSessionStatus(
   status: QrSessionStatus,
   lastError: string | null = null,
   db: Database.Database = getDb(),
+  accountId: number = currentAccountId(),
 ): void {
-  db.prepare(
-    `UPDATE whatsapp_qr_session
-     SET status = @status,
-         last_error = @lastError,
-         disconnected_at = CASE WHEN @status IN ('disconnected','logged_out','error') THEN datetime('now') ELSE disconnected_at END,
-         updated_at = datetime('now')
-     WHERE id = 1`,
-  ).run({ status, lastError });
+  setAccountStatus(accountId, status, lastError, db);
 }
 
 /** Records the identity that actually scanned the QR code. */
 export function recordQrSessionConnected(
   identity: { phoneNumber: string | null; jid: string; displayName: string | null },
   db: Database.Database = getDb(),
+  accountId: number = currentAccountId(),
 ): void {
-  db.prepare(
-    `UPDATE whatsapp_qr_session
-     SET status = 'connected', phone_number = @phoneNumber, jid = @jid, display_name = @displayName,
-         connected_at = datetime('now'), last_error = NULL, updated_at = datetime('now')
-     WHERE id = 1`,
-  ).run(identity);
+  recordAccountConnected(accountId, identity, db);
 }
 
 /** Logout clears the identity — a different number may pair next. */
-export function clearQrSessionIdentity(db: Database.Database = getDb()): void {
-  db.prepare(
-    `UPDATE whatsapp_qr_session
-     SET status = 'logged_out', phone_number = NULL, jid = NULL, display_name = NULL,
-         connected_at = NULL, disconnected_at = datetime('now'), updated_at = datetime('now')
-     WHERE id = 1`,
-  ).run();
+export function clearQrSessionIdentity(db: Database.Database = getDb(), accountId: number = currentAccountId()): void {
+  clearAccountIdentity(accountId, db);
 }

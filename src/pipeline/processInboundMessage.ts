@@ -32,8 +32,11 @@ import { MENU_STATES, DATA_DRIVEN_FALLBACKS, routeMenu, type RouteResult } from 
 import { renderCustomerOffers } from '../offers/offerRepo';
 import { resolveTemplate, type TemplateVars } from '../templates/templateRepo';
 import { getAutomationSettings, recordReplyActivity, type ReplyActivityKind } from '../automation/settingsRepo';
+import { currentAccountId, runWithAccount, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
+import { isOutsideBusinessHours } from '../setup/hours';
 
 export interface ProcessDependencies {
+  /** The knowledge base of the account the message belongs to. */
   knowledge: KnowledgeBase;
 }
 
@@ -48,7 +51,12 @@ export interface ProcessDependencies {
  * the inbound message arrived on.
  */
 export async function processInboundMessage(msg: InboundMessage, deps: ProcessDependencies): Promise<void> {
-  return withCustomerLock(msg.waId, () => processInboundMessageUnlocked(msg, deps));
+  // The whole pipeline — customer lookup, settings, templates, offers, AI
+  // context, request creation, outbox rows — runs inside the account the
+  // message arrived on. Serialisation is per (account, customer): the same
+  // phone talking to two businesses is two independent conversations.
+  const accountId = msg.accountId ?? currentAccountId();
+  return runWithAccount(accountId, () => withCustomerLock(`${accountId}:${msg.waId}`, () => processInboundMessageUnlocked(msg, deps)));
 }
 
 interface ReplyContext {
@@ -149,6 +157,7 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
     pauseCustomerAutomation(customer.id, 'Customer requested a human');
     setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
     await replyTemplate(ctx, 'human_support', 'human_handoff');
+    await replyOutOfHours(ctx);
     return;
   }
 
@@ -225,6 +234,21 @@ async function applyRoute(ctx: ReplyContext, route: RouteResult): Promise<void> 
   const nextCtx: ReplyContext = { ...ctx, customer, language };
   for (const key of route.send) {
     await replyTemplate(nextCtx, resolveDataDrivenKey(key, language, vars), route.kind, vars);
+  }
+  if (route.kind === 'human_handoff') await replyOutOfHours(nextCtx);
+}
+
+/**
+ * After a hand-off to staff outside the business's own opening hours, tell the customer when someone will be back.
+ * Only for businesses that entered hours (never guessed), and only the non-original businesses have this template.
+ */
+async function replyOutOfHours(ctx: ReplyContext): Promise<void> {
+  if (currentAccountId() === LEGACY_ACCOUNT_ID) return;
+  if (isOutsideBusinessHours(getBusinessSettings()) !== true) return;
+  try {
+    await replyTemplate(ctx, 'out_of_hours', 'human_handoff', {}, 'Outside opening hours');
+  } catch (error) {
+    logger.warn({ error }, 'could not send the out-of-hours reply');
   }
 }
 

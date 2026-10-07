@@ -1,0 +1,14 @@
+{
+  "session": "2329cbf3-d35b-440d-971f-f118bbe979fc",
+  "agent": "Claude-Code",
+  "task": "Commit verified WHATSAPP_CONNECTION_METHOD transport configuration (no push, no deploy)",
+  "at": "2026-10-06T21:40:20.579Z",
+  "finished": true,
+  "summary": "Committed the verified WHATSAPP_CONNECTION_METHOD transport configuration as cf764fc 'feat: make WhatsApp transport configurable' on master. Exactly 8 files: .env.example, README.md, src/config/env.ts, src/config/secretStore.ts, src/index.ts, tests/unit/config/env.test.ts, .project-sync/state.json, and the review-finish handoff .project-sync/handoffs/2329cbf3-...-7af82d94-....json. Nothing pushed to GitHub (master ahead of origin/master by 1). Nothing deployed. No application code, .env, ports, or other folders touched in this pass. Pre-existing untracked files (.project-sync/COWORK_MASTER_HANDOFF.md, 'Open Router.docx', 20 older handoffs) left untouched. This finish step itself writes a new handoff and updates state.json AFTER the commit, so those two will show as uncommitted again; they belong in a later 'Record project-sync handoff' commit per repo precedent.",
+  "reason": "User reviewed the pre-commit report and explicitly authorised committing these 8 files with the given message, with no push and no deploy.",
+  "tests": "No code changed in this pass. Pre-commit checks run: git status --short; staged exactly 8 paths via explicit git add; staged-path scan for .env/.db/baileys/auth/session/pem/key/docx (none); staged-content scan for token/key/PEM/bearer patterns (none); git diff --cached --check exit 0. Post-commit: git log -1 shows cf764fc; git show --stat lists the 8 files, 285 insertions / 64 deletions; git status clean apart from the two pre-existing untracked files and untracked handoffs. Validation of the code itself was recorded in the previous handoffs of this session (typecheck 0, lint 0, 49 files / 401 tests, build 0).",
+  "nextSteps": "User decides when to push (git push origin master) and when to deploy to the Oracle host. On deploy: set WHATSAPP_CONNECTION_METHOD=qr or omit it, set OPENROUTER_API_KEY and DASHBOARD_MASTER_KEY, leave Meta keys unset, start the app, scan the QR from the dashboard Connection page; never copy data/baileys-auth from a dev machine. Optionally commit the handoff + state.json written by this finish in a follow-up sync-record commit.",
+  "changedFiles": [],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

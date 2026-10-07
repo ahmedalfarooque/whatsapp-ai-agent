@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getDb } from './db';
+import { currentAccountId } from '../accounts/accountContext';
 
 export type CustomerRequestKind = 'appointment' | 'quotation';
 export const REQUEST_STATUSES = ['pending', 'contacted', 'confirmed', 'rejected', 'cancelled', 'completed', 'closed'] as const;
@@ -19,6 +20,7 @@ export interface RequestEvent {
 export interface CustomerRequest {
   id: number;
   reference: string;
+  whatsapp_account_id: number;
   customer_id: number;
   wa_id: string;
   kind: CustomerRequestKind;
@@ -50,19 +52,20 @@ const PREFIX: Record<CustomerRequestKind, string> = { appointment: 'APT', quotat
  * reference (e.g. INQ-2026-4821) the customer can quote to staff.
  */
 export function createCustomerRequest(
-  input: { customerId: number; waId: string; kind: CustomerRequestKind; payload: Record<string, string> },
+  input: { customerId: number; waId: string; kind: CustomerRequestKind; payload: Record<string, string>; accountId?: number },
   db: Database.Database = getDb(),
 ): CustomerRequest {
   const year = new Date().getFullYear();
+  const accountId = input.accountId ?? currentAccountId();
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const reference = `${PREFIX[input.kind]}-${year}-${String(1000 + Math.floor(Math.random() * 9000))}`;
     try {
       const result = db
         .prepare(
-          `INSERT INTO customer_requests (reference, customer_id, wa_id, kind, payload)
-           VALUES (@reference, @customerId, @waId, @kind, @payload)`,
+          `INSERT INTO customer_requests (reference, customer_id, wa_id, kind, payload, whatsapp_account_id)
+           VALUES (@reference, @customerId, @waId, @kind, @payload, @accountId)`,
         )
-        .run({ reference, customerId: input.customerId, waId: input.waId, kind: input.kind, payload: JSON.stringify(input.payload) });
+        .run({ reference, customerId: input.customerId, waId: input.waId, kind: input.kind, payload: JSON.stringify(input.payload), accountId });
       return toRequest(db.prepare('SELECT * FROM customer_requests WHERE id = ?').get(result.lastInsertRowid) as Row);
     } catch (error) {
       if (!String((error as Error).message).includes('UNIQUE')) throw error;
@@ -72,36 +75,42 @@ export function createCustomerRequest(
 }
 
 export function listCustomerRequests(
-  params: { kind?: CustomerRequestKind; status?: CustomerRequestStatus; limit?: number } = {},
+  params: { kind?: CustomerRequestKind; status?: CustomerRequestStatus; limit?: number; accountId?: number } = {},
   db: Database.Database = getDb(),
 ): CustomerRequest[] {
   const limit = Math.max(1, Math.min(params.limit ?? 50, 200));
-  const where: string[] = [];
+  const where: string[] = ['whatsapp_account_id = @accountId'];
   if (params.kind) where.push('kind = @kind');
   if (params.status) where.push('status = @status');
   const rows = db
     .prepare(
-      `SELECT * FROM customer_requests ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      `SELECT * FROM customer_requests WHERE ${where.join(' AND ')}
        ORDER BY created_at DESC, id DESC LIMIT @limit`,
     )
-    .all({ kind: params.kind, status: params.status, limit }) as Row[];
+    .all({ kind: params.kind, status: params.status, limit, accountId: params.accountId ?? currentAccountId() }) as Row[];
   return rows.map(toRequest);
 }
 
-export function getCustomerRequest(id: number, db: Database.Database = getDb()): CustomerRequest | undefined {
-  const row = db.prepare('SELECT * FROM customer_requests WHERE id = ?').get(id) as Row | undefined;
+/**
+ * Lookup by id. `accountId: null` (used by the request service, which then
+ * works inside the request's own account) skips the scope; the dashboard uses
+ * the default so another business's request id is "not found".
+ */
+export function getCustomerRequest(id: number, db: Database.Database = getDb(), accountId: number | null = currentAccountId()): CustomerRequest | undefined {
+  const row = db.prepare('SELECT * FROM customer_requests WHERE id = @id AND (@accountId IS NULL OR whatsapp_account_id = @accountId)').get({ id, accountId }) as Row | undefined;
   return row ? toRequest(row) : undefined;
 }
 
-export function getCustomerRequestByReference(reference: string, db: Database.Database = getDb()): CustomerRequest | undefined {
-  const row = db.prepare('SELECT * FROM customer_requests WHERE reference = ?').get(reference.toUpperCase()) as Row | undefined;
+/** References are looked up within one business: an operator on account A cannot act on account B's requests. */
+export function getCustomerRequestByReference(reference: string, db: Database.Database = getDb(), accountId: number = currentAccountId()): CustomerRequest | undefined {
+  const row = db.prepare('SELECT * FROM customer_requests WHERE reference = ? AND whatsapp_account_id = ?').get(reference.toUpperCase(), accountId) as Row | undefined;
   return row ? toRequest(row) : undefined;
 }
 
 /** Plain status write — use requestService.changeRequestStatus() for audited, notifying transitions. */
 export function setCustomerRequestStatus(id: number, status: CustomerRequestStatus, db: Database.Database = getDb()): CustomerRequest | undefined {
   db.prepare(`UPDATE customer_requests SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, id);
-  return getCustomerRequest(id, db);
+  return getCustomerRequest(id, db, null);
 }
 
 export function insertRequestEvent(
@@ -131,6 +140,6 @@ export function updateCustomerRequestStatus(
   return row ? toRequest(row) : undefined;
 }
 
-export function countCustomerRequests(status: CustomerRequestStatus = 'pending', db: Database.Database = getDb()): number {
-  return (db.prepare('SELECT COUNT(*) AS count FROM customer_requests WHERE status = ?').get(status) as { count: number }).count;
+export function countCustomerRequests(status: CustomerRequestStatus = 'pending', db: Database.Database = getDb(), accountId: number = currentAccountId()): number {
+  return (db.prepare('SELECT COUNT(*) AS count FROM customer_requests WHERE status = ? AND whatsapp_account_id = ?').get(status, accountId) as { count: number }).count;
 }

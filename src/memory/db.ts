@@ -34,10 +34,26 @@ export function runMigrations(db: Database.Database): void {
       db.exec(sql);
       db.prepare('INSERT OR IGNORE INTO schema_migrations (id) VALUES (?)').run(file);
     });
-    run();
+    // A migration that rebuilds a table other tables reference (SQLite cannot
+    // drop a CHECK/UNIQUE in place) declares `-- migrate: foreign_keys=off` on
+    // its first line. PRAGMA foreign_keys is a no-op inside a transaction, so
+    // it is toggled around it; integrity is then verified before re-enabling.
+    const rebuildsReferencedTables = FK_OFF_DIRECTIVE.test(sql);
+    if (rebuildsReferencedTables) db.pragma('foreign_keys = OFF');
+    try {
+      run();
+      if (rebuildsReferencedTables) {
+        const violations = db.pragma('foreign_key_check') as unknown[];
+        if (violations.length > 0) throw new Error(`migration ${file} left ${violations.length} foreign key violation(s)`);
+      }
+    } finally {
+      if (rebuildsReferencedTables) db.pragma('foreign_keys = ON');
+    }
     logger.info({ migration: file }, 'applied database migration');
   }
 }
+
+const FK_OFF_DIRECTIVE = /^\s*--\s*migrate:\s*foreign_keys\s*=\s*off/i;
 
 function createDatabase(filePath: string): Database.Database {
   if (filePath !== ':memory:') {

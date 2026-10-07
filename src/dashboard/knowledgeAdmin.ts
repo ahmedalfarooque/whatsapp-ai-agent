@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { logger } from '../logger';
+import { currentAccountId } from '../accounts/accountContext';
+import { knowledgeDirForAccount as resolveKnowledgeDir } from '../knowledge/paths';
+
+export { KNOWLEDGE_ROOT } from '../knowledge/paths';
 
 /**
  * Hard allowlist of editable knowledge files — the ONLY files the dashboard
@@ -12,6 +16,7 @@ export const EDITABLE_KNOWLEDGE_FILES = [
   'services.md',
   'policies.md',
   'faq.md',
+  'ai-knowledge.md',
   'booking.json',
 ] as const;
 
@@ -23,12 +28,17 @@ export function isEditableKnowledgeFile(name: string): name is EditableKnowledge
   return (EDITABLE_KNOWLEDGE_FILES as readonly string[]).includes(name);
 }
 
-function knowledgeDir(): string {
-  return path.join(__dirname, '..', '..', 'knowledge');
+/** Where a business's knowledge files live (see src/knowledge/paths.ts); invalid ids become a 400 for the dashboard. */
+export function knowledgeDirForAccount(accountId: number = currentAccountId()): string {
+  try {
+    return resolveKnowledgeDir(accountId);
+  } catch {
+    throw new KnowledgeFileError('invalid account', 400);
+  }
 }
 
-function backupDir(): string {
-  return path.join(knowledgeDir(), '.backups');
+function backupDir(accountId: number): string {
+  return path.join(knowledgeDirForAccount(accountId), '.backups');
 }
 
 export interface KnowledgeFileInfo {
@@ -38,8 +48,8 @@ export interface KnowledgeFileInfo {
   modifiedAt: string | null;
 }
 
-export function listKnowledgeFiles(): KnowledgeFileInfo[] {
-  const dir = knowledgeDir();
+export function listKnowledgeFiles(accountId: number = currentAccountId()): KnowledgeFileInfo[] {
+  const dir = knowledgeDirForAccount(accountId);
   return EDITABLE_KNOWLEDGE_FILES.map((name) => {
     const filePath = path.join(dir, name);
     try {
@@ -62,11 +72,11 @@ export class KnowledgeFileError extends Error {
 }
 
 /** Reads one allowlisted knowledge file's content. Throws KnowledgeFileError for anything not on the allowlist. */
-export function readKnowledgeFile(name: string): { name: string; content: string } {
+export function readKnowledgeFile(name: string, accountId: number = currentAccountId()): { name: string; content: string } {
   if (!isEditableKnowledgeFile(name)) {
     throw new KnowledgeFileError('unknown or unsupported knowledge file', 400);
   }
-  const filePath = path.join(knowledgeDir(), name);
+  const filePath = path.join(knowledgeDirForAccount(accountId), name);
   if (!fs.existsSync(filePath)) {
     throw new KnowledgeFileError('knowledge file does not exist yet', 404);
   }
@@ -84,7 +94,7 @@ export function readKnowledgeFile(name: string): { name: string; content: string
  *   - writes atomically (write to a temp file, then rename) so a crash
  *     mid-write can never leave a corrupted/partial file in place
  */
-export function writeKnowledgeFile(name: string, content: string): { name: string; backedUpAs: string | null } {
+export function writeKnowledgeFile(name: string, content: string, accountId: number = currentAccountId()): { name: string; backedUpAs: string | null } {
   if (!isEditableKnowledgeFile(name)) {
     throw new KnowledgeFileError('unknown or unsupported knowledge file', 400);
   }
@@ -103,7 +113,7 @@ export function writeKnowledgeFile(name: string, content: string): { name: strin
     }
   }
 
-  const dir = knowledgeDir();
+  const dir = knowledgeDirForAccount(accountId);
   const filePath = path.join(dir, name);
   // Defense in depth: even though `name` is already checked against the
   // allowlist above, confirm the resolved path never escapes the knowledge
@@ -112,13 +122,14 @@ export function writeKnowledgeFile(name: string, content: string): { name: strin
   if (!resolved.startsWith(path.resolve(dir) + path.sep)) {
     throw new KnowledgeFileError('resolved path escapes the knowledge directory', 400);
   }
+  fs.mkdirSync(dir, { recursive: true }); // a new account's directory is created on first save
 
   let backedUpAs: string | null = null;
   if (fs.existsSync(filePath)) {
-    fs.mkdirSync(backupDir(), { recursive: true });
+    fs.mkdirSync(backupDir(accountId), { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupName = `${name}.${stamp}.bak`;
-    fs.copyFileSync(filePath, path.join(backupDir(), backupName));
+    fs.copyFileSync(filePath, path.join(backupDir(accountId), backupName));
     backedUpAs = backupName;
   }
 
@@ -126,6 +137,6 @@ export function writeKnowledgeFile(name: string, content: string): { name: strin
   fs.writeFileSync(tempPath, content, 'utf-8');
   fs.renameSync(tempPath, filePath); // atomic on the same filesystem
 
-  logger.info({ name, backedUpAs, byteSize }, 'dashboard: knowledge file saved');
+  logger.info({ name, backedUpAs, byteSize, account: accountId }, 'dashboard: knowledge file saved');
   return { name, backedUpAs };
 }

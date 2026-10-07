@@ -49,6 +49,8 @@ export function clearSessionCookie(res: Response): void {
 declare module 'express-serve-static-core' {
   interface Request {
     adminUserId?: number;
+    /** The WhatsApp account (business) the request operates on — set by the account middleware in router.ts. */
+    accountId?: number;
   }
 }
 

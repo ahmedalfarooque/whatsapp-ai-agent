@@ -7,10 +7,11 @@ const fixtures = vi.hoisted(() => ({
   sockets: [] as Array<{ ev: EventEmitter; user?: { id: string; name?: string }; sendMessage: ReturnType<typeof vi.fn>; logout: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }>,
   inbound: vi.fn(),
   claimed: vi.fn(() => true),
-  session: {
-    phoneNumber: null as string | null, jid: null as string | null, displayName: null as string | null,
-    status: 'idle', connectedAt: null as string | null, disconnectedAt: null as string | null, lastError: null as string | null, updatedAt: 'now',
-  },
+  accounts: [] as Array<{
+    id: number; name: string; nameAr: string | null; businessCategory: string | null; connectionMethod: 'qr' | 'meta'; authDir: string; enabled: boolean;
+    phoneNumber: string | null; jid: string | null; displayName: string | null; status: string; connectedAt: string | null; disconnectedAt: string | null;
+    lastError: string | null; createdAt: string; updatedAt: string;
+  }>,
   lidPn: null as string | null,
   lidMappings: [] as Array<[string, string]>,
   replyJids: [] as Array<[number, string]>,
@@ -55,14 +56,25 @@ vi.mock('../../../src/memory/lidMapRepo', () => ({
   rememberLidMapping: vi.fn((lid: string, pn: string) => { fixtures.lidMappings.push([lid, pn]); }),
   getPnForLid: vi.fn(() => fixtures.lidPn),
 }));
-vi.mock('../../../src/memory/qrSessionRepo', () => ({
-  getQrSession: vi.fn(() => fixtures.session),
-  setQrSessionStatus: vi.fn((status: string, err: string | null) => { fixtures.session.status = status; fixtures.session.lastError = err; }),
-  recordQrSessionConnected: vi.fn((identity: { phoneNumber: string | null; jid: string; displayName: string | null }) => {
-    Object.assign(fixtures.session, identity, { status: 'connected', connectedAt: 'now' });
-  }),
-  clearQrSessionIdentity: vi.fn(() => { Object.assign(fixtures.session, { phoneNumber: null, jid: null, displayName: null, status: 'logged_out' }); }),
-}));
+// Accounts live in SQLite; this suite mocks the filesystem (so no migrations
+// can run) and therefore fakes the account repository in memory. Account 1 is
+// the legacy business with the legacy 'baileys-auth' directory; account 2 is a
+// second business with its own directory, used by the multi-account tests.
+vi.mock('../../../src/accounts/accountRepo', () => {
+  const accounts = fixtures.accounts;
+  const get = (id: number) => accounts.find((a) => a.id === id);
+  return {
+    getAccount: vi.fn((id: number) => get(id)),
+    listEnabledAccounts: vi.fn(() => accounts.filter((a) => a.enabled)),
+    authDirFor: (a: { authDir: string }) => `/data/${a.authDir}`,
+    dataDir: () => '/data',
+    setAccountStatus: vi.fn((id: number, status: string, err: string | null) => { const a = get(id); if (a) { a.status = status; a.lastError = err; } }),
+    recordAccountConnected: vi.fn((id: number, identity: { phoneNumber: string | null; jid: string; displayName: string | null }) => {
+      const a = get(id); if (a) Object.assign(a, identity, { status: 'connected', connectedAt: 'now' });
+    }),
+    clearAccountIdentity: vi.fn((id: number) => { const a = get(id); if (a) Object.assign(a, { phoneNumber: null, jid: null, displayName: null, status: 'logged_out' }); }),
+  };
+});
 vi.mock('../../../src/automation/settingsRepo', () => ({ recordReplyActivity: fixtures.activity }));
 vi.mock('../../../src/requests/requestService', () => ({
   parseOperatorCommand: (text: string | undefined) => {
@@ -109,7 +121,11 @@ describe('Baileys QR connection lifecycle', () => {
     vi.clearAllMocks();
     fixtures.sockets.length = 0;
     fixtures.ownerFile = null; fixtures.lidPn = null; fixtures.operator.mockClear(); fixtures.flush.mockClear(); fixtures.lidMappings.length = 0; fixtures.replyJids.length = 0; fixtures.written.length = 0;
-    Object.assign(fixtures.session, { phoneNumber: null, jid: null, displayName: null, status: 'idle', connectedAt: null, lastError: null });
+    fixtures.accounts.length = 0;
+    fixtures.accounts.push(
+      { id: 1, name: 'Rowad Alfa Auto Care', nameAr: null, businessCategory: 'Car care', connectionMethod: 'qr', authDir: 'baileys-auth', enabled: true, phoneNumber: null, jid: null, displayName: null, status: 'idle', connectedAt: null, disconnectedAt: null, lastError: null, createdAt: 'now', updatedAt: 'now' },
+      { id: 2, name: 'Noor Salon', nameAr: 'صالون نور', businessCategory: 'Salon', connectionMethod: 'qr', authDir: 'accounts/2/baileys-auth', enabled: true, phoneNumber: null, jid: null, displayName: null, status: 'idle', connectedAt: null, disconnectedAt: null, lastError: null, createdAt: 'now', updatedAt: 'now' },
+    );
     delete process.env.VERCEL;
   });
   afterEach(async () => {
@@ -330,7 +346,7 @@ describe('Baileys QR connection lifecycle', () => {
     // business account (own chat, fromMe) → operator command, answered in the same chat
     emit(socket, 'messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '966558190545@s.whatsapp.net', fromMe: true, id: 'op1' }, message: { conversation: 'CONFIRM APT-2026-3777' } }] });
     await tick(); await tick();
-    expect(fixtures.operator).toHaveBeenCalledWith({ status: 'confirmed', reference: 'APT-2026-3777' }, expect.stringContaining('whatsapp:'));
+    expect(fixtures.operator).toHaveBeenCalledWith({ status: 'confirmed', reference: 'APT-2026-3777' }, expect.stringContaining('whatsapp:'), undefined, 1);
     expect(socket.sendMessage).toHaveBeenCalledWith('966558190545@s.whatsapp.net', { text: 'done' });
     // duplicate delivery of the same command event → ignored
     fixtures.claimed.mockReturnValueOnce(false);
@@ -344,9 +360,9 @@ describe('Baileys QR connection lifecycle', () => {
     expect(fixtures.operator).toHaveBeenCalledTimes(1);
     // the outbox sender uses the live socket and refuses when not connected
     expect(fixtures.outboxSender).toBeTypeOf('function');
-    expect(await fixtures.outboxSender!('966558190545@s.whatsapp.net', 'alert')).toBe('sent-1');
+    expect(await fixtures.outboxSender!('966558190545@s.whatsapp.net', 'alert', 1)).toBe('sent-1');
     emit(socket, 'connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 428 } } } });
-    await expect(fixtures.outboxSender!('966558190545@s.whatsapp.net', 'alert')).rejects.toThrow();
+    await expect(fixtures.outboxSender!('966558190545@s.whatsapp.net', 'alert', 1)).rejects.toThrow();
     fixtures.inbound.mockReset();
   });
 

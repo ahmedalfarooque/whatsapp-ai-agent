@@ -31,6 +31,7 @@ const app = createApp();
 
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, 'WhatsApp AI agent listening');
+  // Every enabled WhatsApp account resumes its own saved session independently.
   resumeQrConnection();
 });
 

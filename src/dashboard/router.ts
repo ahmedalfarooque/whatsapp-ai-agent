@@ -58,11 +58,18 @@ import {
 } from '../config/businessSettings';
 import { getWhatsappConnectionState, markWhatsappConfigurationSaved } from '../config/whatsappConnection';
 import { syncWhatsapp } from './whatsappSync';
-import { getQrStatus, startQrConnection, stopQrConnection, refreshQrConnection, retryQrConnection } from '../whatsapp/qrConnection';
+import {
+  getQrStatus, startQrConnection, stopQrConnection, refreshQrConnection, retryQrConnection, suspendQrConnection, invalidateAccountKnowledge, listConnections,
+} from '../whatsapp/qrConnection';
 import { getBusinessSettings, getBusinessSettingsOverrides, formatBusinessHours, formatAddress } from '../config/businessSettings';
 import { getQrSession } from '../memory/qrSessionRepo';
+import { resolveDashboardAccount, assertAccountAccess } from './accountMiddleware';
+import { runWithAccount } from '../accounts/accountContext';
 import {
-  saveDocument, listDocuments, getDocument, updateDocument, replaceDocumentFile, deleteDocument, documentPath, serveContentType,
+  listAccountsForAdmin, getAccount, createAccount, updateAccount, setAccountEnabled, AccountValidationError, type WhatsappAccount,
+} from '../accounts/accountRepo';
+import {
+  saveDocument, listDocuments, getDocument, updateDocument, replaceDocumentFile, deleteDocument, documentPath, serveContentType, extractDocumentText,
   DocumentValidationError, MAX_DOCUMENT_BYTES, ALLOWED_TYPES, type DocumentVisibility, type DocumentStatus,
 } from '../documents/documentStore';
 import {
@@ -82,7 +89,9 @@ import {
   templateSourceType,
   TemplateValidationError,
 } from '../templates/templateRepo';
-import { FOLLOW_UP_TEMPLATES, MAIN_MENU_OPTIONS, SUBMENUS, FLOWS, DATA_DRIVEN_FALLBACKS } from '../automation/menuRouter';
+import { FOLLOW_UP_TEMPLATES, DATA_DRIVEN_FALLBACKS } from '../automation/menuRouter';
+import { getMenuTables } from '../automation/menuConfig';
+import { registerSetupRoutes } from './setupRoutes';
 import {
   listCustomerRequests,
   countCustomerRequests,
@@ -206,6 +215,127 @@ export function createDashboardRouter(): Router {
     requireDashboardAuth(req, res, next);
   });
 
+  // ---- Every authenticated route runs inside ONE WhatsApp account (business) ----
+  // The selected account comes from the X-Whatsapp-Account header (set by the
+  // dashboard's account switcher) and is validated server-side; see
+  // accountMiddleware.ts. Repositories read it from the account context.
+  router.use('/api/dashboard', (req, res, next) => {
+    if (UNAUTHENTICATED_AUTH_ROUTES.includes(req.path)) {
+      next();
+      return;
+    }
+    resolveDashboardAccount(req, res, next);
+  });
+
+  // ---- WhatsApp accounts (businesses) ----------------------------------------
+  function accountView(account: WhatsappAccount) {
+    // Live phase from the running connection when there is one; otherwise the last persisted state.
+    const live = listConnections().find((c) => c.accountId === account.id);
+    const phase = live ? live.phase : account.status;
+    return {
+      id: account.id,
+      name: account.name,
+      nameAr: account.nameAr,
+      businessCategory: account.businessCategory,
+      connectionMethod: account.connectionMethod,
+      enabled: account.enabled,
+      phoneNumber: account.phoneNumber,
+      displayName: account.displayName,
+      phase,
+      /** Coarse state for the sidebar: connected | connecting | qr_required | disconnected | disabled | error. */
+      uiStatus: !account.enabled
+        ? 'disabled'
+        : phase === 'connected'
+          ? 'connected'
+          : ['starting', 'connecting', 'reconnecting'].includes(phase)
+            ? 'connecting'
+            : ['scan', 'qr_expired', 'idle', 'logged_out'].includes(phase)
+              ? 'qr_required'
+              : phase === 'error'
+                ? 'error'
+                : 'disconnected',
+      connectedAt: account.connectedAt,
+      disconnectedAt: account.disconnectedAt,
+      lastError: account.lastError,
+      isLegacy: account.id === 1,
+      /** The original business cannot be deleted (it can be edited, disabled or disconnected). */
+      protected: account.id === 1,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    };
+  }
+  function accountError(res: Response, error: unknown): void {
+    if (error instanceof AccountValidationError) { res.status(error.status).json({ error: 'validation_failed', fields: error.fields }); return; }
+    logger.error({ error }, 'account operation failed');
+    res.status(500).json({ error: 'Account operation failed' });
+  }
+  router.get('/api/dashboard/accounts', (req, res) => {
+    res.json({ accounts: listAccountsForAdmin(req.adminUserId as number).map(accountView), selected: req.accountId });
+  });
+  router.post('/api/dashboard/accounts', (req, res) => {
+    try {
+      const account = createAccount(req.body);
+      logger.info({ account: account.id, admin: req.adminUserId }, 'dashboard: WhatsApp account created');
+      res.status(201).json(accountView(account));
+    } catch (error) { accountError(res, error); }
+  });
+  router.get('/api/dashboard/accounts/:id', (req, res) => {
+    const id = Number.parseInt(String(req.params.id), 10);
+    if (!assertAccountAccess(req, res, id)) return;
+    res.json(accountView(getAccount(id)!));
+  });
+  router.put('/api/dashboard/accounts/:id', (req, res) => {
+    const id = Number.parseInt(String(req.params.id), 10);
+    if (!assertAccountAccess(req, res, id)) return;
+    try { res.json(accountView(updateAccount(id, req.body)!)); } catch (error) { accountError(res, error); }
+  });
+  router.post('/api/dashboard/accounts/:id/:action(enable|disable)', async (req, res) => {
+    const id = Number.parseInt(String(req.params.id), 10);
+    if (!assertAccountAccess(req, res, id)) return;
+    const enable = req.params.action === 'enable';
+    const account = setAccountEnabled(id, enable)!;
+    // Disabling closes the socket but keeps the saved session, so enabling later resumes without a new scan.
+    if (!enable) await suspendQrConnection(id);
+    else if (account.connectionMethod === 'qr') await runWithAccount(id, () => startQrConnection(id)).catch((error) => logger.warn({ error, account: id }, 'could not resume the enabled account'));
+    res.json(accountView(getAccount(id)!));
+  });
+
+  // ---- Business setup: information, links, PDFs/images, Analyze & Generate, menu, delete ----
+  registerSetupRoutes(router, actor);
+
+  // ---- WhatsApp linked-device (QR) connection — one per account ---------------
+  async function qrAction(accountId: number, action: string): Promise<{ notice: string | null } | null> {
+    let notice: string | null = null;
+    if (action === 'connect') await startQrConnection(accountId);
+    else if (action === 'refresh') notice = (await refreshQrConnection(accountId)).notice;
+    else if (action === 'retry') notice = (await retryQrConnection(accountId)).notice;
+    else if (action === 'status') notice = 'status';
+    else if (action === 'disconnect') await stopQrConnection(accountId);
+    else return null;
+    return { notice };
+  }
+  const qrLimiter = rateLimit({ windowMs: 60_000, limit: 12, standardHeaders: true, legacyHeaders: false });
+  // Explicit per-account endpoints (the account page uses these for any business, not only the selected one).
+  router.get('/api/dashboard/accounts/:id/qr', (req, res) => {
+    const id = Number.parseInt(String(req.params.id), 10);
+    if (!assertAccountAccess(req, res, id)) return;
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(runWithAccount(id, () => getQrStatus(id)));
+  });
+  router.post('/api/dashboard/accounts/:id/qr/:action', qrLimiter, async (req, res) => {
+    const id = Number.parseInt(String(req.params.id), 10);
+    if (!assertAccountAccess(req, res, id)) return;
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const result = await runWithAccount(id, () => qrAction(id, String(req.params.action)));
+      if (!result) { res.status(404).json({ error: 'Unknown connection action' }); return; }
+      res.json({ ...runWithAccount(id, () => getQrStatus(id)), notice: result.notice });
+    } catch (error) {
+      logger.warn({ error, account: id }, 'QR connection action failed');
+      res.status(409).json({ error: (error as Error).message || 'QR connection could not change. Use a persistent Node server and try again.' });
+    }
+  });
+
   // Revokes EVERY active session (including the caller's own) — for when an
   // admin suspects a session/device was compromised. Requires an already
   // valid session to invoke (gated above like every other route here), so
@@ -216,37 +346,31 @@ export function createDashboardRouter(): Router {
     res.json({ ok: true, revoked });
   });
 
-  // ---- Overview -------------------------------------------------------
-  // ---- WhatsApp linked-device (QR) connection ---------------------------
-  router.get('/api/dashboard/whatsapp/qr', (_req, res) => {
+  // The selected account's connection (what the WhatsApp Connection page and the header pill read).
+  router.get('/api/dashboard/whatsapp/qr', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json(getQrStatus());
+    res.json(getQrStatus(req.accountId));
   });
-  const qrLimiter = rateLimit({ windowMs: 60_000, limit: 12, standardHeaders: true, legacyHeaders: false });
   router.post('/api/dashboard/whatsapp/qr/:action', qrLimiter, async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
-      let notice: string | null = null;
-      if (req.params.action === 'connect') await startQrConnection();
-      else if (req.params.action === 'refresh') notice = (await refreshQrConnection()).notice;
-      else if (req.params.action === 'retry') notice = (await retryQrConnection()).notice;
-      else if (req.params.action === 'status') notice = 'status';
-      else if (req.params.action === 'disconnect') await stopQrConnection();
-      else { res.status(404).json({ error: 'Unknown connection action' }); return; }
-      res.json({ ...getQrStatus(), notice });
+      const result = await qrAction(req.accountId as number, String(req.params.action));
+      if (!result) { res.status(404).json({ error: 'Unknown connection action' }); return; }
+      res.json({ ...getQrStatus(req.accountId), notice: result.notice });
     } catch (error) {
-      logger.warn({ error }, 'QR connection action failed');
-      res.status(409).json({ error: 'QR connection could not change. Use a persistent Node server and try again.' });
+      logger.warn({ error, account: req.accountId }, 'QR connection action failed');
+      res.status(409).json({ error: (error as Error).message || 'QR connection could not change. Use a persistent Node server and try again.' });
     }
   });
 
   // ---- Business profile & location (one resolver: WhatsApp {business}/{maps}/{hours}/{address}, preview, AI) ----
-  function businessProfileView() {
-    const settings = getBusinessSettings();
-    const session = getQrSession();
+  function businessProfileView(accountId: number) {
+    const settings = getBusinessSettings(accountId);
+    const session = getQrSession(undefined, accountId);
     return {
+      accountId,
       settings,
-      overrides: getBusinessSettingsOverrides(),
+      overrides: getBusinessSettingsOverrides(accountId),
       activeNumber: session.phoneNumber,
       activeProfileName: session.displayName,
       rendered: {
@@ -255,16 +379,16 @@ export function createDashboardRouter(): Router {
         addressAr: formatAddress(settings, 'ar'),
         addressEn: formatAddress(settings, 'en'),
       },
-      updatedAt: (getDb().prepare('SELECT updated_at FROM business_settings WHERE id = 1').get() as { updated_at: string } | undefined)?.updated_at ?? null,
+      updatedAt: (getDb().prepare('SELECT updated_at FROM business_settings WHERE id = ?').get(accountId) as { updated_at: string } | undefined)?.updated_at ?? null,
     };
   }
-  router.get('/api/dashboard/business-profile', (_req, res) => {
-    res.json(businessProfileView());
+  router.get('/api/dashboard/business-profile', (req, res) => {
+    res.json(businessProfileView(req.accountId as number));
   });
   router.put('/api/dashboard/business-profile', (req, res) => {
     try {
-      updateBusinessSettings(req.body ?? {});
-      res.json(businessProfileView());
+      updateBusinessSettings(req.body ?? {}, req.accountId as number);
+      res.json(businessProfileView(req.accountId as number));
     } catch (error) {
       if (error instanceof BusinessSettingsValidationError) { res.status(error.status).json({ error: 'validation_failed', fields: error.fields }); return; }
       logger.error({ error }, 'dashboard: failed to save business profile');
@@ -290,13 +414,14 @@ export function createDashboardRouter(): Router {
     const status = typeof req.query.status === 'string' && ['active', 'archived'].includes(req.query.status) ? (req.query.status as DocumentStatus) : undefined;
     res.json({ documents: listDocuments({ status }).map(publicDoc), limits: { maxBytes: MAX_DOCUMENT_BYTES, allowed: Object.keys(ALLOWED_TYPES) } });
   });
-  router.post('/api/dashboard/documents', rawUpload, (req, res) => {
+  router.post('/api/dashboard/documents', rawUpload, async (req, res) => {
     try {
       const name = decodeURIComponent(String(req.header('x-file-name') ?? 'upload'));
       const visibility = String(req.header('x-visibility') ?? 'internal') as DocumentVisibility;
       const title = req.header('x-title') ? decodeURIComponent(String(req.header('x-title'))) : null;
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-      const doc = saveDocument({ originalName: name, mimeType: String(req.header('content-type') ?? ''), bytes, visibility, title, uploadedBy: actor(req) });
+      const saved = saveDocument({ originalName: name, mimeType: String(req.header('content-type') ?? ''), bytes, visibility, title, uploadedBy: actor(req), purpose: req.header('x-purpose') ? decodeURIComponent(String(req.header('x-purpose'))) : null, caption: req.header('x-caption') ? decodeURIComponent(String(req.header('x-caption'))) : null });
+      const doc = saved.extension === 'pdf' ? ((await extractDocumentText(saved.id)) ?? saved) : saved;
       res.status(201).json(publicDoc(doc));
     } catch (error) { documentError(res, error); }
   });
@@ -433,8 +558,10 @@ export function createDashboardRouter(): Router {
     });
   });
   /** The menu structure the router enforces (numbers → actions); the dashboard flow map is built from this. */
-  router.get('/api/dashboard/menu-tree', (_req, res) => {
-    res.json({ mainMenu: MAIN_MENU_OPTIONS, submenus: SUBMENUS, flows: {
+  router.get('/api/dashboard/menu-tree', (req, res) => {
+    const tables = getMenuTables(req.accountId as number); // the original business: built-in structure; any other business: its own menu
+    const FLOWS = tables.flows;
+    res.json({ mainMenu: tables.main, submenus: tables.submenus, builtIn: tables.builtIn, flows: {
       appointment: { intro: FLOWS.appointment.intro, confirm: FLOWS.appointment.confirm, fields: FLOWS.appointment.fields, steps: FLOWS.appointment.fields.map((_, i) => (i === 0 ? FLOWS.appointment.intro : FLOWS.appointment.stepTemplate(i + 1))) },
       quotation: { intro: FLOWS.quotation.intro, confirm: FLOWS.quotation.confirm, fields: FLOWS.quotation.fields, steps: FLOWS.quotation.fields.map((_, i) => (i === 0 ? FLOWS.quotation.intro : FLOWS.quotation.stepTemplate(i + 1))) },
     }, followUps: FOLLOW_UP_TEMPLATES });
@@ -499,8 +626,8 @@ export function createDashboardRouter(): Router {
   });
 
   // ---- Automatic reply control center --------------------------------------
-  router.get('/api/dashboard/automation', (_req, res) => {
-    const qr = getQrStatus();
+  router.get('/api/dashboard/automation', (req, res) => {
+    const qr = getQrStatus(req.accountId);
     res.json({
       settings: getAutomationSettings(),
       connection: { phase: qr.phase, phoneNumber: qr.phoneNumber, detail: qr.detail },
@@ -546,11 +673,13 @@ export function createDashboardRouter(): Router {
     res.json(getDashboardSummary());
   });
 
-  router.get('/api/dashboard/status', (_req, res) => {
+  router.get('/api/dashboard/status', (req, res) => {
+    const qr = getQrStatus(req.accountId);
     res.json({
       environment: env.NODE_ENV,
       providerMode: env.shouldUseMockProviders ? 'mock' : 'production',
-      services: [...getServiceStatuses(), { name: 'WhatsApp (QR)', state: getQrStatus().phase, detail: getQrStatus().detail }],
+      accountId: req.accountId,
+      services: [...getServiceStatuses(), { name: 'WhatsApp (QR)', state: qr.phase, detail: qr.detail }],
       knowledge: getKnowledgeStatus(),
     });
   });
@@ -632,6 +761,14 @@ export function createDashboardRouter(): Router {
       res.status(400).json({ error: 'resolution must be "confirmed" or "not_booked"' });
       return;
     }
+    // A booking belongs to a business through its conversation; another business's id is "not found".
+    const owner = getDb()
+      .prepare('SELECT c.whatsapp_account_id AS accountId FROM booking_locks bl JOIN conversations c ON c.id = bl.conversation_id WHERE bl.id = ?')
+      .get(id) as { accountId: number } | undefined;
+    if (!owner || owner.accountId !== req.accountId) {
+      res.status(404).json({ error: 'booking not found' });
+      return;
+    }
     if (resolution === 'confirmed') {
       const calendarEventId = req.body?.calendarEventId;
       if (typeof calendarEventId !== 'string' || calendarEventId.trim().length === 0) {
@@ -695,7 +832,9 @@ export function createDashboardRouter(): Router {
       return;
     }
     try {
-      res.json(writeKnowledgeFile(req.params.name, content));
+      const saved = writeKnowledgeFile(req.params.name, content);
+      invalidateAccountKnowledge(req.accountId as number); // the next WhatsApp message uses the new text
+      res.json(saved);
     } catch (error) {
       if (error instanceof KnowledgeFileError) {
         res.status(error.status).json({ error: error.message });

@@ -1,10 +1,13 @@
 import type Database from 'better-sqlite3';
 import { getDb } from './db';
+import { currentAccountId } from '../accounts/accountContext';
 
 export type CustomerLanguage = 'en' | 'ar';
 
 export interface Customer {
   id: number;
+  /** The WhatsApp account (business) this customer record belongs to — the same phone can be a customer of several businesses. */
+  whatsapp_account_id: number;
   wa_id: string;
   display_name: string | null;
   language: CustomerLanguage | null;
@@ -31,11 +34,12 @@ export function getOrCreateCustomer(
   waId: string,
   displayName: string | undefined,
   db: Database.Database = getDb(),
+  accountId: number = currentAccountId(),
 ): Customer {
   const normalized = normalizeWaId(waId);
   const existing = db
-    .prepare('SELECT * FROM customers WHERE wa_id = ?')
-    .get(normalized) as Customer | undefined;
+    .prepare('SELECT * FROM customers WHERE whatsapp_account_id = ? AND wa_id = ?')
+    .get(accountId, normalized) as Customer | undefined;
 
   if (existing) {
     if (displayName && displayName !== existing.display_name) {
@@ -48,8 +52,8 @@ export function getOrCreateCustomer(
   }
 
   const result = db
-    .prepare('INSERT INTO customers (wa_id, display_name) VALUES (?, ?)')
-    .run(normalized, displayName ?? null);
+    .prepare('INSERT INTO customers (wa_id, display_name, whatsapp_account_id) VALUES (?, ?, ?)')
+    .run(normalized, displayName ?? null, accountId);
 
   return db
     .prepare('SELECT * FROM customers WHERE id = ?')
@@ -59,10 +63,11 @@ export function getOrCreateCustomer(
 export function getCustomerByWaId(
   waId: string,
   db: Database.Database = getDb(),
+  accountId: number = currentAccountId(),
 ): Customer | undefined {
   return db
-    .prepare('SELECT * FROM customers WHERE wa_id = ?')
-    .get(normalizeWaId(waId)) as Customer | undefined;
+    .prepare('SELECT * FROM customers WHERE whatsapp_account_id = ? AND wa_id = ?')
+    .get(accountId, normalizeWaId(waId)) as Customer | undefined;
 }
 
 /** Persists the customer's chosen menu language (or clears it back to unset with null). */
@@ -108,8 +113,8 @@ export interface PausedCustomer {
   lastMessageAt: string | null;
 }
 
-/** Customers currently waiting for a human — the support queue. */
-export function listPausedCustomers(db: Database.Database = getDb()): PausedCustomer[] {
+/** Customers currently waiting for a human — the support queue (one business). */
+export function listPausedCustomers(db: Database.Database = getDb(), accountId: number = currentAccountId()): PausedCustomer[] {
   return db
     .prepare(
       `SELECT cu.id, cu.wa_id, cu.display_name, cu.language, cu.paused_at, cu.pause_reason,
@@ -117,9 +122,9 @@ export function listPausedCustomers(db: Database.Database = getDb()): PausedCust
                 WHERE c.customer_id = cu.id AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) AS lastMessage,
               (SELECT MAX(m.created_at) FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id
                 WHERE c.customer_id = cu.id) AS lastMessageAt
-       FROM customers cu WHERE cu.automation_paused = 1 ORDER BY cu.paused_at DESC`,
+       FROM customers cu WHERE cu.automation_paused = 1 AND cu.whatsapp_account_id = ? ORDER BY cu.paused_at DESC`,
     )
-    .all() as PausedCustomer[];
+    .all(accountId) as PausedCustomer[];
 }
 
 /** Remembers the option IDs of the last numbered menu so "2" can be mapped back to a stable ID. */
@@ -154,19 +159,20 @@ const MAX_PAGE_SIZE = 100;
  * MAX_PAGE_SIZE rows regardless of what the caller asks for.
  */
 export function listCustomers(
-  params: { search?: string; limit?: number; offset?: number } = {},
+  params: { search?: string; limit?: number; offset?: number; accountId?: number } = {},
   db: Database.Database = getDb(),
 ): { items: CustomerListItem[]; total: number } {
   const limit = Math.max(1, Math.min(params.limit ?? 25, MAX_PAGE_SIZE));
   const offset = Math.max(0, params.offset ?? 0);
   const search = params.search?.trim();
-  const whereClause = search ? 'WHERE cu.wa_id LIKE @term OR cu.display_name LIKE @term' : '';
+  const accountId = params.accountId ?? currentAccountId();
+  const whereClause = `WHERE cu.whatsapp_account_id = @accountId${search ? ' AND (cu.wa_id LIKE @term OR cu.display_name LIKE @term)' : ''}`;
   const term = search ? `%${search}%` : undefined;
 
   const total = (
     db
       .prepare(`SELECT COUNT(*) AS count FROM customers cu ${whereClause}`)
-      .get(term ? { term } : {}) as { count: number }
+      .get({ accountId, term }) as { count: number }
   ).count;
 
   const items = db
@@ -184,12 +190,18 @@ export function listCustomers(
        ORDER BY COALESCE(lastInteractionAt, cu.created_at) DESC
        LIMIT @limit OFFSET @offset`,
     )
-    .all({ term, limit, offset } as Record<string, unknown>) as CustomerListItem[];
+    .all({ accountId, term, limit, offset } as Record<string, unknown>) as CustomerListItem[];
 
   return { items, total };
 }
 
-export function getCustomerById(id: number, db: Database.Database = getDb()): CustomerListItem | undefined {
+/**
+ * Lookup by primary key. Internal callers (request service, pipeline) pass
+ * `accountId: null` because a request already carries its account; the
+ * dashboard uses the default (current account) so an id from another
+ * business is simply "not found".
+ */
+export function getCustomerById(id: number, db: Database.Database = getDb(), accountId: number | null = currentAccountId()): CustomerListItem | undefined {
   return db
     .prepare(
       `SELECT cu.*,
@@ -200,9 +212,9 @@ export function getCustomerById(id: number, db: Database.Database = getDb()): Cu
               (SELECT MAX(m.created_at) FROM conversation_messages m
                  JOIN conversations c3 ON c3.id = m.conversation_id
                 WHERE c3.customer_id = cu.id) AS lastInteractionAt
-       FROM customers cu WHERE cu.id = ?`,
+       FROM customers cu WHERE cu.id = @id AND (@accountId IS NULL OR cu.whatsapp_account_id = @accountId)`,
     )
-    .get(id) as CustomerListItem | undefined;
+    .get({ id, accountId }) as CustomerListItem | undefined;
 }
 
 /** Moves the customer through the guided menu; flowData replaces the collected answers (null clears them). */

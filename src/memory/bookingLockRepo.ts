@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getDb } from './db';
+import { currentAccountId } from '../accounts/accountContext';
 
 export interface BookingLock {
   id: number;
@@ -225,16 +226,17 @@ const MAX_PAGE_SIZE = 100;
  * slot-filling and is never written to by the real booking flow.
  */
 export function listBookingLocks(
-  params: { status?: BookingLock['status']; limit?: number; offset?: number } = {},
+  params: { status?: BookingLock['status']; limit?: number; offset?: number; accountId?: number } = {},
   db: Database.Database = getDb(),
 ): { items: BookingListItem[]; total: number } {
   const limit = Math.max(1, Math.min(params.limit ?? 25, MAX_PAGE_SIZE));
   const offset = Math.max(0, params.offset ?? 0);
-  const whereClause = params.status ? 'WHERE bl.status = @status' : '';
-  const args = params.status ? { status: params.status } : {};
+  // Bookings belong to a business through their conversation.
+  const whereClause = `WHERE c.whatsapp_account_id = @accountId${params.status ? ' AND bl.status = @status' : ''}`;
+  const args = { accountId: params.accountId ?? currentAccountId(), status: params.status };
 
   const total = (
-    db.prepare(`SELECT COUNT(*) AS count FROM booking_locks bl ${whereClause}`).get(args) as {
+    db.prepare(`SELECT COUNT(*) AS count FROM booking_locks bl JOIN conversations c ON c.id = bl.conversation_id ${whereClause}`).get(args) as {
       count: number;
     }
   ).count;

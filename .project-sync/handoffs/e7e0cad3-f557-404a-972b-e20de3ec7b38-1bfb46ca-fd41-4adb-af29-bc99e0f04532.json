@@ -1,0 +1,180 @@
+{
+  "session": "e7e0cad3-f557-404a-972b-e20de3ec7b38",
+  "agent": "Claude-Code",
+  "task": "Replace whatsapp-web.js with Baileys QR connection; editable templates; premium dashboard",
+  "at": "2026-09-20T20:47:08.353Z",
+  "finished": false,
+  "summary": "Checkpoint: Baileys QR connection replaces whatsapp-web.js (uninstalled). New src/whatsapp/qrConnection.ts uses makeWASocket/useMultiFileAuthState/connection.update/creds.update/messages.upsert, QR via qrcode dataURL, dynamic number from sock.user.id (jidToPhoneNumber), reconnect w/ backoff, logout clears auth dir. Persistence: migration 011 adds whatsapp_qr_session, reply_templates (default/draft/live), automation_settings, reply_activity, customers.automation_paused/last_menu_options. Templates seeded from src/templates/defaults.ts (no prices). menu.ts + pipeline read live templates only; pipeline gains auto/rule/AI toggles, human-handoff pause, activity log. Router: /whatsapp/qr{,/connect,/refresh,/disconnect}, /templates CRUD, /automation, /support-queue, customer pause/resume. Tests: 329/329, typecheck+lint clean. UI not yet started.",
+  "reason": "User-approved plan: reproduce Antigravity Baileys connection, editable AR/EN templates with draft/live separation, preserve existing pipeline and OpenRouter.",
+  "tests": "npm test 329/329 (44 files) incl. new qrConnection (Baileys-mocked), jid, templateRepo, settingsRepo, pipeline O-R. typecheck clean. lint clean.",
+  "nextSteps": "Phase 4: dark SaaS dashboard, WhatsApp Connection page, Auto-Reply Control Center, 3-panel Manual Reply Editor; Dockerfile/gitignore/docs cleanup; build; live QR scan by user.",
+  "changedFiles": [
+    {
+      "path": "package-lock.json",
+      "change": "modified"
+    },
+    {
+      "path": "package.json",
+      "change": "modified"
+    },
+    {
+      "path": "src/automation/menu.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/automation/settingsRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/migrations/011_qr_session_templates_automation.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/qrSessionRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/pipeline/processInboundMessage.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/templates/defaults.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/templates/templateRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/webhook/parseInboundPayload.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/jid.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/whatsapp/qrConnection.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/conversationFlow.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/automation/settingsRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/pipeline/processInboundMessage.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/templates/templateRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/whatsapp/jid.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/whatsapp/qrConnection.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [
+    {
+      "path": ".gitignore",
+      "change": "modified"
+    },
+    {
+      "path": "Dockerfile",
+      "change": "modified"
+    },
+    {
+      "path": "Start Online.cmd",
+      "change": "added"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/index.html",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/modern.css",
+      "change": "added"
+    },
+    {
+      "path": "docs/QR_CONNECTION.md",
+      "change": "added"
+    },
+    {
+      "path": "package-lock.json",
+      "change": "modified"
+    },
+    {
+      "path": "package.json",
+      "change": "modified"
+    },
+    {
+      "path": "scripts/preview-tunnel.cjs",
+      "change": "added"
+    },
+    {
+      "path": "scripts/start-online.ps1",
+      "change": "added"
+    },
+    {
+      "path": "scripts/verify-dashboard.cjs",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/index.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/client.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/qrConnection.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/whatsapp/replyTransport.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/integration/qrSecurity.e2e.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/setup.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/whatsapp/qrConnection.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/whatsapp/replyTransport.test.ts",
+      "change": "added"
+    }
+  ],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

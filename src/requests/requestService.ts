@@ -18,6 +18,7 @@ import {
 } from '../memory/customerRequestRepo';
 import { resolveTemplate, type TemplateVars } from '../templates/templateRepo';
 import { enqueueNotification, flushOutbox, listOutbox, type OutboxRow } from '../notifications/outbox';
+import { currentAccountId, runWithAccount } from '../accounts/accountContext';
 
 /**
  * One source of truth for appointment / quotation status. Every transition —
@@ -90,12 +91,12 @@ export function customerNotificationJid(customer: Customer): string {
   return getLidForPn(pn) ?? pn;
 }
 
-/** Where staff alerts go: the configured staff number, else the linked business number's own chat. */
-export function businessNotificationJid(db: Database.Database = getDb()): string | null {
-  const settings = getBusinessSettings();
+/** Where staff alerts go for one business: its configured staff number, else its own linked number's chat. */
+export function businessNotificationJid(db: Database.Database = getDb(), accountId: number = currentAccountId()): string | null {
+  const settings = getBusinessSettings(accountId);
   const staff = settings.staffWhatsappNumber?.replace(/[^\d]/g, '');
   if (staff) return `${staff}@s.whatsapp.net`;
-  const session = getQrSession(db);
+  const session = getQrSession(db, accountId);
   return session.jid ? canonicalJid(session.jid) : null;
 }
 
@@ -103,18 +104,23 @@ function kick(): void {
   void flushOutbox().catch((error) => logger.warn({ error }, '[OUTBOX] flush failed'));
 }
 
-/** Queues the staff alert for a freshly created request (idempotent per request). */
+/** Queues the staff alert for a freshly created request (idempotent per request). Runs in the request's own account. */
 export function notifyBusinessNewRequest(request: CustomerRequest, db: Database.Database = getDb()): OutboxRow | null {
-  const target = businessNotificationJid(db);
-  if (!target) {
-    logger.warn({ reference: request.reference }, 'no business WhatsApp number linked — staff alert not queued');
-    return null;
-  }
-  const customer = getCustomerById(request.customer_id, db);
-  const body = resolveTemplate('staff_new_request', 'en', requestTemplateVars(request, customer, 'en'), db);
-  const { row } = enqueueNotification({ kind: 'business_new_request', requestId: request.id, targetJid: target, body, dedupeKey: `business:new:${request.id}` }, db);
-  kick();
-  return row;
+  return runWithAccount(request.whatsapp_account_id, () => {
+    const target = businessNotificationJid(db, request.whatsapp_account_id);
+    if (!target) {
+      logger.warn({ reference: request.reference, account: request.whatsapp_account_id }, 'no business WhatsApp number linked — staff alert not queued');
+      return null;
+    }
+    const customer = getCustomerById(request.customer_id, db, null);
+    const body = resolveTemplate('staff_new_request', 'en', requestTemplateVars(request, customer, 'en'), db, request.whatsapp_account_id);
+    const { row } = enqueueNotification(
+      { kind: 'business_new_request', requestId: request.id, targetJid: target, body, dedupeKey: `business:new:${request.id}`, accountId: request.whatsapp_account_id },
+      db,
+    );
+    kick();
+    return row;
+  });
 }
 
 export interface StatusChangeResult {
@@ -138,41 +144,47 @@ export function changeRequestStatus(
   newStatus: CustomerRequestStatus,
   actor: RequestActor,
   db: Database.Database = getDb(),
+  /** Dashboard callers pass their selected account so another business's request id is "not found"; internal callers pass null. */
+  accountId: number | null = currentAccountId(),
 ): StatusChangeResult | undefined {
-  const current = getCustomerRequest(id, db);
+  const current = getCustomerRequest(id, db, accountId);
   if (!current) return undefined;
   if (current.status === newStatus) return { request: current, changed: false, event: null, notifications: [] };
 
-  const updated = setCustomerRequestStatus(id, newStatus, db)!;
-  const event = insertRequestEvent({ requestId: id, reference: updated.reference, oldStatus: current.status, newStatus, actor: actor.type, actorDetail: actor.detail ?? null }, db);
-  const notifications: OutboxRow[] = [];
-  const customer = getCustomerById(updated.customer_id, db);
+  // Everything below (templates, staff number, outbox rows) belongs to the request's own business.
+  return runWithAccount(current.whatsapp_account_id, () => {
+    const account = current.whatsapp_account_id;
+    const updated = setCustomerRequestStatus(id, newStatus, db)!;
+    const event = insertRequestEvent({ requestId: id, reference: updated.reference, oldStatus: current.status, newStatus, actor: actor.type, actorDetail: actor.detail ?? null }, db);
+    const notifications: OutboxRow[] = [];
+    const customer = getCustomerById(updated.customer_id, db, null);
 
-  const templateKey = CUSTOMER_TEMPLATE[newStatus];
-  if (templateKey && customer) {
-    const language = (customer.language ?? 'en') as 'ar' | 'en';
-    const body = resolveTemplate(templateKey, language, requestTemplateVars(updated, customer, language), db);
-    const { row, created } = enqueueNotification(
-      { kind: 'customer_status', requestId: id, targetJid: customerNotificationJid(customer), body, dedupeKey: `customer:${id}:${newStatus}` },
-      db,
-    );
-    if (created) notifications.push(row);
-  }
-
-  if (actor.type !== 'whatsapp') {
-    const target = businessNotificationJid(db);
-    if (target) {
-      const body = resolveTemplate('staff_status_changed', 'en', requestTemplateVars(updated, customer, 'en', { actor: actor.type === 'dashboard' ? 'Dashboard' : 'System' }), db);
+    const templateKey = CUSTOMER_TEMPLATE[newStatus];
+    if (templateKey && customer) {
+      const language = (customer.language ?? 'en') as 'ar' | 'en';
+      const body = resolveTemplate(templateKey, language, requestTemplateVars(updated, customer, language), db, account);
       const { row, created } = enqueueNotification(
-        { kind: 'business_status', requestId: id, targetJid: target, body, dedupeKey: `business:status:${id}:${event.id}` },
+        { kind: 'customer_status', requestId: id, targetJid: customerNotificationJid(customer), body, dedupeKey: `customer:${id}:${newStatus}`, accountId: account },
         db,
       );
       if (created) notifications.push(row);
     }
-  }
-  logger.info({ reference: updated.reference, from: current.status, to: newStatus, actor: actor.type, queued: notifications.length }, '[REQUEST] status changed');
-  kick();
-  return { request: updated, changed: true, event, notifications };
+
+    if (actor.type !== 'whatsapp') {
+      const target = businessNotificationJid(db, account);
+      if (target) {
+        const body = resolveTemplate('staff_status_changed', 'en', requestTemplateVars(updated, customer, 'en', { actor: actor.type === 'dashboard' ? 'Dashboard' : 'System' }), db, account);
+        const { row, created } = enqueueNotification(
+          { kind: 'business_status', requestId: id, targetJid: target, body, dedupeKey: `business:status:${id}:${event.id}`, accountId: account },
+          db,
+        );
+        if (created) notifications.push(row);
+      }
+    }
+    logger.info({ reference: updated.reference, account, from: current.status, to: newStatus, actor: actor.type, queued: notifications.length }, '[REQUEST] status changed');
+    kick();
+    return { request: updated, changed: true, event, notifications };
+  });
 }
 
 // ------------------------------------------------------------------ operator commands (from the business WhatsApp account)
@@ -206,19 +218,25 @@ export function parseOperatorCommand(text: string | undefined): OperatorCommand 
  * from the business account itself (key.fromMe) — customers never reach this.
  * Returns the text to send back to the operator.
  */
-export function handleOperatorCommand(command: OperatorCommand, actorDetail: string, db: Database.Database = getDb()): { text: string; result: StatusChangeResult | null } {
-  const request = getCustomerRequestByReference(command.reference, db);
+export function handleOperatorCommand(
+  command: OperatorCommand,
+  actorDetail: string,
+  db: Database.Database = getDb(),
+  /** The account whose business phone typed the command — it may only act on its own requests. */
+  accountId: number = currentAccountId(),
+): { text: string; result: StatusChangeResult | null } {
+  const request = getCustomerRequestByReference(command.reference, db, accountId);
   if (!request) return { text: `⚠️ ${command.reference}: no such request. / لا يوجد طلب بهذا الرقم.`, result: null };
-  const result = changeRequestStatus(request.id, command.status, { type: 'whatsapp', detail: actorDetail }, db)!;
-  const customer = getCustomerById(result.request.customer_id, db);
+  const result = changeRequestStatus(request.id, command.status, { type: 'whatsapp', detail: actorDetail }, db, accountId)!;
+  const customer = getCustomerById(result.request.customer_id, db, null);
   const vars = requestTemplateVars(result.request, customer, 'en', { actor: 'WhatsApp operator' });
   if (!result.changed) {
     return { text: `ℹ️ ${result.request.reference} is already ${statusLabel(result.request.status, 'en')} / الطلب بالفعل ${statusLabel(result.request.status, 'ar')}. Nothing re-sent.`, result };
   }
-  return { text: resolveTemplate('staff_status_changed', 'en', vars, db), result };
+  return { text: resolveTemplate('staff_status_changed', 'en', vars, db, accountId), result };
 }
 
 /** Dashboard view: request + audit events + notification states. */
 export function requestTimeline(requestId: number, db: Database.Database = getDb()): { events: RequestEvent[]; notifications: OutboxRow[] } {
-  return { events: listRequestEvents(requestId, db), notifications: listOutbox({ requestId }, db) };
+  return { events: listRequestEvents(requestId, db), notifications: listOutbox({ requestId, accountId: null }, db) };
 }

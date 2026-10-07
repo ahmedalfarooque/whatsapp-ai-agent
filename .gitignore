@@ -44,6 +44,13 @@ caddy_config/
 
 # Dashboard knowledge-file edit backups (runtime, never business content of record)
 knowledge/.backups/
+# Per-account knowledge for additional WhatsApp businesses (runtime data, created from the dashboard)
+knowledge/accounts/
+
+# Runtime files of each additional WhatsApp business: its Baileys session (= the WhatsApp login) and uploaded PDFs/images
+data/accounts/
+# Uploaded business documents (private) — never commit
+data/uploads/
 
 .vercel
 

@@ -1,10 +1,13 @@
 import type Database from 'better-sqlite3';
 import { getDb } from '../memory/db';
+import { currentAccountId } from '../accounts/accountContext';
 
 /**
  * Offers & discounts — one resolver for the dashboard, the WhatsApp runtime,
  * the Manual Reply Editor preview and the AI context. Customers (and the AI)
  * only ever see offers returned by listCustomerVisibleOffers().
+ * Every offer belongs to one WhatsApp account (business); lookups by id are
+ * scoped too, so one business can never read or edit another's offers.
  */
 
 export type OfferStatus = 'draft' | 'published' | 'finished' | 'archived';
@@ -167,40 +170,40 @@ export function toView(offer: Offer, now: Date = new Date()): OfferView {
   return { ...offer, effectiveStatus: eff, customerVisibleNow: eff === 'published' && offer.visibility === 'customer' && !offer.deleted_at };
 }
 
-export function createOffer(raw: unknown, actor: string, db: Database.Database = getDb()): OfferView {
+export function createOffer(raw: unknown, actor: string, db: Database.Database = getDb(), accountId: number = currentAccountId()): OfferView {
   const v = validateOfferInput(raw);
   const result = db
     .prepare(
       `INSERT INTO offers (title_ar, title_en, description_ar, description_en, category, related_item, price_status, original_price, promotional_price,
-         discount_percent, currency, starts_at, ends_at, image_document_id, document_id, terms_ar, terms_en, visibility, status, priority, created_by, updated_by)
+         discount_percent, currency, starts_at, ends_at, image_document_id, document_id, terms_ar, terms_en, visibility, status, priority, created_by, updated_by, whatsapp_account_id)
        VALUES (@titleAr, @titleEn, @descriptionAr, @descriptionEn, @category, @relatedItem, @priceStatus, @originalPrice, @promotionalPrice,
-         @discountPercent, @currency, @startsAt, @endsAt, @imageDocumentId, @documentId, @termsAr, @termsEn, @visibility, 'draft', @priority, @actor, @actor)`,
+         @discountPercent, @currency, @startsAt, @endsAt, @imageDocumentId, @documentId, @termsAr, @termsEn, @visibility, 'draft', @priority, @actor, @actor, @accountId)`,
     )
-    .run({ ...v, actor });
-  return getOffer(Number(result.lastInsertRowid), db)!;
+    .run({ ...v, actor, accountId });
+  return getOffer(Number(result.lastInsertRowid), db, accountId)!;
 }
 
-export function updateOffer(id: number, raw: unknown, actor: string, db: Database.Database = getDb()): OfferView | undefined {
-  if (!getOffer(id, db)) return undefined;
+export function updateOffer(id: number, raw: unknown, actor: string, db: Database.Database = getDb(), accountId: number = currentAccountId()): OfferView | undefined {
+  if (!getOffer(id, db, accountId)) return undefined;
   const v = validateOfferInput(raw);
   db.prepare(
     `UPDATE offers SET title_ar=@titleAr, title_en=@titleEn, description_ar=@descriptionAr, description_en=@descriptionEn, category=@category,
        related_item=@relatedItem, price_status=@priceStatus, original_price=@originalPrice, promotional_price=@promotionalPrice, discount_percent=@discountPercent,
        currency=@currency, starts_at=@startsAt, ends_at=@endsAt, image_document_id=@imageDocumentId, document_id=@documentId, terms_ar=@termsAr, terms_en=@termsEn,
-       visibility=@visibility, priority=@priority, updated_by=@actor, updated_at=datetime('now') WHERE id=@id AND deleted_at IS NULL`,
-  ).run({ ...v, actor, id });
-  return getOffer(id, db);
+       visibility=@visibility, priority=@priority, updated_by=@actor, updated_at=datetime('now') WHERE id=@id AND whatsapp_account_id=@accountId AND deleted_at IS NULL`,
+  ).run({ ...v, actor, id, accountId });
+  return getOffer(id, db, accountId);
 }
 
-export function setOfferStatus(id: number, status: OfferStatus, actor: string, db: Database.Database = getDb()): OfferView | undefined {
+export function setOfferStatus(id: number, status: OfferStatus, actor: string, db: Database.Database = getDb(), accountId: number = currentAccountId()): OfferView | undefined {
   if (!STATUSES.includes(status)) throw new OfferValidationError({ status: 'invalid status' });
-  if (!getOffer(id, db)) return undefined;
-  db.prepare(`UPDATE offers SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`).run(status, actor, id);
-  return getOffer(id, db);
+  if (!getOffer(id, db, accountId)) return undefined;
+  db.prepare(`UPDATE offers SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND whatsapp_account_id = ? AND deleted_at IS NULL`).run(status, actor, id, accountId);
+  return getOffer(id, db, accountId);
 }
 
-export function duplicateOffer(id: number, actor: string, db: Database.Database = getDb()): OfferView | undefined {
-  const o = getOffer(id, db);
+export function duplicateOffer(id: number, actor: string, db: Database.Database = getDb(), accountId: number = currentAccountId()): OfferView | undefined {
+  const o = getOffer(id, db, accountId);
   if (!o) return undefined;
   return createOffer(
     {
@@ -211,36 +214,37 @@ export function duplicateOffer(id: number, actor: string, db: Database.Database 
     },
     actor,
     db,
+    accountId,
   );
 }
 
 /** Soft delete — the record and its history stay in the table. */
-export function deleteOffer(id: number, actor: string, db: Database.Database = getDb()): boolean {
-  const r = db.prepare(`UPDATE offers SET deleted_at = datetime('now'), updated_by = ?, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`).run(actor, id);
+export function deleteOffer(id: number, actor: string, db: Database.Database = getDb(), accountId: number = currentAccountId()): boolean {
+  const r = db.prepare(`UPDATE offers SET deleted_at = datetime('now'), updated_by = ?, updated_at = datetime('now') WHERE id = ? AND whatsapp_account_id = ? AND deleted_at IS NULL`).run(actor, id, accountId);
   return r.changes > 0;
 }
 
-export function getOffer(id: number, db: Database.Database = getDb()): OfferView | undefined {
-  const row = db.prepare('SELECT * FROM offers WHERE id = ? AND deleted_at IS NULL').get(id) as Offer | undefined;
+export function getOffer(id: number, db: Database.Database = getDb(), accountId: number = currentAccountId()): OfferView | undefined {
+  const row = db.prepare('SELECT * FROM offers WHERE id = ? AND whatsapp_account_id = ? AND deleted_at IS NULL').get(id, accountId) as Offer | undefined;
   return row ? toView(row) : undefined;
 }
 
-export function listOffers(params: { includeDeleted?: boolean } = {}, db: Database.Database = getDb()): OfferView[] {
+export function listOffers(params: { includeDeleted?: boolean; accountId?: number } = {}, db: Database.Database = getDb()): OfferView[] {
   const rows = db
-    .prepare(`SELECT * FROM offers ${params.includeDeleted ? '' : 'WHERE deleted_at IS NULL'} ORDER BY priority DESC, updated_at DESC, id DESC`)
-    .all() as Offer[];
+    .prepare(`SELECT * FROM offers WHERE whatsapp_account_id = ? ${params.includeDeleted ? '' : 'AND deleted_at IS NULL'} ORDER BY priority DESC, updated_at DESC, id DESC`)
+    .all(params.accountId ?? currentAccountId()) as Offer[];
   const now = new Date();
   return rows.map((r) => toView(r, now));
 }
 
 /** THE customer-facing filter: published, inside the validity window, customer-visible, not finished/archived/deleted. */
-export function listCustomerVisibleOffers(now: Date = new Date(), db: Database.Database = getDb()): OfferView[] {
-  return listOffers({}, db).map((o) => toView(o, now)).filter((o) => o.customerVisibleNow);
+export function listCustomerVisibleOffers(now: Date = new Date(), db: Database.Database = getDb(), accountId: number = currentAccountId()): OfferView[] {
+  return listOffers({ accountId }, db).map((o) => toView(o, now)).filter((o) => o.customerVisibleNow);
 }
 
-export function offerKpis(db: Database.Database = getDb()): Record<OfferEffectiveStatus, number> {
+export function offerKpis(db: Database.Database = getDb(), accountId: number = currentAccountId()): Record<OfferEffectiveStatus, number> {
   const kpis: Record<OfferEffectiveStatus, number> = { draft: 0, published: 0, scheduled: 0, expired: 0, finished: 0, archived: 0 };
-  for (const o of listOffers({}, db)) kpis[o.effectiveStatus] += 1;
+  for (const o of listOffers({ accountId }, db)) kpis[o.effectiveStatus] += 1;
   return kpis;
 }
 
@@ -279,6 +283,6 @@ export function renderOfferLine(o: OfferView, lang: 'ar' | 'en'): string {
 }
 
 /** Text for the {offers} placeholder: all currently customer-visible offers, or '' when none. */
-export function renderCustomerOffers(lang: 'ar' | 'en', now: Date = new Date(), db: Database.Database = getDb()): string {
-  return listCustomerVisibleOffers(now, db).map((o) => renderOfferLine(o, lang)).join('\n\n');
+export function renderCustomerOffers(lang: 'ar' | 'en', now: Date = new Date(), db: Database.Database = getDb(), accountId: number = currentAccountId()): string {
+  return listCustomerVisibleOffers(now, db, accountId).map((o) => renderOfferLine(o, lang)).join('\n\n');
 }

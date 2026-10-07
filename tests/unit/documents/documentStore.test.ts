@@ -44,7 +44,7 @@ describe('business documents — lifecycle, safety, AI context', () => {
     expect(serveContentType(html)).toBe('text/plain; charset=utf-8');
     expect(htmlToText('<b>a</b>&nbsp;<i>b</i>')).toBe('a b');
     const pdf = saveDocument({ originalName: 'list.pdf', mimeType: 'application/pdf', bytes: PDF }, db);
-    expect(pdf.processing).toBe('unsupported');
+    expect(pdf.processing).toBe('stored'); // text is read by extractDocumentText() right after upload
     expect(serveContentType(pdf)).toBe('application/pdf');
   });
 

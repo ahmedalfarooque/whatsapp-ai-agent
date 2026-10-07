@@ -1,7 +1,8 @@
 import { env } from '../config/env';
 import { logger } from '../logger';
 import { chatCompletion } from './openRouterClient';
-import { toolRegistry, toolSchemas } from '../tools';
+import { toolRegistry, toolSchemasForAccount } from '../tools';
+import { currentAccountId } from '../accounts/accountContext';
 import type { ChatMessage } from './types';
 import type { ChatMessageForLlm } from '../memory/conversationRepo';
 
@@ -60,7 +61,8 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
   const generatedMessages: GeneratedMessage[] = [];
 
   for (let round = 1; round <= maxRounds; round += 1) {
-    const response = await chatCompletion({ messages, tools: toolSchemas });
+    const tools = toolSchemasForAccount(currentAccountId());
+    const response = await chatCompletion({ messages, tools: tools.length ? tools : undefined });
     const choice = response.choices[0];
     if (!choice) {
       throw new Error('OpenRouter response contained no choices');
@@ -87,8 +89,9 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
       const args = safeParseArgs(toolCall.function.arguments ?? '{}');
 
       let resultContent: string;
-      if (!toolDef) {
-        logger.error({ toolName }, 'model requested an unknown tool');
+      if (!toolDef || !toolSchemasForAccount(currentAccountId()).length) {
+        // Unknown, or a tool this business is not offered (only the original business has a calendar).
+        logger.error({ toolName, account: currentAccountId() }, 'model requested an unknown or unavailable tool');
         resultContent = JSON.stringify({ error: `unknown tool: ${toolName}` });
       } else {
         try {

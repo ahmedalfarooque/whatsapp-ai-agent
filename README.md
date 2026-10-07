@@ -322,6 +322,24 @@ boot at all. The dashboard's override store is a **runtime rotation
 mechanism on top of an already-valid deployment**, not a way to boot
 production with an empty `.env`.
 
+## 11a-bis. Multiple WhatsApp accounts
+
+The dashboard's **WhatsApp Accounts** section lets one login run several
+businesses, each with its own linked WhatsApp number, QR session, profile,
+templates, customers, offers, documents and knowledge. The selected account is
+sent as the `X-Whatsapp-Account` header and validated server-side; account 1
+is the original business and keeps `data/baileys-auth/` and `knowledge/`.
+Additional accounts live under `data/accounts/<id>/` and
+`knowledge/accounts/<id>/`. See `docs/QR_CONNECTION.md` → "Multiple WhatsApp
+accounts".
+
+Each business is set up from **WhatsApp Accounts → Set up business**
+(`#/accounts/<id>`): business information, links, PDFs and images,
+**Analyze & Generate** (draft → review → edit → apply), a category-driven
+WhatsApp menu, and disable / delete (the original business is protected).
+Details, the database audit and the **production rollback strategy** are in
+`docs/BUSINESS_SETUP.md`.
+
 ## 11b. Rotating DASHBOARD_MASTER_KEY
 
 If the key needs to change (suspected compromise, routine security hygiene),

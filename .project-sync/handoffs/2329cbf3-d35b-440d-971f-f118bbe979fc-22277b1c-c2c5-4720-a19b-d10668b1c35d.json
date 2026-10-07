@@ -1,0 +1,179 @@
+{
+  "session": "2329cbf3-d35b-440d-971f-f118bbe979fc",
+  "agent": "Claude-Code",
+  "task": "Multi-WhatsApp-account / multi-business support (local implementation + tests, no deploy)",
+  "at": "2026-10-07T08:35:19.449Z",
+  "finished": false,
+  "summary": "Multi-WhatsApp-account / multi-business support implemented locally (NOT deployed, NOT committed). One app, one login, one SQLite DB, one repo. New: whatsapp_accounts table + admin_account_access (migration 015, foreign-keys-off rebuild of business_settings/automation_settings (id = account id), reply_templates (PK account+key), customers (UNIQUE account+wa_id); whatsapp_account_id DEFAULT 1 added to conversations, customer_requests, notification_outbox, reply_activity, business_documents, offers; account 1 created from the existing business + whatsapp_qr_session row, auth_dir 'baileys-auth'). src/accounts/accountContext.ts (AsyncLocalStorage, legacy default 1) + accountRepo.ts (CRUD, enable/disable, session state, admin access model). qrConnection.ts rewritten as a per-account QrConnection class + manager map: own socket/auth dir (accounts/<id>/baileys-auth for new accounts; account 1 keeps data/baileys-auth), QR, reconnect, 401 archive, 515, owner marker, sent-ids; outbox sender routes by account; resumeQrConnection starts every enabled account; suspendQrConnection on disable (keeps creds). Pipeline runs inside the message's account; customer lock per (account, waId). Repos (customers, conversations, requests, outbox, templates, offers, documents, settings, automation, booking list, knowledge files per account under knowledge/accounts/<id>, dashboard data) take an explicit accountId defaulting to the context. Dashboard: accountMiddleware (X-Whatsapp-Account header validated server-side: unknown 404, forbidden 403, default = legacy), /api/dashboard/accounts CRUD + enable/disable + per-account QR endpoints, existing routes scoped, cross-account ids 404. UI: sidebar 'WhatsApp Accounts' list with status dots + switcher (localStorage), header account chip, Manage Accounts page (dashboard/pages-accounts.js). Docs: README 11a-bis, docs/QR_CONNECTION.md 'Multiple WhatsApp accounts'. .gitignore: knowledge/accounts/. Limitation: menu number structure (menuRouter.ts) stays shared; template texts are per account. Meta Cloud API path unchanged (legacy account). Port 3005 untouched; no deploy; local data/app.db and data/baileys-auth untouched (migration dry-run used a scratch COPY).",
+  "reason": "User requested first-class multiple WhatsApp accounts/businesses in the existing application with isolated data and independent Baileys sessions, legacy data migrated to account 1 without re-pairing, one login, account switcher in the dashboard, comprehensive tests, no production deploy until authorised.",
+  "tests": "npm test: 54 files / 437 tests passed (new: tests/unit/accounts/accountRepo.test.ts 7, tests/unit/accounts/isolation.test.ts 10, tests/unit/memory/migration015.test.ts 3 (old schema with legacy rows -> 015 preserves ids/values, idempotent, fresh DB), tests/unit/whatsapp/multiAccountConnection.test.ts 10 (two sockets, per-account QR, routing with accountId, outbox per account, 428 reconnect isolation, logout/401/515 isolation, refresh isolation, boot resume skips disabled, disable keeps creds), tests/integration/accounts.e2e.test.ts 6 (accounts API, header switching, every page endpoint for account 2, cross-account 404, per-account QR + enable/disable + rename, admin_account_access 403/default)). Existing qrConnection.test.ts adapted (accountRepo mock instead of qrSessionRepo; operator/outbox signatures). npm run typecheck 0, npm run lint 0, npm run build 0. Migration dry run on a scratch COPY of local data/app.db (6 customers, 68 templates, 114 messages, connected session): counts unchanged, customer rows byte-identical, settings identical, account 1 connected with phone/jid carried over, foreign_key_check clean. Browser verification on a scratch data dir (port 3010, local .env, dev/mock providers): first-run setup, sidebar shows accounts with status, created 'Noor Salon' (Arabic name), switch updates chip/eyebrow, Connect for account 2 produced its own QR while account 1 kept its own pairing socket (2 sockets, generation 1 each). Scratch server stopped; temporary launch.json entry reverted. Not tested: real phone pairing of two numbers, Oracle deployment.",
+  "nextSteps": "User reviews diff. Commit (no secrets; knowledge/accounts and data/accounts are gitignored). Production deploy plan when authorised: backup /home/ubuntu/whatsapp-data (sqlite3 .backup + tar baileys-auth) -> git pull cf764fc..new -> npm ci -> npm run build -> systemctl restart whatsapp-ai-agent (migration 015 runs at boot, additive, account 1 = existing business, existing data/baileys-auth resumes with no re-pairing) -> verify /health, /readiness, dashboard sidebar shows account 1 connected -> create account 2 -> scan its QR with the second business phone. Rollback: git checkout cf764fc + build + restart (migration 015 leaves extra columns/tables that the old code ignores; business_settings/automation_settings/reply_templates/customers were rebuilt with the same columns + account column, old code's 'WHERE id = 1' and key lookups still work). Optional follow-ups: per-user account assignment UI (table exists), per-account menu structure, Meta Cloud API per account.",
+  "changedFiles": [
+    {
+      "path": ".claude/launch.json",
+      "change": "modified"
+    },
+    {
+      "path": ".gitignore",
+      "change": "modified"
+    },
+    {
+      "path": "README.md",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/index.html",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/pages-accounts.js",
+      "change": "added"
+    },
+    {
+      "path": "dashboard/theme.css",
+      "change": "modified"
+    },
+    {
+      "path": "docs/QR_CONNECTION.md",
+      "change": "modified"
+    },
+    {
+      "path": "src/accounts/accountContext.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/accounts/accountRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/automation/settingsRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/config/businessSettings.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/accountMiddleware.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/authMiddleware.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/data.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/knowledgeAdmin.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/documents/documentStore.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/index.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/knowledge/loader.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/knowledge/paths.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/bookingLockRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/conversationRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRequestRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/db.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/migrations/015_whatsapp_accounts.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/qrSessionRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/notifications/outbox.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/offers/offerRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/pipeline/processInboundMessage.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/requests/requestService.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/templates/templateRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/webhook/parseInboundPayload.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/qrConnection.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/accounts.e2e.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/accounts/accountRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/accounts/isolation.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/memory/migration015.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/whatsapp/multiAccountConnection.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/whatsapp/qrConnection.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

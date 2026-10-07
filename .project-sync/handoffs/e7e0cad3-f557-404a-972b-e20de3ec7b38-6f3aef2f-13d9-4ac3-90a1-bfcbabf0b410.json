@@ -1,0 +1,220 @@
+{
+  "session": "e7e0cad3-f557-404a-972b-e20de3ec7b38",
+  "agent": "Claude-Code",
+  "task": "Replace whatsapp-web.js with Baileys QR connection; editable templates; premium dashboard",
+  "at": "2026-09-20T20:57:08.726Z",
+  "finished": true,
+  "summary": "Replaced Codex's whatsapp-web.js/Puppeteer QR attempt with the Antigravity method: @whiskeysockets/baileys@6.7.24 (satisfies ^6.7.19) via makeWASocket + useMultiFileAuthState(data/baileys-auth) + connection.update (QR -> qrcode dataURL) + creds.update/saveCreds + messages.upsert; whatsapp-web.js uninstalled, Dockerfile Chromium lines reverted, zero references to puppeteer/LocalAuth remain in src. Scanned number is read from sock.user.id and normalised by src/whatsapp/jid.ts (jidToPhoneNumber), persisted in new whatsapp_qr_session table; logout clears identity and auth dir so another number can pair. Inbound: fromMe/groups/broadcast filtered, claimWebhookEvent('qr:<id>') dedupe, Arabic-Indic numerals normalised, numbered replies mapped to stable menu IDs via customers.last_menu_options, then the EXISTING processInboundMessage pipeline; replies go back through the same socket via replyTransport (kept from Codex). Templates: reply_templates table with default/draft/live columns seeded from src/templates/defaults.ts (13 templates, no prices/hours/addresses invented); menu.ts and pipeline read live_* only. Automation: automation_settings (auto/rule/AI toggles), per-customer human-handoff pause (support queue), reply_activity log. Dashboard: dark navy theme (theme.css), regrouped nav (19 areas), new pages WhatsApp Connection (QR, dynamic number, connect/refresh/logout, troubleshooting), Auto-Reply Control Center, 3-panel Manual Reply Editor (search/filter, AR/EN RTL-LTR tabs, char count, Save Draft/Publish/Discard/Reset with confirmations + unsaved warning, WhatsApp-style preview 'Preview only'), Support Queue, Flow Map, Analytics, Security, Business, Location; Products/Offers/Price Book shown as honest planned states (no fake data). Meta Cloud API code isolated under 'Providers & Legacy API', not the active channel. OpenRouter openrouter/free untouched. Live verification: server started in production mode, migration 011 applied to the live DB, real Baileys session reached phase 'scan' with a 6.9KB PNG QR returned by /api/dashboard/whatsapp/qr; all new endpoints exercised with a temporary revoked session (draft never changes live text, empty publish rejected 400, toggles persist, 401 without session). Login page rendered in browser with no console errors. NOT verified: real phone scan, real inbound message, published-edit round trip on a real phone (requires the user's phone; agent has no admin password to view authenticated pages).",
+  "reason": "User-approved correction of Codex's library choice and completion of the approved plan: Baileys QR-only pairing matching the reference project, editable AR/EN templates with strict draft/live separation, preserved pipeline and AI provider, premium dark dashboard.",
+  "tests": "npm test 329/329 (44 files; +32 new: Baileys-mocked qrConnection lifecycle incl. reconnect/logout/number extraction/dedupe/numeric mapping, jid helpers, templateRepo draft-live isolation/publish/reset/validation/no-price guard, settingsRepo + support queue + menu memory + qr session, pipeline O-R handoff/AI-off/auto-off/draft-vs-publish). typecheck clean. lint clean. build clean. Live: /health 200, /readiness 200, real QR generated (phase scan), authenticated API smoke passed, unauth 401. One test assertion updated for the renamed shell title ('AI Workspace'); no tests weakened.",
+  "nextSteps": "HUMAN: (1) sign in at http://localhost:3000/dashboard, open WhatsApp Connection, scan the QR with the phone that should be the agent number; confirm the Active number shown matches that phone. (2) From another phone send 'Hello' or 'مرحبا': expect language selection -> 1/2 -> welcome + numbered menu -> category prompts -> free text answered by AI. (3) In Manual Reply Editor save a draft, verify a fresh customer still gets the old text, Publish, verify new text, Reset to Default. (4) Test reconnect (toggle phone wifi) and Log out & unlink -> re-pair. Remaining engineering gaps (documented as planned states, not implemented): products/offers/price-book tables, appointment 8-step and quotation/inquiry-cart flows from the reference state machine (current booking uses the existing Google Calendar tool), business-hours/after-hours behaviour. Codex leftovers kept untouched: Start Online.cmd, scripts/start-online.ps1, scripts/preview-tunnel.cjs, localtunnel dep, data/whatsapp-session (dead Chromium profile, gitignored). scripts/verify-dashboard.cjs deleted (depended on removed puppeteer).",
+  "changedFiles": [
+    {
+      "path": ".gitignore",
+      "change": "modified"
+    },
+    {
+      "path": "Dockerfile",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/index.html",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/modern.css",
+      "change": "deleted"
+    },
+    {
+      "path": "dashboard/pages-automation.js",
+      "change": "added"
+    },
+    {
+      "path": "dashboard/theme.css",
+      "change": "added"
+    },
+    {
+      "path": "docs/QR_CONNECTION.md",
+      "change": "modified"
+    },
+    {
+      "path": "package-lock.json",
+      "change": "modified"
+    },
+    {
+      "path": "package.json",
+      "change": "modified"
+    },
+    {
+      "path": "scripts/verify-dashboard.cjs",
+      "change": "deleted"
+    },
+    {
+      "path": "src/automation/menu.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/automation/settingsRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/customerRepo.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/memory/migrations/011_qr_session_templates_automation.sql",
+      "change": "added"
+    },
+    {
+      "path": "src/memory/qrSessionRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/pipeline/processInboundMessage.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/templates/defaults.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/templates/templateRepo.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/webhook/parseInboundPayload.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/jid.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/whatsapp/qrConnection.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/conversationFlow.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/integration/dashboard.e2e.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/automation/settingsRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/pipeline/processInboundMessage.test.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/templates/templateRepo.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/whatsapp/jid.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/whatsapp/qrConnection.test.ts",
+      "change": "modified"
+    }
+  ],
+  "inherited": [
+    {
+      "path": ".gitignore",
+      "change": "modified"
+    },
+    {
+      "path": "Dockerfile",
+      "change": "modified"
+    },
+    {
+      "path": "Start Online.cmd",
+      "change": "added"
+    },
+    {
+      "path": "dashboard/app.js",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/index.html",
+      "change": "modified"
+    },
+    {
+      "path": "dashboard/modern.css",
+      "change": "added"
+    },
+    {
+      "path": "docs/QR_CONNECTION.md",
+      "change": "added"
+    },
+    {
+      "path": "package-lock.json",
+      "change": "modified"
+    },
+    {
+      "path": "package.json",
+      "change": "modified"
+    },
+    {
+      "path": "scripts/preview-tunnel.cjs",
+      "change": "added"
+    },
+    {
+      "path": "scripts/start-online.ps1",
+      "change": "added"
+    },
+    {
+      "path": "scripts/verify-dashboard.cjs",
+      "change": "added"
+    },
+    {
+      "path": "src/dashboard/router.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/index.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/client.ts",
+      "change": "modified"
+    },
+    {
+      "path": "src/whatsapp/qrConnection.ts",
+      "change": "added"
+    },
+    {
+      "path": "src/whatsapp/replyTransport.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/integration/qrSecurity.e2e.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/setup.ts",
+      "change": "modified"
+    },
+    {
+      "path": "tests/unit/whatsapp/qrConnection.test.ts",
+      "change": "added"
+    },
+    {
+      "path": "tests/unit/whatsapp/replyTransport.test.ts",
+      "change": "added"
+    }
+  ],
+  "attribution": "Observed during this session; not proof of exclusive authorship."
+}

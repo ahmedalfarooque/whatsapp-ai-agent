@@ -2,6 +2,8 @@ import type { Customer, CustomerLanguage } from '../memory/customerRepo';
 import { getCustomerFlowData } from '../memory/customerRepo';
 import type { TemplateVars } from '../templates/templateRepo';
 import { normalizeNumerals } from '../whatsapp/jid';
+import { MENU_STATES, type FlowSet, type MenuOption } from './menuStatic';
+import { getMenuTables } from './menuConfig';
 import {
   MENU_IDS,
   detectLanguageFromText,
@@ -21,88 +23,10 @@ import {
  * message to the AI agent loop (free text) — that path is preserved.
  */
 
-export const MENU_STATES = {
-  AWAITING_LANGUAGE: 'AWAITING_LANGUAGE',
-  AWAITING_LANGUAGE_SWITCH: 'AWAITING_LANGUAGE_SWITCH',
-  MAIN_MENU: 'MAIN_MENU',
-  SUBMENU_AUDIO: 'SUBMENU_AUDIO',
-  SUBMENU_ACCESSORIES: 'SUBMENU_ACCESSORIES',
-  SUBMENU_CARE: 'SUBMENU_CARE',
-  SUBMENU_TINT: 'SUBMENU_TINT',
-  SUBMENU_PRICES: 'SUBMENU_PRICES',
-} as const;
-
-export interface MenuOption {
-  /** Template sent when this number is chosen (undefined for flows/handoff). */
-  template?: string;
-  /** State to move into (undefined = unchanged). */
-  state?: string;
-  /** Starts a multi-step flow instead of sending a single template. */
-  flow?: 'appointment' | 'quotation';
-  /** Pauses automation and hands the customer to staff. */
-  handoff?: boolean;
-}
-
-/** Main menu: the option number → what happens. Text for the numbers lives in the main_menu template. */
-export const MAIN_MENU_OPTIONS: Record<string, MenuOption> = {
-  '1': { template: 'car_audio', state: MENU_STATES.SUBMENU_AUDIO },
-  '2': { template: 'car_accessories', state: MENU_STATES.SUBMENU_ACCESSORIES },
-  '3': { template: 'car_care', state: MENU_STATES.SUBMENU_CARE },
-  '4': { template: 'tinting_protection', state: MENU_STATES.SUBMENU_TINT },
-  '5': { template: 'prices_enquiries', state: MENU_STATES.SUBMENU_PRICES },
-  '6': { template: 'location_hours' },
-  '7': { flow: 'appointment' },
-  '8': { handoff: true },
-  '9': { template: 'about' },
-};
-
-/** Sub-menus: state → (menu template, option number → action). */
-export const SUBMENUS: Record<string, { menuTemplate: string; options: Record<string, MenuOption> }> = {
-  [MENU_STATES.SUBMENU_AUDIO]: {
-    menuTemplate: 'car_audio',
-    options: Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map((n) => [String(n), { template: `car_audio_${n}` }])),
-  },
-  [MENU_STATES.SUBMENU_ACCESSORIES]: {
-    menuTemplate: 'car_accessories',
-    options: Object.fromEntries([1, 2, 3, 4, 5, 6].map((n) => [String(n), { template: `car_accessories_${n}` }])),
-  },
-  [MENU_STATES.SUBMENU_CARE]: {
-    menuTemplate: 'car_care',
-    options: Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map((n) => [String(n), { template: `car_care_${n}` }])),
-  },
-  [MENU_STATES.SUBMENU_TINT]: {
-    menuTemplate: 'tinting_protection',
-    options: Object.fromEntries([1, 2, 3, 4, 5].map((n) => [String(n), { template: `tinting_protection_${n}` }])),
-  },
-  [MENU_STATES.SUBMENU_PRICES]: {
-    menuTemplate: 'prices_enquiries',
-    options: {
-      '1': { template: 'prices_products' },
-      '2': { template: 'prices_services' },
-      '3': { template: 'prices_offers_list' },
-      '4': { flow: 'quotation' },
-      '5': { template: 'prices_inquiry_cart' },
-    },
-  },
-};
-
-/** Multi-step flows: the answer stored at each step and the prompt for the next one. */
-export const FLOWS = {
-  appointment: {
-    statePrefix: 'APPOINTMENT_STEP_',
-    intro: 'appointment_intro',
-    confirm: 'appointment_confirm',
-    fields: ['name', 'make', 'model', 'year', 'service', 'date', 'time', 'notes'],
-    stepTemplate: (step: number) => `appointment_step_${step}`,
-  },
-  quotation: {
-    statePrefix: 'QUOTATION_STEP_',
-    intro: 'quotation_intro',
-    confirm: 'quotation_confirm',
-    fields: ['name', 'vehicle', 'service', 'notes'],
-    stepTemplate: (step: number) => `quotation_step_${step}`,
-  },
-} as const;
+// The original business's built-in structure lives in menuStatic.ts and is re-exported here for
+// existing importers; every other business is compiled from its own MenuConfig (menuConfig.ts).
+export { MENU_STATES, MAIN_MENU_OPTIONS, SUBMENUS, FLOWS } from './menuStatic';
+export type { MenuOption } from './menuStatic';
 
 /**
  * Data-driven templates that need live records: when the resolver has nothing
@@ -172,12 +96,12 @@ function chooseLanguage(normalized: string, lower: string): CustomerLanguage | u
   return detectLanguageFromText(lower);
 }
 
-function applyOption(option: MenuOption, current: Customer): RouteResult {
+function applyOption(option: MenuOption, current: Customer, flows: FlowSet): RouteResult {
   if (option.handoff) {
     return { kind: 'human_handoff', send: ['human_support'], state: MENU_STATES.MAIN_MENU, flowData: null };
   }
   if (option.flow) {
-    const flow = FLOWS[option.flow];
+    const flow = flows[option.flow];
     return { kind: 'rule', send: [flow.intro], state: `${flow.statePrefix}1`, flowData: {} };
   }
   return {
@@ -191,8 +115,8 @@ function invalidChoice(): RouteResult {
   return { kind: 'rule', send: withFollowUp(['invalid_option']), state: MENU_STATES.MAIN_MENU, flowData: null };
 }
 
-function continueFlow(kind: 'appointment' | 'quotation', step: number, answer: string, customer: Customer): RouteResult {
-  const flow = FLOWS[kind];
+function continueFlow(flows: FlowSet, kind: 'appointment' | 'quotation', step: number, answer: string, customer: Customer): RouteResult {
+  const flow = flows[kind];
   const data = { ...getCustomerFlowData(customer) };
   const field = flow.fields[step - 1];
   if (field) data[field] = answer;
@@ -214,6 +138,7 @@ function continueFlow(kind: 'appointment' | 'quotation', step: number, answer: s
  */
 export function routeMenu(input: RouteInput): RouteResult | null {
   const { customer } = input;
+  const tables = getMenuTables();
   let raw = (input.text ?? '').trim();
   let state = customer.menu_state ?? null;
 
@@ -264,23 +189,23 @@ export function routeMenu(input: RouteInput): RouteResult | null {
 
   // 4. Multi-step flows consume the whole message as the answer.
   for (const kind of ['appointment', 'quotation'] as const) {
-    const prefix = FLOWS[kind].statePrefix;
+    const prefix = tables.flows[kind].statePrefix;
     if (state?.startsWith(prefix)) {
       const step = Number(state.slice(prefix.length));
-      if (Number.isFinite(step) && step >= 1) return continueFlow(kind, step, raw, customer);
+      if (Number.isFinite(step) && step >= 1) return continueFlow(tables.flows, kind, step, raw, customer);
     }
   }
 
   // 5. Sub-menus.
-  const submenu = state ? SUBMENUS[state] : undefined;
+  const submenu = state ? tables.submenus[state] : undefined;
   if (submenu) {
     if (!DIGITS.test(normalized)) return null; // free text → AI
     const option = submenu.options[String(Number(normalized))];
-    return option ? applyOption(option, customer) : invalidChoice();
+    return option ? applyOption(option, customer, tables.flows) : invalidChoice();
   }
 
   // 6. Main menu (also the default for unknown / stale states).
   if (!DIGITS.test(normalized)) return null; // free text → AI
-  const option = MAIN_MENU_OPTIONS[String(Number(normalized))];
-  return option ? applyOption(option, customer) : invalidChoice();
+  const option = tables.main[String(Number(normalized))];
+  return option ? applyOption(option, customer, tables.flows) : invalidChoice();
 }

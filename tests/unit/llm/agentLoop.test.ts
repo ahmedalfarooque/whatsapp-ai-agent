@@ -11,6 +11,8 @@ vi.mock('../../../src/tools', () => ({
     },
   },
   toolSchemas: [{ type: 'function', function: { name: 'check_availability' } }],
+  toolSchemasForAccount: () => [{ type: 'function', function: { name: 'check_availability' } }],
+  accountHasCalendar: () => true,
 }));
 
 import { chatCompletion } from '../../../src/llm/openRouterClient';

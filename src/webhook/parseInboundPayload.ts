@@ -9,6 +9,8 @@ export interface InboundMessage {
   contactName?: string;
   /** Stable internal ID from a button/list tap (interactive messages only). */
   interactiveId?: string;
+  /** WhatsApp account (business) the message arrived on. Absent = the legacy account (Meta Cloud API path, old callers). */
+  accountId?: number;
   /** Transport the message arrived on: 'cloud' (Meta webhook, default) or 'qr' (linked device). */
   channel?: string;
 }
