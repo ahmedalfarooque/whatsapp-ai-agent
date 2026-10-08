@@ -998,7 +998,9 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
     ]);
     const openRouterSaved = credentials.OPENROUTER_API_KEY?.source !== 'unset';
     const openRouterConnected = credentials.OPENROUTER_API_KEY?.lastCheckOk === true;
-    const aiChipLabel = openRouterConnected ? 'CONNECTED' : openRouterSaved ? 'NOT CONNECTED' : 'NOT CONFIGURED';
+    // A saved key that cannot be decrypted with the current master key is ignored by the server: say so, and say what to do.
+    const aiNeedsKey = credentials.OPENROUTER_API_KEY?.overrideStatus === 'undecryptable' && !openRouterConnected;
+    const aiChipLabel = openRouterConnected ? 'CONNECTED' : aiNeedsKey ? 'NEEDS A NEW KEY' : openRouterSaved ? 'NOT CONNECTED' : 'NOT CONFIGURED';
     const waLive = waStatus.syncStatus === 'live';
 
     const statusLabel = { not_configured: 'Not configured', saved: 'Configuration saved', live: 'Connected — LIVE', failed: 'Connection failed' }[
@@ -1049,6 +1051,7 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
       <section class="panel setup-card ai-card" style="margin-top:16px">
         <h3>AI</h3>
         <p class="muted">Your OpenRouter API key powers the assistant's replies.</p>
+        ${aiNeedsKey ? '<p class="muted" role="alert" style="color:#c0453f;font-size:13px">The key saved earlier can no longer be read (it was stored under a different master key), so the assistant cannot reply. Enter your OpenRouter key again below and press Save &amp; Test AI.</p>' : ''}
         <form id="ai-form" autocomplete="off">
           ${autofillDecoy()}
           ${pwField('apiKey', 'OpenRouter API Key', null, openRouterSaved)}

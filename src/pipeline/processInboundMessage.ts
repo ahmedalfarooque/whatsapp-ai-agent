@@ -29,6 +29,7 @@ import { sendTextMessage, sendDocumentMessage } from '../whatsapp/client';
 import { getDeliverableCatalogue } from '../catalogues/catalogueRepo';
 import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
+import { AiCredentialError } from '../llm/aiCredentialError';
 import { MENU_IDS, detectLanguageFromScript, isHardRestart, isHumanSupportRequest, isMenuKeyword, isSubstantiveFreeText } from '../automation/menu';
 import { MENU_STATES, DATA_DRIVEN_FALLBACKS, routeMenu, type RouteResult } from '../automation/menuRouter';
 import { renderCustomerOffers } from '../offers/offerRepo';
@@ -102,6 +103,24 @@ function storeInbound(conversationId: number, msg: InboundMessage): void {
 
 /** Protocol-level noise (reactions, edits, receipts): not worth a row in the conversation or the activity list. */
 const SILENT_UNSTORED_TYPES = new Set(['reaction', 'other']);
+
+/** While the AI key is unusable, each customer hears the generic apology at most once per window. */
+const CREDENTIAL_FALLBACK_COOLDOWN_MS = 10 * 60_000;
+const lastCredentialFallback = new Map<string, number>();
+
+function allowCredentialFallback(accountId: number, waId: string, now = Date.now()): boolean {
+  const key = `${accountId}:${waId}`;
+  const last = lastCredentialFallback.get(key) ?? 0;
+  if (now - last < CREDENTIAL_FALLBACK_COOLDOWN_MS) return false;
+  lastCredentialFallback.set(key, now);
+  if (lastCredentialFallback.size > 2000) lastCredentialFallback.delete(lastCredentialFallback.keys().next().value as string);
+  return true;
+}
+
+/** Test hook. */
+export function resetCredentialFallbackThrottle(): void {
+  lastCredentialFallback.clear();
+}
 
 async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessDependencies): Promise<void> {
   const maskedId = maskWaId(msg.waId);
@@ -200,6 +219,7 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
 
   let finalText: string;
   let kind: 'ai' | 'error' = 'ai';
+  let failureDetail = 'AI failed; fallback sent';
   try {
     const loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
     finalText = loopResult.finalText;
@@ -213,7 +233,19 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
       });
     }
   } catch (error) {
-    logger.error({ waId: maskedId, error }, 'agent loop failed for inbound message');
+    const credentialProblem = error instanceof AiCredentialError ? error : null;
+    logger.error(
+      { waId: maskedId, errorName: (error as Error)?.name, errorMessage: String((error as Error)?.message ?? error).slice(0, 200), credentialReason: credentialProblem?.reason },
+      'agent loop failed for inbound message',
+    );
+    if (credentialProblem) {
+      // The provider key is unusable: every message would fail the same way. Tell the customer once in a while, not on every message.
+      if (!allowCredentialFallback(currentAccountId(), msg.waId)) {
+        recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: `AI credential problem (${credentialProblem.reason}) — apology already sent recently` });
+        return;
+      }
+      failureDetail = `AI credential problem (${credentialProblem.reason}): fallback sent. Enter a valid OpenRouter key in the dashboard (Providers).`;
+    }
     kind = 'error';
     finalText = resolveTemplate('fallback_error', language);
     appendMessage(conversation.id, { role: 'assistant', content: finalText, direction: MESSAGE_DIRECTION.OUTBOUND });
@@ -221,7 +253,7 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
 
   try {
     await sendTextMessage(msg.waId, finalText);
-    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? 'AI failed; fallback sent' : undefined });
+    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? failureDetail : undefined });
   } catch (error) {
     recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: 'Reply could not be sent' });
     logger.error({ waId: maskedId, error }, 'failed to send reply to customer after processing');

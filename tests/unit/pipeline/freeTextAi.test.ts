@@ -9,7 +9,9 @@ vi.mock('../../../src/llm/openRouterClient', () => ({ chatCompletion: vi.fn() })
 
 import { sendTextMessage } from '../../../src/whatsapp/client';
 import { chatCompletion } from '../../../src/llm/openRouterClient';
-import { processInboundMessage } from '../../../src/pipeline/processInboundMessage';
+import { processInboundMessage, resetCredentialFallbackThrottle } from '../../../src/pipeline/processInboundMessage';
+import { AiCredentialError } from '../../../src/llm/aiCredentialError';
+import { listReplyActivity } from '../../../src/automation/settingsRepo';
 import { getDb } from '../../../src/memory/db';
 import { createAccount } from '../../../src/accounts/accountRepo';
 import { runWithAccount } from '../../../src/accounts/accountContext';
@@ -201,5 +203,53 @@ describe('web search inside a real conversation', () => {
       .mockResolvedValueOnce(text('I could not check that right now — would you like our team to help?') as never);
     await processInboundMessage(msg(GARAGE, '966511000502', 'What is the newest tyre technology?'), { knowledge: GARAGE_KB });
     expect(sent()).toEqual(['I could not check that right now — would you like our team to help?']);
+  });
+});
+
+describe('when the AI key is unusable, customers are not spammed with apologies', () => {
+  const fallback = () => runWithAccount(PAINT, () => resolveTemplate('fallback_error', 'en'));
+  beforeEach(() => resetCredentialFallbackThrottle());
+
+  it('each customer gets the generic apology once per window; further messages are recorded but not answered; other customers still get theirs', async () => {
+    vi.mocked(chatCompletion).mockRejectedValue(new AiCredentialError('OpenRouter refused the API key (HTTP 401).', 'rejected', 401));
+    const a = '966511000601';
+    const b = '966511000602';
+    await processInboundMessage(msg(PAINT, a, 'Do you have exterior wall paint?'), { knowledge: PAINT_KB });
+    expect(sent()).toEqual([fallback()]);
+    await processInboundMessage(msg(PAINT, a, 'Hello? Anyone there please'), { knowledge: PAINT_KB });
+    await processInboundMessage(msg(PAINT, a, 'I need paint for my bedroom'), { knowledge: PAINT_KB });
+    expect(sent()).toEqual([fallback()]); // still just the one
+    await processInboundMessage(msg(PAINT, b, 'Do you have exterior wall paint?'), { knowledge: PAINT_KB });
+    expect(sent()).toEqual([fallback(), fallback()]);
+
+    const activity = listReplyActivity({ limit: 50, accountId: PAINT }).map((r) => `${r.kind}:${r.detail ?? ''}`);
+    expect(activity.some((x) => x.startsWith('error:AI credential problem (rejected): fallback sent'))).toBe(true);
+    expect(activity.some((x) => x.startsWith('suppressed:AI credential problem (rejected) — apology already sent recently'))).toBe(true);
+  });
+
+  it('the apology is available again after the window (and is not sent for a generic AI failure throttle)', async () => {
+    vi.mocked(chatCompletion).mockRejectedValue(new AiCredentialError('missing', 'missing'));
+    const waId = '966511000603';
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2030-01-01T10:00:00Z'));
+      await processInboundMessage(msg(PAINT, waId, 'Do you have exterior wall paint?'), { knowledge: PAINT_KB });
+      vi.setSystemTime(new Date('2030-01-01T10:05:00Z'));
+      await processInboundMessage(msg(PAINT, waId, 'Still waiting for an answer please'), { knowledge: PAINT_KB });
+      expect(sent()).toHaveLength(1);
+      vi.setSystemTime(new Date('2030-01-01T10:11:00Z'));
+      await processInboundMessage(msg(PAINT, waId, 'Any update on my question now'), { knowledge: PAINT_KB });
+      expect(sent()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a different kind of AI failure (not a credential problem) is NOT throttled: each message still gets its apology', async () => {
+    vi.mocked(chatCompletion).mockRejectedValue(new Error('upstream exploded'));
+    const waId = '966511000604';
+    await processInboundMessage(msg(PAINT, waId, 'Do you have exterior wall paint?'), { knowledge: PAINT_KB });
+    await processInboundMessage(msg(PAINT, waId, 'Is anyone there to answer me'), { knowledge: PAINT_KB });
+    expect(sent()).toEqual([fallback(), fallback()]);
   });
 });

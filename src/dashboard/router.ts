@@ -46,13 +46,12 @@ import {
   OVERRIDABLE_KEYS,
   isOverridableKey,
   setSecret,
-  getSecret,
+  readOverride,
   clearSecret,
-  listConfiguredOverrideKeys,
   maskSecret,
   type OverridableKey,
 } from '../config/secretStore';
-import { getEffectiveCredential } from '../config/effectiveConfig';
+import { describeCredential, getEffectiveCredential } from '../config/effectiveConfig';
 import { testConnection, getLastConnectionCheck } from './credentialTest';
 import { getDb } from '../memory/db';
 import {
@@ -954,11 +953,12 @@ export function createDashboardRouter(): Router {
 
   // ---- Credentials (encrypted dashboard override store) ----------------------
   router.get('/api/dashboard/credentials', (_req, res) => {
-    const configuredOverrides = new Set(listConfiguredOverrideKeys());
     const result: Record<
       string,
       {
         source: 'override' | 'env' | 'unset';
+        /** 'undecryptable' = a value is stored but was saved under a different master key: it is ignored until re-entered. */
+        overrideStatus: 'absent' | 'ok' | 'undecryptable';
         masked: string | null;
         lastCheckedAt: string | null;
         lastCheckOk: boolean | null;
@@ -966,11 +966,12 @@ export function createDashboardRouter(): Router {
       }
     > = {};
     for (const key of OVERRIDABLE_KEYS) {
+      const diagnostics = describeCredential(key);
       const effective = getEffectiveCredential(key);
-      const source = configuredOverrides.has(key) ? 'override' : effective ? 'env' : 'unset';
       const lastCheck = getLastConnectionCheck(key);
       result[key] = {
-        source,
+        source: diagnostics.source,
+        overrideStatus: diagnostics.overrideStatus,
         masked: effective ? maskSecret(effective) : null,
         lastCheckedAt: lastCheck?.testedAt ?? null,
         lastCheckOk: lastCheck?.ok ?? null,
@@ -1005,14 +1006,18 @@ export function createDashboardRouter(): Router {
     // production boot check (see env.ts) and is never a real saved
     // configuration; showing it here would display a placeholder as if the
     // administrator had actually configured something.
-    const savedWabaId = getSecret('WHATSAPP_BUSINESS_ACCOUNT_ID');
-    const savedPhoneNumberId = getSecret('WHATSAPP_PHONE_NUMBER_ID');
+    const saved = (key: OverridableKey): string | null => {
+      const stored = readOverride(key);
+      return stored.status === 'ok' ? stored.value : null; // an unreadable stored value counts as not saved
+    };
+    const savedWabaId = saved('WHATSAPP_BUSINESS_ACCOUNT_ID');
+    const savedPhoneNumberId = saved('WHATSAPP_PHONE_NUMBER_ID');
     const configured = {
       wabaId: Boolean(savedWabaId),
       phoneNumberId: Boolean(savedPhoneNumberId),
-      accessToken: Boolean(getSecret('WHATSAPP_ACCESS_TOKEN')),
-      verifyToken: Boolean(getSecret('WHATSAPP_VERIFY_TOKEN')),
-      appSecret: Boolean(getSecret('META_APP_SECRET')),
+      accessToken: Boolean(saved('WHATSAPP_ACCESS_TOKEN')),
+      verifyToken: Boolean(saved('WHATSAPP_VERIFY_TOKEN')),
+      appSecret: Boolean(saved('META_APP_SECRET')),
       webhookUrl: Boolean(state.webhookUrl),
     };
     res.json({

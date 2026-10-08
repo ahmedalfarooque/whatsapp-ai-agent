@@ -2,7 +2,7 @@ import express, { type Request, type Response, type Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { logger } from '../logger';
 import { env } from '../config/env';
-import { getEffectiveCredential } from '../config/effectiveConfig';
+import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { assertAccountAccess } from './accountMiddleware';
 import { runWithAccount, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 import { getAccount, AccountValidationError } from '../accounts/accountRepo';
@@ -44,12 +44,7 @@ const rawUpload = express.raw({ type: () => true, limit: MAX_DOCUMENT_BYTES + 10
 
 function aiStatus(): { available: boolean; mode: 'live' | 'mock' | 'unconfigured' } {
   if (env.shouldUseMockProviders) return { available: false, mode: 'mock' };
-  try {
-    getEffectiveCredential('OPENROUTER_API_KEY');
-    return { available: true, mode: 'live' };
-  } catch {
-    return { available: false, mode: 'unconfigured' };
-  }
+  return isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY')) ? { available: true, mode: 'live' } : { available: false, mode: 'unconfigured' };
 }
 
 function fileView(d: BusinessDocument, accountId: number) {

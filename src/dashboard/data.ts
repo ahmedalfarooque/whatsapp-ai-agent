@@ -5,7 +5,7 @@ import { getDb } from '../memory/db';
 import { maskWaId } from '../logger';
 import { listBookingLocks } from '../memory/bookingLockRepo';
 import { listKnowledgeFiles, knowledgeDirForAccount } from './knowledgeAdmin';
-import { getEffectiveCredential } from '../config/effectiveConfig';
+import { describeCredential, getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { getBusinessSettings, getBusinessSettingsOverrides } from '../config/businessSettings';
 import { currentAccountId } from '../accounts/accountContext';
 
@@ -170,7 +170,10 @@ export function getIntegrations(): IntegrationView[] {
   const whatsappConfigured = Boolean(
     getEffectiveCredential('WHATSAPP_ACCESS_TOKEN') && getEffectiveCredential('WHATSAPP_PHONE_NUMBER_ID'),
   );
-  const openRouterConfigured = Boolean(getEffectiveCredential('OPENROUTER_API_KEY'));
+  const openRouterKey = describeCredential('OPENROUTER_API_KEY');
+  // 'Configured' means a key we would actually send. A stored key that cannot be decrypted, or a malformed one, is NOT configured.
+  const openRouterConfigured = isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY'));
+  const openRouterNeedsKey = !openRouterConfigured && openRouterKey.overrideStatus === 'undecryptable';
   const googleConfigured = Boolean(
     getEffectiveCredential('GOOGLE_CLIENT_EMAIL') && getEffectiveCredential('GOOGLE_PRIVATE_KEY'),
   );
@@ -184,9 +187,9 @@ export function getIntegrations(): IntegrationView[] {
     },
     {
       name: 'OpenRouter',
-      state: mock ? 'Development Mock' : openRouterConfigured ? 'Configured' : 'Missing configuration',
+      state: mock ? 'Development Mock' : openRouterConfigured ? 'Configured' : openRouterNeedsKey ? 'Needs a new key' : 'Missing configuration',
       configured: openRouterConfigured,
-      detail: `Model: ${getBusinessSettings().openRouterModel}`,
+      detail: openRouterNeedsKey ? 'The saved key cannot be read with the current master key — enter it again in Providers.' : `Model: ${getBusinessSettings().openRouterModel}`,
     },
     {
       name: 'Google Calendar',

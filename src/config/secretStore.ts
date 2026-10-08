@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getDb } from '../memory/db';
 import { getSecretEncryptionKey } from './masterKey';
+import { logger } from '../logger';
 
 /**
  * The exact set of credential fields that may be overridden from the
@@ -96,6 +97,40 @@ export function getSecret(key: OverridableKey): string | null {
     .get(key) as CredentialOverrideRow | undefined;
   if (!row) return null;
   return decryptWithKey(row.ciphertext, getSecretEncryptionKey());
+}
+
+/** What is stored for a key, WITHOUT ever throwing on unreadable ciphertext (and never exposing it). */
+export type OverrideReading = { status: 'absent' } | { status: 'ok'; value: string } | { status: 'undecryptable' };
+
+const warnedUndecryptable = new Set<string>();
+
+/**
+ * The safe way to read an override at runtime. A row that cannot be decrypted with the CURRENT master key (it was written under a
+ * different key, or its ciphertext was altered) is reported as 'undecryptable' — never as a value and never as an exception —
+ * so one stale row cannot take down AI replies, calendar access or the dashboard pages that list credentials. It is logged once
+ * per key per process (key NAME only, never any secret material) and is NOT deleted: the administrator re-enters it.
+ * getSecret() above stays strict and throws; tampering must remain loud wherever a caller asks for the value itself.
+ */
+export function readOverride(key: OverridableKey): OverrideReading {
+  const row = getDb().prepare('SELECT key, ciphertext FROM credential_overrides WHERE key = ?').get(key) as CredentialOverrideRow | undefined;
+  if (!row) return { status: 'absent' };
+  try {
+    return { status: 'ok', value: decryptWithKey(row.ciphertext, getSecretEncryptionKey()) };
+  } catch {
+    if (!warnedUndecryptable.has(key)) {
+      warnedUndecryptable.add(key);
+      logger.warn(
+        { credential: key },
+        'a stored credential override cannot be decrypted with the current DASHBOARD_MASTER_KEY (it was saved under a different key); it is being ignored. Enter it again in the dashboard to replace it.',
+      );
+    }
+    return { status: 'undecryptable' };
+  }
+}
+
+/** Test hook: forget which keys were already warned about. */
+export function resetUndecryptableWarnings(): void {
+  warnedUndecryptable.clear();
 }
 
 /** Lists every row's raw key + ciphertext — used only by the offline rotation

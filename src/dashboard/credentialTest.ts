@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
 import { env } from '../config/env';
-import { getEffectiveCredential } from '../config/effectiveConfig';
+import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { fetchWithTimeout } from '../utils/retry';
 import type { OverridableKey } from '../config/secretStore';
 
@@ -88,6 +88,9 @@ async function testOpenRouter(): Promise<ConnectionTestResult> {
   const apiKey = getEffectiveCredential('OPENROUTER_API_KEY');
   if (!apiKey) {
     return { ok: false, detail: 'OpenRouter API key is not configured.' };
+  }
+  if (!isUsableApiKey(apiKey)) {
+    return { ok: false, detail: 'The saved OpenRouter value is not a usable API key (wrong format or length). Enter the key again.' };
   }
   try {
     // /models is public and returns 200 for any (or no) bearer token — it

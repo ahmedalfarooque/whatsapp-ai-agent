@@ -1,5 +1,5 @@
 import { env } from './env';
-import { getSecret, type OverridableKey } from './secretStore';
+import { readOverride, type OverridableKey, type OverrideReading } from './secretStore';
 
 /**
  * Resolves the effective value of an overridable credential: a
@@ -15,5 +15,35 @@ import { getSecret, type OverridableKey } from './secretStore';
  * an empty .env.
  */
 export function getEffectiveCredential(key: OverridableKey): string {
-  return getSecret(key) ?? env[key];
+  const stored = readOverride(key);
+  // A stored value that cannot be decrypted is IGNORED (logged once, never thrown, never sent anywhere): the .env value, if any,
+  // is used instead. Callers that talk to a provider must still check the value is usable (see isUsableApiKey).
+  if (stored.status === 'ok') return stored.value;
+  return env[key];
+}
+
+export type CredentialSource = 'override' | 'env' | 'unset';
+
+export interface CredentialDiagnostics {
+  key: OverridableKey;
+  /** Where the effective value comes from. A stored override that cannot be decrypted is not a source. */
+  source: CredentialSource;
+  overrideStatus: OverrideReading['status'];
+  envSet: boolean;
+}
+
+/** Safe, secret-free description of where a credential comes from — for the dashboard and for log lines. */
+export function describeCredential(key: OverridableKey): CredentialDiagnostics {
+  const stored = readOverride(key);
+  const envSet = Boolean(env[key]);
+  const source: CredentialSource = stored.status === 'ok' && stored.value ? 'override' : envSet ? 'env' : 'unset';
+  return { key, source, overrideStatus: stored.status, envSet };
+}
+
+/**
+ * True when a value looks like an API key worth sending to a provider: printable ASCII, no whitespace or quotes, a sensible length.
+ * Anything else (empty, a pasted paragraph, a decryption leftover) is never sent — the provider would only answer 401.
+ */
+export function isUsableApiKey(value: string | undefined | null): boolean {
+  return typeof value === 'string' && /^[!-~]{16,200}$/.test(value) && !/["'`]/.test(value);
 }

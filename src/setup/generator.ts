@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { env } from '../config/env';
-import { getEffectiveCredential } from '../config/effectiveConfig';
+import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { getBusinessSettings } from '../config/businessSettings';
 import { chatCompletion } from '../llm/openRouterClient';
 import { logger } from '../logger';
@@ -155,9 +155,7 @@ export function groundAiResult(parsed: z.infer<typeof aiResult>, sources: SetupS
 async function defaultAiExtractor(sources: SetupSources): ReturnType<AiExtractor> {
   if (sources.texts.length === 0) return { error: 'There is no readable text to analyse.' };
   if (env.shouldUseMockProviders) return { error: 'The AI provider is in mock mode — sources were analysed by rules only.' };
-  try {
-    getEffectiveCredential('OPENROUTER_API_KEY');
-  } catch {
+  if (!isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY'))) {
     return { error: 'OpenRouter is not configured — sources were analysed by rules only.' };
   }
   try {
