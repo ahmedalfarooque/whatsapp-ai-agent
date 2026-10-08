@@ -348,7 +348,7 @@ async function renderLogin(view) {
       <p class="muted">${isSetup ? 'Create an administrator account to get started.' : 'Sign in to manage your AI assistant.'}</p>
       <form id="auth-form">
         <label class="muted" for="username">Username</label>
-        <input id="username" type="text" autocomplete="username" required style="width:100%;margin:6px 0 14px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe" />
+        <input id="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required style="width:100%;margin:6px 0 14px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe" />
         <label class="muted" for="password">Password${isSetup ? ' (min 12 characters)' : ''}</label>
         <div class="password-wrap"><input id="password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" ${isSetup ? 'minlength="12"' : ''} required /><button type="button" id="show-password" aria-controls="password" aria-pressed="false">Show</button></div>
         <div id="auth-error" class="form-error" hidden></div>
@@ -418,7 +418,7 @@ async function renderLogin(view) {
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
-          showError(body.error || 'Verification failed.');
+          showError(body.error || (res.status === 429 ? 'Too many attempts. Please wait a few minutes and try again.' : `Verification failed (HTTP ${res.status}).`));
           if (body.code === 'locked' || res.status === 429) { setTimeout(backToPassword, 1800); }
           codeInput.select();
           return;
@@ -439,7 +439,7 @@ async function renderLogin(view) {
         const res = await fetch('/api/dashboard/auth/otp/resend', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challenge }) });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
-          showError(body.error || 'Could not resend the code.');
+          showError(body.error || (res.status === 429 ? 'Too many code requests. Please wait a few minutes and try again.' : `Could not resend the code (HTTP ${res.status}).`));
           if (res.status === 410) { setTimeout(backToPassword, 1800); return; }
           startCooldown(Number(res.headers.get('Retry-After')) || 60);
           return;
@@ -471,7 +471,7 @@ async function renderLogin(view) {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         errorBox.hidden = false;
-        errorBox.textContent = body.error || 'Sign-in failed.';
+        errorBox.textContent = body.error || (res.status === 429 ? 'Too many sign-in attempts. Please wait a few minutes and try again.' : `Sign-in failed (HTTP ${res.status}).`);
         return;
       }
       if (body.otpRequired && body.challenge) {

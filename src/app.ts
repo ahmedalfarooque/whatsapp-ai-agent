@@ -14,6 +14,11 @@ import path from 'node:path';
 export function createApp(): Express {
   const app = express();
   app.disable('x-powered-by');
+  // The app sits behind a reverse proxy on the same machine (Caddy → 127.0.0.1:3000). Trust forwarded
+  // client addresses ONLY from the loopback proxy, so rate limits and logs see each visitor's real IP
+  // instead of one shared 127.0.0.1 (which made the login limit a single global bucket). A client that
+  // reaches the app any other way cannot spoof X-Forwarded-For.
+  app.set('trust proxy', 'loopback');
   app.use(helmet());
 
   app.use(

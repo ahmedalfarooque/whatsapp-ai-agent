@@ -129,12 +129,15 @@ export function createDashboardRouter(): Router {
 
   router.use('/api/dashboard', express.json({ limit: '256kb' }));
 
-  const setupLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
-  const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  // JSON bodies so the dashboard can show a clear "too many attempts" message (a plain-text 429 used to
+  // surface as a generic "Sign-in failed", indistinguishable from a wrong password).
+  const tooMany = (what: string) => ({ error: `Too many ${what}. Please wait a few minutes and try again.`, code: 'rate_limited' });
+  const setupLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, message: tooMany('attempts') });
+  const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: tooMany('sign-in attempts') });
   // Email-code step: a code has 1,000,000 possibilities and each challenge dies after 5 wrong
   // tries (loginOtp.ts); these per-IP caps additionally stop someone cycling many challenges.
-  const otpVerifyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
-  const otpResendLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
+  const otpVerifyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false, message: tooMany('verification attempts') });
+  const otpResendLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false, message: tooMany('code requests') });
 
   const sendOtpError = (res: express.Response, error: unknown): void => {
     if (error instanceof OtpError) {

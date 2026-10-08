@@ -59,8 +59,9 @@ export function createAdminUser(username: string, password: string): number {
 
 export function verifyAdminCredentials(username: string, password: string): number | null {
   const row = getDb()
-    .prepare('SELECT id, username, password_hash FROM admin_users WHERE username = ?')
-    .get(username) as AdminUserRow | undefined;
+    // NOCASE: an email-style username must not depend on how a phone keyboard capitalised it.
+    .prepare('SELECT id, username, password_hash FROM admin_users WHERE username = ? COLLATE NOCASE')
+    .get(username.trim()) as AdminUserRow | undefined;
   if (!row) return null;
   if (!verifyPassword(password, row.password_hash)) return null;
   return row.id;
