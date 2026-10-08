@@ -27,7 +27,8 @@ import { env } from '../config/env';
 import {
   adminCount,
   createAdminUser,
-  verifyAdminCredentials,
+  checkAdminCredentials,
+  diagnoseRejectedPassword,
   verifySessionToken,
   createSession,
   destroySessionByToken,
@@ -205,7 +206,23 @@ export function createDashboardRouter(): Router {
       res.status(400).json({ error: 'username and password are required' });
       return;
     }
-    const adminUserId = verifyAdminCredentials(username, password);
+    const check = checkAdminCredentials(username, password);
+    const adminUserId = check.adminUserId;
+    // Diagnostics: booleans and lengths of a REJECTED attempt only. Never the username, the password, a hash,
+    // a cookie or a token; a successful sign-in logs no lengths at all.
+    logger.info(
+      {
+        event: 'dashboard_login_attempt',
+        body_keys: Object.keys(req.body ?? {}),
+        username_received: username.trim().length > 0,
+        password_field_received: password.length > 0,
+        admin_found: check.adminFound,
+        password_verified: adminUserId !== null,
+        session_will_be_created: adminUserId !== null && !loginOtpEnabled(),
+        ...(adminUserId === null ? { username_length: username.trim().length, ...(check.adminFound ? diagnoseRejectedPassword(username, password) : {}) } : {}),
+      },
+      'dashboard login attempt',
+    );
     if (!adminUserId) {
       res.status(401).json({ error: 'invalid username or password' });
       return;

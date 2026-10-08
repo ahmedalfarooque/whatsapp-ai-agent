@@ -1,9 +1,13 @@
 import pino from 'pino';
 import { env } from './config/env';
 
-const REDACT_PATHS = [
+export const REDACT_PATHS = [
   'req.headers.authorization',
   'req.headers["x-hub-signature-256"]',
+  // The dashboard session token travels in these headers; request logging serialises them verbatim, so a
+  // successful sign-in would otherwise write a live session token into the service log.
+  'req.headers.cookie',
+  'res.headers["set-cookie"]',
   '*.accessToken',
   '*.access_token',
   '*.apiKey',

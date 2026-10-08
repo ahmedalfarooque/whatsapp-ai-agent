@@ -57,14 +57,48 @@ export function createAdminUser(username: string, password: string): number {
   return Number(result.lastInsertRowid);
 }
 
-export function verifyAdminCredentials(username: string, password: string): number | null {
+export interface AdminCredentialCheck {
+  /** The admin's id when username and password both match, otherwise null. */
+  adminUserId: number | null;
+  /** Whether the username resolved to an admin row at all (lets a failed sign-in say WHICH half was wrong). */
+  adminFound: boolean;
+}
+
+export function checkAdminCredentials(username: string, password: string): AdminCredentialCheck {
   const row = getDb()
     // NOCASE: an email-style username must not depend on how a phone keyboard capitalised it.
     .prepare('SELECT id, username, password_hash FROM admin_users WHERE username = ? COLLATE NOCASE')
     .get(username.trim()) as AdminUserRow | undefined;
-  if (!row) return null;
-  if (!verifyPassword(password, row.password_hash)) return null;
-  return row.id;
+  if (!row) return { adminUserId: null, adminFound: false };
+  if (!verifyPassword(password, row.password_hash)) return { adminUserId: null, adminFound: true };
+  return { adminUserId: row.id, adminFound: true };
+}
+
+export function verifyAdminCredentials(username: string, password: string): number | null {
+  return checkAdminCredentials(username, password).adminUserId;
+}
+
+/**
+ * For a sign-in that already FAILED against an existing admin: reports (as booleans and one length) whether the
+ * rejected password would have matched after harmless normalisation. Never returns or logs any value.
+ */
+export function diagnoseRejectedPassword(username: string, password: string): {
+  password_length: number;
+  password_has_edge_whitespace: boolean;
+  trimmed_variant_matches: boolean;
+  nfc_variant_matches: boolean;
+} {
+  const row = getDb()
+    .prepare('SELECT password_hash FROM admin_users WHERE username = ? COLLATE NOCASE')
+    .get(username.trim()) as { password_hash: string } | undefined;
+  const edge = password !== password.trim();
+  const nfc = password.normalize('NFC');
+  return {
+    password_length: password.length,
+    password_has_edge_whitespace: edge,
+    trimmed_variant_matches: Boolean(row && edge && verifyPassword(password.trim(), row.password_hash)),
+    nfc_variant_matches: Boolean(row && nfc !== password && verifyPassword(nfc, row.password_hash)),
+  };
 }
 
 /** Stamps last_login_at — called only once a session is actually established (after the email code when that step is on). */
