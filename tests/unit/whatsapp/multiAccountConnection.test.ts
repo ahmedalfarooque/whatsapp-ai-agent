@@ -73,6 +73,7 @@ vi.mock('../../../src/accounts/accountRepo', () => {
       const a = get(id); if (a) Object.assign(a, identity, { status: 'connected', connectedAt: 'now' });
     }),
     clearAccountIdentity: vi.fn((id: number) => { const a = get(id); if (a) Object.assign(a, { phoneNumber: null, jid: null, displayName: null, status: 'logged_out' }); }),
+    findAccountHoldingIdentity: vi.fn((id: number, identity: { phoneNumber: string | null; jid: string }) => { const user = (j: string | null) => ((j ?? '').split('@')[0] ?? '').split(':')[0]; return accounts.find((a) => a.id !== id && ((identity.phoneNumber !== null && a.phoneNumber === identity.phoneNumber) || (a.jid !== null && user(a.jid) !== '' && user(a.jid) === user(identity.jid)))) ?? null; }),
   };
 });
 vi.mock('../../../src/automation/settingsRepo', () => ({ recordReplyActivity: fixtures.activity }));

@@ -127,6 +127,26 @@ a property of WhatsApp identities, not of a business).
 - Deleting a business (typed `DELETE`; never account 1) logs its phone out and
   removes its rows, `data/accounts/<id>/` and `knowledge/accounts/<id>/`.
 
+### Which number is bound to which business
+
+The number is never typed in: when a scan completes, the application reads the
+signed-in identity from the live Baileys socket (`user.id`, falling back to the
+saved credentials) and stores the normalised number, the JID and the display
+name on **that** account's row. A LID-only identity is resolved to a phone
+number through the stored LID mapping; without a mapping the number stays
+unknown rather than guessed.
+
+- A connection that opens **without** an identity is not marked connected and
+  does not answer messages; it reconnects.
+- One number belongs to one business. If a fresh scan completes with a number
+  another business already holds (compared by phone number and by JID with the
+  linked-device suffix removed), the new device is unlinked, only that account's
+  new credentials are moved aside (`baileys-auth.duplicate-number-<time>`), the
+  account shows **Connection error** with the reason, and nothing reconnects.
+  The other business is not touched. Refresh QR and scan with the right phone.
+- A saved session that reconnects with its recorded identity is never torn down
+  by this check.
+
 ## Session files
 
 Credentials live in `data/baileys-auth/` next to the SQLite database

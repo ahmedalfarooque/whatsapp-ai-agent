@@ -26,6 +26,7 @@ import {
   setAccountStatus,
   recordAccountConnected,
   clearAccountIdentity,
+  findAccountHoldingIdentity,
   type AccountSessionStatus,
   type WhatsappAccount,
 } from '../accounts/accountRepo';
@@ -33,7 +34,7 @@ import { LEGACY_ACCOUNT_ID, runWithAccount } from '../accounts/accountContext';
 import { recordReplyActivity } from '../automation/settingsRepo';
 import { replyTransport, type ReplyTransport } from './replyTransport';
 import type { OutboundDocument } from './types';
-import { isDirectChatJid, isLidJid, jidToPhoneNumber } from './jid';
+import { isDirectChatJid, isLidJid, jidToPhoneNumber, jidToUser } from './jid';
 import { registerOutboxSender, flushOutbox, NotConnectedError } from '../notifications/outbox';
 import { parseOperatorCommand, handleOperatorCommand } from '../requests/requestService';
 
@@ -148,6 +149,17 @@ function rememberVersion(version: [number, number, number]): void {
   } catch (error) {
     logger.warn({ error }, 'could not persist the WhatsApp Web version cache');
   }
+}
+
+/**
+ * The phone number of the authenticated session itself. A plain phone JID is read directly; a LID-only identity
+ * is resolved through the stored LID to phone mapping. Never guessed: without a mapping the number stays unknown.
+ */
+export function ownPhoneNumber(jid: string): string | null {
+  const direct = jidToPhoneNumber(jid);
+  if (direct || !isLidJid(jid)) return direct;
+  const pn = getPnForLid(jid);
+  return pn ? jidToPhoneNumber(pn) : null;
 }
 
 function pidAlive(pid: number): boolean {
@@ -753,13 +765,30 @@ class QrConnection {
         }
 
         if (connection === 'open') {
+          const me = instance.user ?? state.creds.me;
+          const jid = me?.id ?? '';
+          if (!jid) {
+            // "open" without a signed-in identity is not an authenticated session we can bind or answer for.
+            this.noteConnectionEvent('open_without_identity');
+            logger.warn({ account: this.accountId, socketGeneration: run }, '[WA-SESSION] connection opened without an authenticated identity; not marking connected, retrying');
+            this.scheduleReconnect(run);
+            return;
+          }
+          const phoneNumber = ownPhoneNumber(jid);
+          // A number is bound to ONE business. Checked when this account has no recorded identity yet (a fresh scan) or
+          // the identity changed; a saved session that reconnects with its recorded identity is never torn down here.
+          const stored = this.account();
+          if (!stored.jid || jidToUser(stored.jid) !== jidToUser(jid)) {
+            const holder = findAccountHoldingIdentity(this.accountId, { phoneNumber, jid });
+            if (holder) {
+              await this.rejectDuplicateIdentity(instance, holder, phoneNumber ?? jidToUser(jid));
+              return;
+            }
+          }
           this.reconnectAttempts = 0;
           this.lastDisconnectCode = null;
           this.connectedSince = new Date().toISOString();
           this.noteConnectionEvent('open');
-          const me = instance.user ?? state.creds.me;
-          const jid = me?.id ?? '';
-          const phoneNumber = jidToPhoneNumber(jid);
           recordAccountConnected(this.accountId, { phoneNumber, jid, displayName: me?.name ?? null });
           this.phase = 'connected';
           this.qrDataUrl = null;
@@ -834,6 +863,36 @@ class QrConnection {
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * The number that just scanned this account's QR is already bound to another business. Binding it twice would make
+   * both businesses receive every message and both reply. Only the NEW device is unlinked and only THIS account's
+   * credentials are moved aside; the other account is not touched. No reconnect follows: a fresh QR is needed.
+   */
+  private async rejectDuplicateIdentity(instance: WASocket, holder: WhatsappAccount, shown: string): Promise<void> {
+    ++this.generation; // every later event from this socket is ignored
+    this.sock = undefined;
+    this.connectedSince = null;
+    this.noteConnectionEvent('duplicate_number');
+    instance.ev.removeAllListeners('connection.update');
+    instance.ev.removeAllListeners('messages.upsert');
+    try {
+      await instance.logout();
+    } catch {
+      try { instance.end(undefined); } catch { /* already closed */ }
+    }
+    const archived = this.archiveAuthStore('duplicate-number');
+    clearAccountIdentity(this.accountId);
+    logger.error(
+      { account: this.accountId, heldBy: holder.id, archivedTo: archived ? path.basename(archived) : null },
+      '[WA-SESSION] the scanned WhatsApp number is already bound to another account; new device unlinked, a different phone is required',
+    );
+    this.setPhase(
+      'error',
+      `This WhatsApp number (${shown}) is already connected to "${holder.name}". Scan this QR with the phone that should answer for this business, or disconnect the other business first.`,
+      'duplicate_number',
+    );
   }
 
   /**

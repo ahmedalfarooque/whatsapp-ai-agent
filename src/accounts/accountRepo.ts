@@ -256,6 +256,27 @@ export function recordAccountConnected(
   ).run({ id: accountId, ...identity });
 }
 
+/**
+ * Another account that already holds this WhatsApp identity, if any. Compared by phone number and by the JID's
+ * user part with the device suffix removed (each linked device of one number has its own ":<device>" suffix).
+ * Used so a number can never be bound to two businesses: both would receive every message and both would reply.
+ */
+export function findAccountHoldingIdentity(
+  accountId: number,
+  identity: { phoneNumber: string | null; jid: string },
+  db: Database.Database = getDb(),
+): WhatsappAccount | null {
+  const userOf = (jid: string | null): string => (jid ? (jid.split('@')[0] ?? '').split(':')[0] ?? '' : '');
+  const wanted = userOf(identity.jid);
+  return (
+    listAccounts(db).find((a) => {
+      if (a.id === accountId) return false;
+      if (identity.phoneNumber !== null && a.phoneNumber === identity.phoneNumber) return true;
+      return wanted !== '' && userOf(a.jid) === wanted;
+    }) ?? null
+  );
+}
+
 /** Logout clears the identity — a different number may pair next. */
 export function clearAccountIdentity(accountId: number, db: Database.Database = getDb()): void {
   db.prepare(

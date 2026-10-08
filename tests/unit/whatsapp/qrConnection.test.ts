@@ -73,6 +73,7 @@ vi.mock('../../../src/accounts/accountRepo', () => {
       const a = get(id); if (a) Object.assign(a, identity, { status: 'connected', connectedAt: 'now' });
     }),
     clearAccountIdentity: vi.fn((id: number) => { const a = get(id); if (a) Object.assign(a, { phoneNumber: null, jid: null, displayName: null, status: 'logged_out' }); }),
+    findAccountHoldingIdentity: vi.fn((id: number, identity: { phoneNumber: string | null; jid: string }) => { const user = (j: string | null) => ((j ?? '').split('@')[0] ?? '').split(':')[0]; return accounts.find((a) => a.id !== id && ((identity.phoneNumber !== null && a.phoneNumber === identity.phoneNumber) || (a.jid !== null && user(a.jid) !== '' && user(a.jid) === user(identity.jid)))) ?? null; }),
   };
 });
 vi.mock('../../../src/automation/settingsRepo', () => ({ recordReplyActivity: fixtures.activity }));
@@ -597,5 +598,95 @@ describe('Baileys QR connection lifecycle', () => {
     await expect(qr.startQrConnection()).rejects.toThrow('persistent');
     expect(fixtures.sockets).toHaveLength(0);
     delete process.env.VERCEL;
+  });
+
+  describe('binding the scanned identity to the right account', () => {
+    const open = async (qr: typeof import('../../../src/whatsapp/qrConnection'), accountId: number, user?: { id: string; name?: string }) => {
+      await qr.startQrConnection(accountId);
+      const socket = fixtures.sockets[fixtures.sockets.length - 1]!;
+      socket.user = user;
+      emit(socket, 'connection.update', { connection: 'open' });
+      await tick();
+      return socket;
+    };
+
+    it('stores the scanned number on the account whose QR was scanned and leaves the other account alone', async () => {
+      const qr = await import('../../../src/whatsapp/qrConnection');
+      await open(qr, 1, { id: '966558190545:3@s.whatsapp.net', name: 'Rowad Alfa' });
+      await open(qr, 2, { id: '966511223344:9@s.whatsapp.net', name: 'JOTUN' });
+      expect(qr.getQrStatus(2)).toMatchObject({ phase: 'connected', phoneNumber: '+966511223344', displayName: 'JOTUN' });
+      expect(fixtures.accounts[1]).toMatchObject({ jid: '966511223344:9@s.whatsapp.net' });
+      expect(qr.getQrStatus(1)).toMatchObject({ phase: 'connected', phoneNumber: '+966558190545' });
+      expect(fixtures.accounts[0]).toMatchObject({ jid: '966558190545:3@s.whatsapp.net' });
+    });
+
+    it('refuses a number that another account already holds: unlinks only the new device, archives only the new account auth folder, keeps the other account connected, and never reconnects', async () => {
+      const qr = await import('../../../src/whatsapp/qrConnection');
+      const first = await open(qr, 1, { id: '966558190545:3@s.whatsapp.net' });
+      const second = await open(qr, 2, { id: '966558190545:21@s.whatsapp.net' });
+
+      expect(second.logout).toHaveBeenCalledTimes(1);
+      expect(first.logout).not.toHaveBeenCalled();
+      expect(first.end).not.toHaveBeenCalled();
+      const status = qr.getQrStatus(2);
+      expect(status.phase).toBe('error');
+      expect(status.phoneNumber).toBeNull();
+      expect(status.detail).toContain('already connected');
+      expect(status.detail).toContain('Rowad Alfa Auto Care');
+      expect(fixtures.accounts[1]!.lastError).toBe('duplicate_number');
+      expect(fixtures.accounts[1]!.jid).toBeNull();
+      expect(fixtures.rename).toHaveBeenCalledTimes(1);
+      expect(String(fixtures.rename.mock.calls[0]?.[0])).toBe('/data/accounts/2/baileys-auth');
+      expect(fixtures.rm).not.toHaveBeenCalledWith('/data/baileys-auth', expect.anything());
+      expect(qr.getQrStatus(1)).toMatchObject({ phase: 'connected', phoneNumber: '+966558190545' });
+      expect(fixtures.accounts[0]).toMatchObject({ status: 'connected', jid: '966558190545:3@s.whatsapp.net' });
+
+      // Late events from the rejected socket are ignored: no AI, no reconnect, still an error.
+      emit(second, 'connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+      emit(second, 'messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '966500000001@s.whatsapp.net', fromMe: false, id: 'dup1' }, message: { conversation: 'hi' } }] });
+      await tick();
+      expect(fixtures.inbound).not.toHaveBeenCalled();
+      expect(qr.getQrStatus(2).phase).toBe('error');
+      expect(fixtures.sockets).toHaveLength(2);
+    });
+
+    it('does not tear down an already-bound session when it reconnects with its recorded number', async () => {
+      Object.assign(fixtures.accounts[0]!, { phoneNumber: '+966511111111', jid: '966511111111:1@s.whatsapp.net' });
+      Object.assign(fixtures.accounts[1]!, { phoneNumber: '+966511111111', jid: '966511111111:2@s.whatsapp.net' });
+      const qr = await import('../../../src/whatsapp/qrConnection');
+      const socket = await open(qr, 2, { id: '966511111111:2@s.whatsapp.net' });
+      expect(socket.logout).not.toHaveBeenCalled();
+      expect(fixtures.rename).not.toHaveBeenCalled();
+      expect(qr.getQrStatus(2).phase).toBe('connected');
+    });
+
+    it('does not report connected, and does not start the AI, when WhatsApp opens without an identity', async () => {
+      const qr = await import('../../../src/whatsapp/qrConnection');
+      const socket = await open(qr, 2, undefined);
+      const status = qr.getQrStatus(2);
+      expect(status.phase).not.toBe('connected');
+      expect(status.phoneNumber).toBeNull();
+      expect(fixtures.accounts[1]!.status).not.toBe('connected');
+      expect(fixtures.flush).not.toHaveBeenCalled();
+      emit(socket, 'messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '966500000001@s.whatsapp.net', fromMe: false, id: 'early1' }, message: { conversation: 'hi' } }] });
+      await tick();
+      expect(fixtures.inbound).not.toHaveBeenCalled();
+    });
+
+    it('resolves a LID-only identity to its phone number through the stored mapping, and never invents a number without one', async () => {
+      const qr = await import('../../../src/whatsapp/qrConnection');
+      fixtures.lidPn = '966522222222@s.whatsapp.net';
+      await open(qr, 2, { id: '123456789012345:4@lid', name: 'JOTUN' });
+      expect(qr.getQrStatus(2)).toMatchObject({ phase: 'connected', phoneNumber: '+966522222222' });
+
+      await qr.closeQrConnection();
+      vi.resetModules();
+      const fresh = await import('../../../src/whatsapp/qrConnection');
+      fixtures.lidPn = null;
+      fixtures.accounts[1]!.phoneNumber = null;
+      fixtures.accounts[1]!.jid = null;
+      await open(fresh, 2, { id: '123456789012345:4@lid' });
+      expect(fresh.getQrStatus(2)).toMatchObject({ phase: 'connected', phoneNumber: null });
+    });
   });
 });
