@@ -63,8 +63,12 @@ export function verifyAdminCredentials(username: string, password: string): numb
     .get(username) as AdminUserRow | undefined;
   if (!row) return null;
   if (!verifyPassword(password, row.password_hash)) return null;
-  getDb().prepare("UPDATE admin_users SET last_login_at = datetime('now') WHERE id = ?").run(row.id);
   return row.id;
+}
+
+/** Stamps last_login_at — called only once a session is actually established (after the email code when that step is on). */
+export function recordAdminLogin(adminUserId: number): void {
+  getDb().prepare("UPDATE admin_users SET last_login_at = datetime('now') WHERE id = ?").run(adminUserId);
 }
 
 export interface CreatedSession {

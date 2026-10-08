@@ -14,6 +14,12 @@ getDb();
   if (seeded.length) logger.info({ columns: seeded }, 'business profile defaults seeded for columns the dashboard had not set');
 }
 
+if (env.loginOtpEnabled && !(env.RESEND_API_KEY && env.RESEND_FROM_EMAIL)) {
+  logger.warn('RESEND_OTP_ENABLED is on but RESEND_API_KEY / RESEND_FROM_EMAIL are not set: dashboard sign-in will refuse to proceed until they are (fail closed)');
+} else if (env.loginOtpEnabled) {
+  logger.info('Dashboard sign-in requires an emailed one-time code after the password (Resend)');
+}
+
 if (env.shouldUseMockProviders) {
   logger.warn('Development mode: using mock WhatsApp provider — no real messages will be sent');
   logger.warn('Development mode: using mock LLM provider — no real OpenRouter calls will be made');

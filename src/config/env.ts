@@ -106,6 +106,19 @@ const envSchema = z
     // not an optional mock-in-dev feature, so this is validated below
     // unconditionally, not gated on NODE_ENV=production.
     DASHBOARD_MASTER_KEY: z.string().optional().default(''),
+
+    // Email one-time codes for dashboard sign-in (second step after the
+    // password), delivered through Resend. RESEND_OTP_ENABLED turns the step
+    // on; the key and sender are read only on the server and never reach
+    // the browser. With the step on but no key, sign-in fails CLOSED (no
+    // session is ever created without a verified code) — it never falls
+    // back to password-only.
+    RESEND_API_KEY: z.string().optional().default(''),
+    RESEND_FROM_EMAIL: z.string().optional().default(''),
+    RESEND_OTP_ENABLED: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim() !== '' ? ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase()) : undefined),
+      z.boolean().default(false),
+    ),
   })
   .superRefine((data, ctx) => {
     // The master key must always be present and decode to exactly 32
@@ -227,6 +240,8 @@ export const env = {
    */
   shouldUseMockCalendarProviders:
     raw.NODE_ENV !== 'production' || !raw.GOOGLE_CLIENT_EMAIL || !raw.GOOGLE_PRIVATE_KEY,
+  /** Dashboard sign-in requires an emailed one-time code after the password (see src/dashboard/loginOtp.ts). */
+  loginOtpEnabled: raw.RESEND_OTP_ENABLED,
 };
 
 export type Env = typeof env;

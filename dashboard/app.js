@@ -331,7 +331,7 @@ async function boot() {
 // Login / first-run admin setup
 // ---------------------------------------------------------------------
 
-route('#/login', 'Sign in', '', async (view) => {
+async function renderLogin(view) {
   const status = await fetch('/api/dashboard/auth/status', { credentials: 'include' }).then((r) => r.json());
   const isSetup = !status.hasAdmin;
 
@@ -365,6 +365,94 @@ route('#/login', 'Sign in', '', async (view) => {
     event.currentTarget.setAttribute('aria-pressed', String(reveal));
   });
 
+  // Second sign-in step: the password was accepted, the session exists only after the emailed code is verified.
+  // The challenge token stays in this closure — never in storage, never in the URL.
+  function renderOtpStep(info) {
+    const challenge = info.challenge;
+    const card = view.querySelector('.auth-card');
+    let timer = null;
+    card.innerHTML = `
+      <span class="auth-logo" aria-hidden="true">◎</span><p class="eyebrow">CHECK YOUR EMAIL</p>
+      <h3>Enter your verification code</h3>
+      <p class="muted">We sent a 6-digit code to <span class="otp-sent">${esc(info.email || 'your email address')}</span>. It expires in 10 minutes and can be used once.</p>
+      <form id="otp-form" autocomplete="off">
+        <label class="muted" for="otp-code">Verification code</label>
+        <input id="otp-code" class="otp-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" spellcheck="false" required />
+        <div id="otp-error" class="form-error" hidden></div>
+        <button type="submit" class="btn primary" style="width:100%">Verify &amp; sign in</button>
+      </form>
+      <div class="otp-actions"><button type="button" id="otp-resend" class="btn">Resend code</button><button type="button" id="otp-back" class="btn ghost">Back</button></div>
+      <p class="auth-footnote">Did not get it? Check your spam folder, or resend once the timer ends.</p>`;
+    const codeInput = card.querySelector('#otp-code');
+    const otpError = card.querySelector('#otp-error');
+    const resendBtn = card.querySelector('#otp-resend');
+    const showError = (message) => { otpError.hidden = false; otpError.textContent = message; };
+    const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const startCooldown = (seconds) => {
+      stopTimer();
+      let left = seconds;
+      const tick = () => {
+        if (left <= 0) { stopTimer(); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; return; }
+        resendBtn.disabled = true; resendBtn.textContent = `Resend code (${left}s)`; left -= 1;
+      };
+      tick();
+      timer = setInterval(tick, 1000);
+    };
+    const backToPassword = async () => {
+      stopTimer();
+      try { await fetch('/api/dashboard/auth/otp/cancel', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challenge }) }); } catch { /* best effort */ }
+      await renderLogin(view);
+    };
+    codeInput.focus();
+    startCooldown(60);
+
+    card.querySelector('#otp-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      otpError.hidden = true;
+      const submit = card.querySelector('[type=submit]');
+      submit.disabled = true;
+      try {
+        const res = await fetch('/api/dashboard/auth/otp/verify', {
+          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ challenge, code: codeInput.value.replace(/\D/g, '') }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showError(body.error || 'Verification failed.');
+          if (body.code === 'locked' || res.status === 429) { setTimeout(backToPassword, 1800); }
+          codeInput.select();
+          return;
+        }
+        stopTimer();
+        location.hash = '#/';
+        await boot();
+      } catch {
+        showError('Could not reach the server.');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    resendBtn.addEventListener('click', async () => {
+      otpError.hidden = true;
+      resendBtn.disabled = true;
+      try {
+        const res = await fetch('/api/dashboard/auth/otp/resend', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challenge }) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showError(body.error || 'Could not resend the code.');
+          if (res.status === 410) { setTimeout(backToPassword, 1800); return; }
+          startCooldown(Number(res.headers.get('Retry-After')) || 60);
+          return;
+        }
+        startCooldown(60);
+      } catch {
+        showError('Could not reach the server.');
+        resendBtn.disabled = false;
+      }
+    });
+    card.querySelector('#otp-back').addEventListener('click', backToPassword);
+  }
+
   const errorBox = view.querySelector('#auth-error');
   view.querySelector('#auth-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -386,6 +474,11 @@ route('#/login', 'Sign in', '', async (view) => {
         errorBox.textContent = body.error || 'Sign-in failed.';
         return;
       }
+      if (body.otpRequired && body.challenge) {
+        // No session yet — the server only sets the cookie after the emailed code is verified.
+        renderOtpStep(body);
+        return;
+      }
       location.hash = '#/';
       await boot();
     } catch {
@@ -395,7 +488,8 @@ route('#/login', 'Sign in', '', async (view) => {
       submit.disabled = false;
     }
   });
-});
+}
+route('#/login', 'Sign in', '', renderLogin);
 
 // ---------------------------------------------------------------------
 // Dashboard home

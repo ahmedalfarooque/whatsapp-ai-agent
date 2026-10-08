@@ -32,7 +32,9 @@ import {
   createSession,
   destroySessionByToken,
   destroyAllSessions,
+  recordAdminLogin,
 } from './auth';
+import { OtpError, beginOtpLogin, cancelOtp, loginOtpEnabled, resendOtp, verifyOtp } from './loginOtp';
 import {
   requireDashboardAuth,
   readSessionToken,
@@ -119,7 +121,7 @@ function parsePageParams(req: Request): { limit: number; offset: number } {
 
 // Relative to the '/api/dashboard' mount point (see the router.use('/api/dashboard', ...)
 // auth gate below — Express strips the mount prefix from req.path inside it).
-const UNAUTHENTICATED_AUTH_ROUTES = ['/auth/status', '/auth/setup', '/auth/login'];
+const UNAUTHENTICATED_AUTH_ROUTES = ['/auth/status', '/auth/setup', '/auth/login', '/auth/otp/verify', '/auth/otp/resend', '/auth/otp/cancel'];
 
 export function createDashboardRouter(): Router {
   const router = Router();
@@ -129,6 +131,20 @@ export function createDashboardRouter(): Router {
 
   const setupLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
   const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  // Email-code step: a code has 1,000,000 possibilities and each challenge dies after 5 wrong
+  // tries (loginOtp.ts); these per-IP caps additionally stop someone cycling many challenges.
+  const otpVerifyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
+  const otpResendLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
+
+  const sendOtpError = (res: express.Response, error: unknown): void => {
+    if (error instanceof OtpError) {
+      if (error.retryAfterSec) res.setHeader('Retry-After', String(error.retryAfterSec));
+      res.status(error.status).json({ error: error.message, code: error.code });
+      return;
+    }
+    logger.error({ error }, 'dashboard: email code step failed');
+    res.status(500).json({ error: 'internal_server_error' });
+  };
 
   // ---- Auth (reachable unauthenticated, in every environment) ----------------
   router.get('/api/dashboard/auth/status', (_req, res) => {
@@ -175,11 +191,12 @@ export function createDashboardRouter(): Router {
     }
 
     const session = createSession(adminUserId);
+    recordAdminLogin(adminUserId);
     setSessionCookie(res, session.token, session.expiresAt);
     res.status(201).json({ ok: true });
   });
 
-  router.post('/api/dashboard/auth/login', loginLimiter, (req, res) => {
+  router.post('/api/dashboard/auth/login', loginLimiter, async (req, res) => {
     const { username, password } = req.body ?? {};
     if (typeof username !== 'string' || typeof password !== 'string') {
       res.status(400).json({ error: 'username and password are required' });
@@ -190,8 +207,60 @@ export function createDashboardRouter(): Router {
       res.status(401).json({ error: 'invalid username or password' });
       return;
     }
+    if (loginOtpEnabled()) {
+      // Password accepted, but NO session yet: the browser must present the emailed code first.
+      // Any failure here (no mailer, provider down, rate limit) ends without a session — fail closed.
+      try {
+        const challenge = await beginOtpLogin(adminUserId);
+        res.json({ ok: true, otpRequired: true, challenge: challenge.challenge, expiresAt: challenge.expiresAt, email: challenge.email });
+      } catch (error) {
+        sendOtpError(res, error);
+      }
+      return;
+    }
     const session = createSession(adminUserId);
+    recordAdminLogin(adminUserId);
     setSessionCookie(res, session.token, session.expiresAt);
+    res.json({ ok: true });
+  });
+
+  // ---- Email one-time code (second sign-in step; see loginOtp.ts) --------------
+  router.post('/api/dashboard/auth/otp/verify', otpVerifyLimiter, (req, res) => {
+    const { challenge, code } = req.body ?? {};
+    if (typeof challenge !== 'string' || typeof code !== 'string') {
+      res.status(400).json({ error: 'challenge and code are required' });
+      return;
+    }
+    const result = verifyOtp(challenge, code);
+    if (!result.ok) {
+      res.status(401).json({
+        error: result.code === 'locked' ? 'Too many incorrect codes. Please sign in again.' : 'Incorrect or expired code.',
+        code: result.code,
+      });
+      return;
+    }
+    const session = createSession(result.adminUserId);
+    recordAdminLogin(result.adminUserId);
+    setSessionCookie(res, session.token, session.expiresAt);
+    res.json({ ok: true });
+  });
+
+  router.post('/api/dashboard/auth/otp/resend', otpResendLimiter, async (req, res) => {
+    const { challenge } = req.body ?? {};
+    if (typeof challenge !== 'string') {
+      res.status(400).json({ error: 'challenge is required' });
+      return;
+    }
+    try {
+      const sent = await resendOtp(challenge);
+      res.json({ ok: true, expiresAt: sent.expiresAt, email: sent.email });
+    } catch (error) {
+      sendOtpError(res, error);
+    }
+  });
+
+  router.post('/api/dashboard/auth/otp/cancel', (req, res) => {
+    cancelOtp((req.body ?? {}).challenge);
     res.json({ ok: true });
   });
 

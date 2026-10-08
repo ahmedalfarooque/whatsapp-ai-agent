@@ -38,7 +38,7 @@ describe('migration 015 — multi-account (existing production schema)', () => {
     const db = legacyDatabase();
     runMigrations(db); // applies 015 (and the additive 016 setup tables) on top
     const applied = (db.prepare('SELECT id FROM schema_migrations ORDER BY id').all() as { id: string }[]).map((r) => r.id);
-    expect(applied.slice(-2)).toEqual([expect.stringMatching(/^015_/), expect.stringMatching(/^016_/)]);
+    expect(applied.slice(-3)).toEqual([expect.stringMatching(/^015_/), expect.stringMatching(/^016_/), expect.stringMatching(/^017_/)]);
 
     const account = db.prepare('SELECT * FROM whatsapp_accounts').all() as Record<string, unknown>[];
     expect(account).toHaveLength(1);

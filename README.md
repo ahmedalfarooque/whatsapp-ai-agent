@@ -267,6 +267,31 @@ From the dashboard you can:
 - **Log out everywhere** (Settings page) revokes every active dashboard
   session at once (including your own) if you suspect a session or device
   was compromised.
+
+### Emailed one-time code at sign-in (Resend)
+
+With `RESEND_OTP_ENABLED=true`, a correct password no longer opens the
+dashboard by itself: the server emails a 6-digit code to the administrator
+(the `email` column of `admin_users`, else the username when it is an email
+address) and only creates the session once that code is entered. The code
+comes from `crypto.randomInt`, is stored only as an HMAC keyed by a random
+per-attempt challenge token the browser holds, expires after 10 minutes,
+works once, dies after 5 wrong tries, and is never logged or returned by
+any API. Resend is limited to 3 emails per attempt with a 60 s cooldown, and
+one admin can start at most 5 attempts per 15 minutes; the endpoints are
+additionally rate limited per IP. If the email cannot be sent (no key,
+provider error) sign-in fails closed — there is no password-only fallback.
+Configure on the server only:
+
+```
+RESEND_OTP_ENABLED=true
+RESEND_FROM_EMAIL=no-reply@your-verified-domain
+RESEND_API_KEY=<Resend key with "Sending access" for that domain — never commit it>
+```
+
+Local development and the test suite leave the step off (`RESEND_OTP_ENABLED`
+unset); tests exercise it with an in-memory fake mailer
+(`configureLoginOtp`), so no real email or key is ever needed.
 - View and edit the allowlisted knowledge files (with automatic timestamped
   backups before every save).
 - View and edit business-facing **Settings** (hours, timezone, restart
