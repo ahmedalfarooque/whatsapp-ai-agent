@@ -11,6 +11,7 @@
     { id: 'info', label: 'Business information' },
     { id: 'links', label: 'Business links' },
     { id: 'files', label: 'PDFs & images' },
+    { id: 'catalogues', label: 'Catalogues', feature: 'catalogues' },
     { id: 'generate', label: 'Analyze & Generate' },
     { id: 'menu', label: 'WhatsApp menu' },
     { id: 'manage', label: 'Manage account' },
@@ -23,7 +24,7 @@
   };
   const DOC_PURPOSES = ['company_profile', 'service_catalogue', 'product_catalogue', 'price_list', 'menu', 'brochure', 'terms', 'faq', 'promotion', 'other'];
   const IMAGE_PURPOSES = ['logo', 'product_image', 'service_image', 'catalogue_image', 'promo_image', 'menu_image', 'storefront', 'certificate', 'other'];
-  const MENU_KINDS = [['info', 'Information page'], ['submenu', 'Sub-menu'], ['location', 'Location & hours'], ['offers', 'Current offers'], ['appointment', 'Book an appointment'], ['quotation', 'Request a quotation'], ['handoff', 'Talk to a person']];
+  const MENU_KINDS = [['info', 'Information page'], ['submenu', 'Sub-menu'], ['location', 'Location & hours'], ['offers', 'Current offers'], ['appointment', 'Book an appointment'], ['catalogues', 'Catalogue list'], ['quotation', 'Request a quotation'], ['handoff', 'Talk to a person']];
 
   const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const val = (v) => (v === null || v === undefined ? '' : String(v));
@@ -72,6 +73,7 @@
     }
     const S = { id, tab: sessionStorage.getItem(`setup-tab-${id}`) || 'info', data: null, draft: null, report: null, busy: false };
     if (!TABS.some((t) => t.id === S.tab)) S.tab = 'info';
+    const visibleTabs = () => TABS.filter((t) => !t.feature || (S.data && S.data.account.features && S.data.account.features[t.feature]));
     const base = `/api/dashboard/accounts/${id}/setup`;
     let disposed = false;
     disposeView = () => { disposed = true; };
@@ -100,7 +102,7 @@
         </div>
         <div class="actions"><a class="btn" href="#/whatsapp">WhatsApp connection</a><a class="btn ghost" href="#/accounts">All accounts</a></div>
       </section>
-      <div class="tabs" role="tablist" aria-label="Business setup sections">${TABS.map((t) => {
+      <div class="tabs" role="tablist" aria-label="Business setup sections">${visibleTabs().map((t) => {
         const count = t.id === 'links' ? d.links.length : t.id === 'files' ? d.documents.length + d.images.length : '';
         return `<button role="tab" id="tab-${t.id}" aria-selected="${S.tab === t.id}" aria-controls="tabpanel" tabindex="${S.tab === t.id ? 0 : -1}" class="tab ${S.tab === t.id ? 'active' : ''}" data-tab="${t.id}">${esc(t.label)}${count !== '' ? ` <span class="tab-count">${count}</span>` : ''}</button>`;
       }).join('')}</div>`;
@@ -108,23 +110,26 @@
 
     async function draw() {
       if (disposed) return;
+      if (!visibleTabs().some((t) => t.id === S.tab)) S.tab = 'info';
+      if (S.tab === 'catalogues' && !S.cat) { try { await loadCatalogues(); } catch (error) { toast(errText(error), 'error'); S.tab = 'info'; } }
       const keepScroll = window.scrollY;
       view.innerHTML = `${header()}<div id="tabpanel" role="tabpanel" aria-labelledby="tab-${S.tab}" tabindex="0">${panel()}</div>`;
       view.querySelectorAll('[data-tab]').forEach((btn) => {
         btn.addEventListener('click', () => { S.tab = btn.dataset.tab; sessionStorage.setItem(`setup-tab-${id}`, S.tab); draw(); });
         btn.addEventListener('keydown', (e) => {
           if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-          const i = TABS.findIndex((t) => t.id === S.tab);
-          const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length];
+          const tabs = visibleTabs();
+          const i = tabs.findIndex((t) => t.id === S.tab);
+          const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
           S.tab = next.id; sessionStorage.setItem(`setup-tab-${id}`, S.tab); draw().then(() => view.querySelector(`#tab-${next.id}`).focus());
         });
       });
-      ({ info: bindInfo, links: bindLinks, files: bindFiles, generate: bindGenerate, menu: bindMenu, manage: bindManage })[S.tab]();
+      ({ info: bindInfo, links: bindLinks, files: bindFiles, catalogues: bindCatalogues, generate: bindGenerate, menu: bindMenu, manage: bindManage })[S.tab]();
       window.scrollTo(0, keepScroll);
     }
 
     function panel() {
-      return ({ info: infoPanel, links: linksPanel, files: filesPanel, generate: generatePanel, menu: menuPanel, manage: managePanel })[S.tab]();
+      return ({ info: infoPanel, links: linksPanel, files: filesPanel, catalogues: cataloguesPanel, generate: generatePanel, menu: menuPanel, manage: managePanel })[S.tab]();
     }
 
     // ============================================================== Business information
@@ -393,6 +398,99 @@
       }));
     }
 
+    // ============================================================== Catalogues (a business with the catalogue library)
+    const catBase = `/api/dashboard/accounts/${id}/catalogues`;
+    async function loadCatalogues() { S.cat = await api(catBase); }
+
+    function cataloguesPanel() {
+      const c = S.cat;
+      const q = (S.catFilter || '').trim().toLowerCase();
+      const rows = c.catalogues.filter((x) => !q || `${x.title} ${x.originalName}`.toLowerCase().includes(q));
+      const maxMb = Math.round(c.limits.maxBytes / 1048576);
+      return `<section class="panel">
+        <div class="panel-head"><div><p class="eyebrow">${c.catalogues.length} catalogue(s) · ${c.enabledCount} offered to customers</p><h3>Upload catalogue PDFs</h3></div></div>
+        <p class="muted">Customers who ask for a catalogue (or choose it in the WhatsApp menu) are shown the list below and receive the PDF they pick. PDF only, up to ${maxMb} MB each. A disabled catalogue is hidden from customers and from the assistant; deleting one removes the file for good.</p>
+        <form id="cat-upload" class="upload-form">
+          <div class="field grow"><label for="cat-file">PDF files (you can choose several)</label><input id="cat-file" type="file" name="file" accept="application/pdf,.pdf" multiple required></div>
+          <div class="field grow"><label for="cat-title">Title (optional — one file only)</label><input id="cat-title" name="title" type="text" maxlength="${c.limits.maxTitle}" placeholder="Shown to customers"></div>
+          <div class="field end"><button class="btn primary" type="submit">Upload</button></div>
+        </form>
+        <p id="cat-status" class="muted" role="status" aria-live="polite"></p>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div><p class="eyebrow">Library</p><h3>Uploaded catalogues</h3></div>
+          <div class="field"><label class="sr-only" for="cat-filter">Search catalogues</label><input id="cat-filter" type="search" placeholder="Search catalogues…" value="${esc(S.catFilter || '')}"></div></div>
+        ${rows.length ? `<div class="table-scroll"><table class="data-table"><thead><tr><th>Order</th><th>Catalogue</th><th>Pages</th><th>Size</th><th>Status</th><th>Uploaded</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>
+          ${rows.map((x, i) => `<tr data-cat="${x.id}">
+            <td class="row-actions"><button class="btn small ghost" data-act="up" data-id="${x.id}" aria-label="Move up" ${q || i === 0 ? 'disabled' : ''}>↑</button><button class="btn small ghost" data-act="down" data-id="${x.id}" aria-label="Move down" ${q || i === rows.length - 1 ? 'disabled' : ''}>↓</button></td>
+            <td><label class="sr-only" for="cat-title-${x.id}">Title</label><input id="cat-title-${x.id}" name="title" type="text" dir="auto" maxlength="${c.limits.maxTitle}" value="${esc(x.title)}"><br><span class="muted small" dir="auto">${esc(x.originalName)}</span></td>
+            <td>${x.pageCount === null ? '—' : x.pageCount}</td>
+            <td>${bytes(x.sizeBytes)}</td>
+            <td>${x.enabled ? badge('Offered to customers', 'green') : badge('Disabled', 'amber')}${x.hasText ? '' : '<br>' + badge('No readable text', '')}</td>
+            <td class="muted small">${esc(formatDate(x.uploadedAt))}</td>
+            <td class="row-actions"><button class="btn small" data-act="save-title" data-id="${x.id}">Save title</button><a class="btn small ghost" href="${esc(x.fileUrl)}" target="_blank" rel="noopener noreferrer">Preview</a><a class="btn small ghost" href="${esc(x.fileUrl)}?download=1">Download</a><button class="btn small ghost" data-act="toggle" data-id="${x.id}" data-enabled="${x.enabled ? 1 : 0}">${x.enabled ? 'Disable' : 'Enable'}</button><label class="btn small ghost">Replace<input type="file" accept="application/pdf,.pdf" data-act="replace" data-id="${x.id}" hidden></label><button class="btn small danger" data-act="delete" data-id="${x.id}">Delete</button></td>
+          </tr>`).join('')}
+        </tbody></table></div>` : emptyView(c.catalogues.length ? 'No catalogue matches your search.' : 'No catalogues yet — upload a PDF above.')}
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div><p class="eyebrow">Preview</p><h3>What customers see</h3></div></div>
+        <p class="muted">Generated from the enabled catalogues above; it updates the moment you enable, disable, reorder, add or delete one.</p>
+        <div class="reply-compare"><div><p class="eyebrow">English</p><pre class="reply-preview" dir="auto">${esc(c.customerPreview.en)}</pre></div><div><p class="eyebrow">العربية</p><pre class="reply-preview" dir="rtl">${esc(c.customerPreview.ar)}</pre></div></div>
+      </section>`;
+    }
+
+    function bindCatalogues() {
+      const form = view.querySelector('#cat-upload');
+      const status = view.querySelector('#cat-status');
+      const refresh = async () => { await loadCatalogues(); await draw(); };
+      const isPdf = (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+      const send = (path, method, file, title) => api(path, { method, headers: { 'Content-Type': 'application/pdf', 'X-File-Name': encodeURIComponent(file.name), ...(title ? { 'X-Title': encodeURIComponent(title) } : {}) }, body: file });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const files = [...form.elements.file.files];
+        const title = form.elements.title.value.trim();
+        const submit = form.querySelector('[type=submit]');
+        submit.disabled = true;
+        let done = 0;
+        for (const [i, file] of files.entries()) {
+          status.textContent = `Uploading ${file.name} (${i + 1} of ${files.length})…`;
+          if (!isPdf(file)) { toast(`${file.name}: only PDF files can be added.`, 'error'); continue; }
+          try { await send(catBase, 'POST', file, files.length === 1 ? title : ''); done += 1; } catch (error) { toast(`${file.name}: ${errText(error)}`, 'error'); }
+        }
+        if (done) toast(`${done} catalogue(s) added.`, 'success');
+        await refresh();
+      });
+
+      const filter = view.querySelector('#cat-filter');
+      filter.addEventListener('input', async () => { S.catFilter = filter.value; await draw(); const f = view.querySelector('#cat-filter'); f.focus(); f.setSelectionRange(f.value.length, f.value.length); });
+
+      view.querySelectorAll('[data-act]').forEach((el) => {
+        const cid = Number(el.dataset.id);
+        if (el.dataset.act === 'replace') {
+          el.addEventListener('change', async () => {
+            const file = el.files[0];
+            if (!file) return;
+            if (!isPdf(file)) { toast('Only PDF files can be used.', 'error'); return; }
+            if (!window.confirm('Replace this catalogue file? Customers will receive the new file from now on.')) return;
+            try { await send(`${catBase}/${cid}/file`, 'PUT', file); toast('Catalogue file replaced.', 'success'); await refresh(); } catch (error) { toast(errText(error), 'error'); }
+          });
+          return;
+        }
+        el.addEventListener('click', async () => {
+          try {
+            if (el.dataset.act === 'save-title') { await api(`${catBase}/${cid}`, json('PATCH', { title: view.querySelector(`#cat-title-${cid}`).value })); toast('Title saved.', 'success'); await refresh(); return; }
+            if (el.dataset.act === 'toggle') { const enable = el.dataset.enabled !== '1'; await api(`${catBase}/${cid}`, json('PATCH', { enabled: enable })); toast(enable ? 'Catalogue is now offered to customers.' : 'Catalogue hidden from customers.', 'success'); await refresh(); return; }
+            if (el.dataset.act === 'up' || el.dataset.act === 'down') { await api(`${catBase}/${cid}/move`, json('POST', { direction: el.dataset.act })); await refresh(); return; }
+            if (el.dataset.act === 'delete') {
+              if (!window.confirm('Delete this catalogue and its file permanently? Customers will no longer see it.')) return;
+              await api(`${catBase}/${cid}`, { method: 'DELETE' }); toast('Catalogue deleted.', 'success'); await refresh();
+            }
+          } catch (error) { toast(errText(error), 'error'); }
+        });
+      });
+    }
+
     // ============================================================== Analyze & Generate
     function sourcesSummary() {
       const d = S.data;
@@ -622,7 +720,7 @@
     function menuEditorHtml(config, scope) {
       const rows = (items, prefix, depth) => items.map((it, i) => {
         const p = `${prefix}${i}`;
-        const kindOptions = MENU_KINDS.filter(([k]) => !(depth > 0 && k === 'submenu')).map(([k, label]) => `<option value="${k}" ${k === it.kind ? 'selected' : ''}>${esc(label)}</option>`).join('');
+        const kindOptions = MENU_KINDS.filter(([k]) => !(depth > 0 && k === 'submenu') && !(k === 'catalogues' && (depth > 0 || !(S.data.account.features && S.data.account.features.catalogues)))).map(([k, label]) => `<option value="${k}" ${k === it.kind ? 'selected' : ''}>${esc(label)}</option>`).join('');
         return `<li class="menu-item depth-${depth}" data-mpath="${p}">
           <span class="menu-no" aria-hidden="true">${i + 1}</span>
           <div class="menu-fields">

@@ -89,8 +89,11 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
       const args = safeParseArgs(toolCall.function.arguments ?? '{}');
 
       let resultContent: string;
-      if (!toolDef || !toolSchemasForAccount(currentAccountId()).length) {
-        // Unknown, or a tool this business is not offered (only the original business has a calendar).
+      // A tool runs only if THIS business is offered THAT tool (the original business: the calendar tools; a business with a
+      // catalogue library: the catalogue search) — being offered one tool never unlocks another.
+      const offered = toolSchemasForAccount(currentAccountId()).some((schema) => (schema.function as { name?: string }).name === toolName);
+      if (!toolDef || !offered) {
+        // Unknown, or a tool this business is not offered.
         logger.error({ toolName, account: currentAccountId() }, 'model requested an unknown or unavailable tool');
         resultContent = JSON.stringify({ error: `unknown tool: ${toolName}` });
       } else {

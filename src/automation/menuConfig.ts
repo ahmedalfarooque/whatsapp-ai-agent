@@ -1,7 +1,8 @@
 import type Database from 'better-sqlite3';
 import { getDb } from '../memory/db';
 import { currentAccountId, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
-import { FLOWS, MAIN_MENU_OPTIONS, SUBMENUS, type FlowSet, type MenuOption, type SubmenuDef } from './menuStatic';
+import { FLOWS, MAIN_MENU_OPTIONS, MENU_STATES, SUBMENUS, type FlowSet, type MenuOption, type SubmenuDef } from './menuStatic';
+import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 
 /**
  * The guided WhatsApp menu of one business.
@@ -15,8 +16,8 @@ import { FLOWS, MAIN_MENU_OPTIONS, SUBMENUS, type FlowSet, type MenuOption, type
  * reply templates (Manual Reply Editor) — this module only knows structure.
  */
 
-export type MenuItemKind = 'info' | 'submenu' | 'location' | 'offers' | 'appointment' | 'quotation' | 'handoff';
-export const MENU_ITEM_KINDS: readonly MenuItemKind[] = ['info', 'submenu', 'location', 'offers', 'appointment', 'quotation', 'handoff'];
+export type MenuItemKind = 'info' | 'submenu' | 'location' | 'offers' | 'appointment' | 'quotation' | 'handoff' | 'catalogues';
+export const MENU_ITEM_KINDS: readonly MenuItemKind[] = ['info', 'submenu', 'location', 'offers', 'appointment', 'quotation', 'handoff', 'catalogues'];
 
 export interface MenuItem {
   /** Letters + digits only, e.g. "services", "brands". Becomes part of the template key. */
@@ -52,6 +53,7 @@ export function templateKeyFor(item: MenuItem, parentId?: string): string | null
   if (item.kind === 'info' || item.kind === 'submenu') return parentId ? `menu_${parentId}_${item.id}` : `menu_${item.id}`;
   if (item.kind === 'location') return 'location_hours';
   if (item.kind === 'offers') return 'prices_offers_list';
+  if (item.kind === 'catalogues') return 'catalogues_list';
   return null;
 }
 
@@ -111,7 +113,7 @@ export function validateMenuConfig(raw: unknown): MenuConfig {
   const singletons = new Set<string>();
   for (const item of cleaned) {
     // location/offers/appointment/quotation/handoff may appear once at the top level (they are the platform's own flows).
-    if (['location', 'offers', 'appointment', 'quotation', 'handoff'].includes(item.kind)) {
+    if (['location', 'offers', 'appointment', 'quotation', 'handoff', 'catalogues'].includes(item.kind)) {
       if (singletons.has(item.kind)) throw new MenuValidationError(`The menu can only have one "${item.kind}" item`);
       singletons.add(item.kind);
     }
@@ -171,6 +173,10 @@ export function getMenuConfig(accountId: number = currentAccountId(), db: Databa
 export function saveMenuConfig(accountId: number, raw: unknown, source: 'generated' | 'manual', db: Database.Database = getDb()): StoredMenu {
   if (accountId === LEGACY_ACCOUNT_ID) throw new MenuValidationError('The original business keeps its built-in menu structure');
   const config = validateMenuConfig(raw);
+  // The catalogue entry exists only for a business that has the catalogue library switched on.
+  if (config.items.some((i) => i.kind === 'catalogues') && !accountHasFeature(accountId, FEATURES.CATALOGUES, db)) {
+    throw new MenuValidationError('The catalogue list is not available for this business');
+  }
   db.prepare(
     `INSERT INTO account_menus (whatsapp_account_id, config_json, source, updated_at) VALUES (?, ?, ?, datetime('now'))
      ON CONFLICT(whatsapp_account_id) DO UPDATE SET config_json = excluded.config_json, source = excluded.source, updated_at = excluded.updated_at`,
@@ -233,6 +239,8 @@ function optionFor(item: MenuItem, parentId?: string): MenuOption {
       return { flow: 'quotation' };
     case 'handoff':
       return { handoff: true };
+    case 'catalogues':
+      return { template: 'catalogues_list', state: MENU_STATES.CATALOGUE_SELECT, catalogues: true };
   }
 }
 

@@ -32,6 +32,7 @@ import {
 import { LEGACY_ACCOUNT_ID, runWithAccount } from '../accounts/accountContext';
 import { recordReplyActivity } from '../automation/settingsRepo';
 import { replyTransport, type ReplyTransport } from './replyTransport';
+import type { OutboundDocument } from './types';
 import { isDirectChatJid, isLidJid, jidToPhoneNumber } from './jid';
 import { registerOutboxSender, flushOutbox, NotConnectedError } from '../notifications/outbox';
 import { parseOperatorCommand, handleOperatorCommand } from '../requests/requestService';
@@ -465,12 +466,35 @@ class QrConnection {
         throw error;
       }
     };
+    // Catalogue PDFs: the same socket and the same connected-session guard as text, as a separate method so the
+    // text path above is unchanged.
+    const sendFile = async (file: OutboundDocument) => {
+      logger.info({ account: this.accountId, target, jidServer: replyJid.split('@')[1], bytes: file.bytes.length }, '[WA-OUTBOUND] sendDocument started');
+      if (run !== this.generation || this.phase !== 'connected') {
+        logger.error({ account: this.accountId, target, phase: this.phase }, '[WA-OUTBOUND] sendDocument aborted: session not connected');
+        throw new Error(`WhatsApp account ${this.accountId} is not connected`);
+      }
+      try {
+        const sent = await instance.sendMessage(replyJid, { document: file.bytes, mimetype: file.mimeType, fileName: file.fileName, caption: file.caption });
+        this.rememberSent(sent?.key?.id);
+        logger.info({ account: this.accountId, target, sentId: sent?.key?.id ?? null }, '[WA-OUTBOUND] sendDocument success');
+        return {
+          messaging_product: 'whatsapp' as const,
+          contacts: [{ input: replyJid, wa_id: replyJid }],
+          messages: [{ id: sent?.key?.id ?? `qr-${Date.now()}` }],
+        };
+      } catch (error) {
+        logger.error({ account: this.accountId, target, error }, '[WA-OUTBOUND] sendDocument failure');
+        throw error;
+      }
+    };
     return {
       text: (_to, body) => send(body),
       interactive: async (_to, menu) => {
         const { text } = renderInteractiveAsText(menu);
         return send(text);
       },
+      document: (_to, file) => sendFile(file),
     };
   }
 

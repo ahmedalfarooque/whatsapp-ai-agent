@@ -1,6 +1,7 @@
 import type { TemplateDefault } from './defaults';
 import { TEMPLATE_DEFAULTS } from './defaults';
 import { getMenuConfig, menuTemplateKeys, renderMainMenuText, renderSubmenuText, keycap, type MenuItem } from '../automation/menuConfig';
+import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 
 /**
  * Reply templates for every business EXCEPT the original one.
@@ -150,5 +151,39 @@ export function genericTemplateDefaults(accountId: number): TemplateDefault[] {
     reuse('fallback_error'),
     reuse('ai_disabled'),
   );
+
+  // The catalogue library (only for a business that has it): the list is generated from the database at send time.
+  if (accountHasFeature(accountId, FEATURES.CATALOGUES)) {
+    const entry = config.items.find((i) => i.kind === 'catalogues');
+    const headerEn = entry?.labelEn ?? '📚 Catalogues';
+    const headerAr = entry?.labelAr ?? '📚 الكتالوجات';
+    out.push(
+      {
+        key: 'catalogues_list', category: 'Catalogues', titleAr: 'قائمة الكتالوجات', titleEn: 'Catalogue List',
+        ar: `${headerAr}\nيرجى اختيار الكتالوج الذي تريد تحميله:\n\n{catalogues}${MAIN_FOOTER_AR}`,
+        en: `${headerEn}\nPlease choose the catalogue you would like to download:\n\n{catalogues}${MAIN_FOOTER_EN}`,
+      },
+      {
+        key: 'catalogues_none', category: 'Catalogues', titleAr: 'لا توجد كتالوجات', titleEn: 'No Catalogues Available',
+        ar: `لا توجد كتالوجات متاحة حالياً. يسعد فريقنا مساعدتك، اكتب "موظف" للتحدث مع أحد أعضاء الفريق.${MAIN_FOOTER_AR}`,
+        en: `There are no catalogues available right now. Our team will gladly help — reply "human" to talk to someone.${MAIN_FOOTER_EN}`,
+      },
+      {
+        key: 'catalogue_delivery', category: 'Catalogues', titleAr: 'رسالة إرسال الكتالوج', titleEn: 'Catalogue Delivery Caption',
+        ar: '📚 {catalogue}\nتفضل، هذا هو الكتالوج الذي طلبته.',
+        en: '📚 {catalogue}\nHere is the catalogue you requested.',
+      },
+      {
+        key: 'catalogue_after', category: 'Catalogues', titleAr: 'بعد إرسال الكتالوج', titleEn: 'After Catalogue Sent',
+        ar: `هل تريد كتالوجاً آخر؟ أرسل رقمه، أو اكتب 0 للقائمة الرئيسية.`,
+        en: `Would you like another catalogue? Reply with its number, or 0 for the main menu.`,
+      },
+      {
+        key: 'catalogue_unavailable', category: 'Catalogues', titleAr: 'تعذر إرسال الكتالوج', titleEn: 'Catalogue Could Not Be Sent',
+        ar: `عذراً، تعذر إرسال هذا الكتالوج الآن. يرجى المحاولة لاحقاً أو اكتب "موظف" للتحدث مع فريقنا.${MAIN_FOOTER_AR}`,
+        en: `Sorry, we could not send that catalogue right now. Please try again later or reply "human" to talk to our team.${MAIN_FOOTER_EN}`,
+      },
+    );
+  }
   return out;
 }

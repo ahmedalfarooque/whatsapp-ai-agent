@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { getDb } from '../memory/db';
 import { getBusinessSettings, formatBusinessHours, formatAddress } from '../config/businessSettings';
 import { renderCustomerOffers } from '../offers/offerRepo';
+import { renderCustomerCatalogues } from '../catalogues/catalogueRepo';
 import type { CustomerLanguage } from '../memory/customerRepo';
 import { currentAccountId, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 import { TEMPLATE_DEFAULTS, RETIRED_TEMPLATE_KEYS } from './defaults';
@@ -199,6 +200,10 @@ export interface TemplateVars {
   address?: string;
   /** Currently customer-visible offers ({offers}); defaults to the live offers resolver. */
   offers?: string;
+  /** The numbered catalogue list ({catalogues}); defaults to the live list of the current business. */
+  catalogues?: string;
+  /** The title of the catalogue being sent ({catalogue}). */
+  catalogue?: string;
   /** Location notes ({notes}) in the message language. */
   notes?: string;
   /** Request fields ({service} {date} {time} {vehicle} {details} {customer} {status} {kind} {actor}). */
@@ -223,10 +228,10 @@ export const PREVIEW_VARS: TemplateVars = {
 };
 
 /** Placeholders whose value comes from live data rather than the template text. */
-export const DATA_PLACEHOLDERS = ['business', 'business_en', 'business_ar', 'maps', 'hours', 'address', 'notes', 'offers', 'description', 'phone', 'email', 'website'] as const;
+export const DATA_PLACEHOLDERS = ['business', 'business_en', 'business_ar', 'maps', 'hours', 'address', 'notes', 'offers', 'description', 'phone', 'email', 'website', 'catalogues'] as const;
 
 export function templateSourceType(text: string): 'static' | 'data-driven' {
-  return /\{(maps|hours|address|notes|offers|business|business_en|business_ar|description|phone|email|website)\}/.test(text) ? 'data-driven' : 'static';
+  return /\{(maps|hours|address|notes|offers|catalogues|business|business_en|business_ar|description|phone|email|website)\}/.test(text) ? 'data-driven' : 'static';
 }
 
 /** The first website link of the account (a business's own page), for the {website} placeholder. */
@@ -277,11 +282,13 @@ export function renderTemplateText(text: string, vars: TemplateVars = {}): strin
     reference: vars.reference ?? '',
     notes: vars.notes ?? ((language === 'ar' ? settings.locationNotesAr ?? settings.locationNotesEn : settings.locationNotesEn ?? settings.locationNotesAr) ?? ''),
     offers: vars.offers ?? (/\{offers\}/.test(text) ? renderCustomerOffers(language) : ''),
+    catalogues: vars.catalogues ?? (/\{catalogues\}/.test(text) ? renderCustomerCatalogues(language) : ''),
+    catalogue: vars.catalogue ?? '',
     service: vars.service ?? '', date: vars.date ?? '', time: vars.time ?? '', vehicle: vars.vehicle ?? '', details: vars.details ?? '',
     customer: vars.customer ?? '', status: vars.status ?? '', kind: vars.kind ?? '', actor: vars.actor ?? '',
   };
   return text
-    .replace(/\{(name|business|business_en|business_ar|maps|hours|address|notes|reference|offers|service|date|time|vehicle|details|customer|status|kind|actor|description|phone|email|website)\}/g, (_, k: string) => values[k] || EMPTY_MARK)
+    .replace(/\{(name|business|business_en|business_ar|maps|hours|address|notes|reference|offers|catalogues|catalogue|service|date|time|vehicle|details|customer|status|kind|actor|description|phone|email|website)\}/g, (_, k: string) => values[k] || EMPTY_MARK)
     // A line whose only content was an empty placeholder ("Location: ", "🅿️ ") is dropped so
     // customers never see dangling labels. Lines with real text keep their text.
     .split('\n')

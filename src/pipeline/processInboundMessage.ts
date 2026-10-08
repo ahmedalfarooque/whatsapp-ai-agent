@@ -24,7 +24,9 @@ import { notifyBusinessNewRequest } from '../requests/requestService';
 import { isRestartCommand } from '../restart/isRestartCommand';
 import { buildSystemPrompt } from '../llm/buildSystemPrompt';
 import { runAgentLoop } from '../llm/agentLoop';
-import { sendTextMessage } from '../whatsapp/client';
+import fs from 'node:fs';
+import { sendTextMessage, sendDocumentMessage } from '../whatsapp/client';
+import { getDeliverableCatalogue } from '../catalogues/catalogueRepo';
 import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
 import { MENU_IDS, isHardRestart, isHumanSupportRequest, isMenuKeyword } from '../automation/menu';
@@ -235,7 +237,40 @@ async function applyRoute(ctx: ReplyContext, route: RouteResult): Promise<void> 
   for (const key of route.send) {
     await replyTemplate(nextCtx, resolveDataDrivenKey(key, language, vars), route.kind, vars);
   }
+  if (route.catalogueId !== undefined) await deliverCatalogue(nextCtx, route.catalogueId);
   if (route.kind === 'human_handoff') await replyOutOfHours(nextCtx);
+}
+
+/**
+ * Sends the catalogue PDF the customer picked, through the same WhatsApp connection the message arrived on, with a short
+ * caption from the (editable) reply templates. Only an enabled catalogue of THIS business can be sent; if the file is gone or
+ * cannot be delivered the customer gets a plain apology instead — never a fake link, a path or an internal id.
+ */
+async function deliverCatalogue(ctx: ReplyContext, catalogueId: number): Promise<void> {
+  const maskedId = maskWaId(ctx.msg.waId);
+  const file = getDeliverableCatalogue(catalogueId);
+  if (!file) {
+    await replyTemplate(ctx, 'catalogue_unavailable', 'rule', {}, 'Catalogue no longer available');
+    return;
+  }
+  const caption = resolveTemplate('catalogue_delivery', ctx.language, { name: ctx.customer.display_name ?? ctx.msg.contactName ?? '', catalogue: file.title });
+  try {
+    await sendDocumentMessage(ctx.msg.waId, { fileName: file.fileName, mimeType: file.mimeType, bytes: fs.readFileSync(file.path), caption });
+  } catch (error) {
+    logger.error({ waId: maskedId, error }, 'catalogue could not be sent');
+    recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'error', detail: 'Catalogue could not be sent' });
+    await replyTemplate(ctx, 'catalogue_unavailable', 'rule', {}, 'Catalogue could not be sent');
+    return;
+  }
+  appendMessage(ctx.conversationId, {
+    role: 'assistant',
+    content: `[document] ${file.title}\n${caption}`,
+    direction: MESSAGE_DIRECTION.OUTBOUND,
+    messageType: 'document',
+    metadata: { templateKey: 'catalogue_delivery' },
+  });
+  recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'rule', templateKey: 'catalogue_delivery', detail: `Catalogue sent: ${file.title}` });
+  await replyTemplate(ctx, 'catalogue_after');
 }
 
 /**

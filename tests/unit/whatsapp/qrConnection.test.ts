@@ -214,6 +214,41 @@ describe('Baileys QR connection lifecycle', () => {
     expect(fixtures.replyJids).toContainEqual([7, '966500000002@s.whatsapp.net']);
   });
 
+  it('sends a catalogue PDF as a real WhatsApp document through the same socket, to the address the customer wrote from', async () => {
+    const qr = await import('../../../src/whatsapp/qrConnection');
+    const { replyTransport } = await import('../../../src/whatsapp/replyTransport');
+    const bytes = Buffer.from('%PDF-1.4 catalogue bytes');
+    fixtures.inbound.mockImplementationOnce(async () => {
+      await replyTransport.getStore()!.document!('ignored', { fileName: 'Jotun Soulful Spaces.pdf', mimeType: 'application/pdf', bytes, caption: '📚 Jotun Soulful Spaces' });
+    });
+    await qr.startQrConnection();
+    const socket = fixtures.sockets[0]!;
+    socket.user = { id: '966558190545@s.whatsapp.net' };
+    emit(socket, 'connection.update', { connection: 'open' });
+    emit(socket, 'messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '966500000002@s.whatsapp.net', fromMe: false, id: 'doc1' }, message: { conversation: 'catalogue' } }] });
+    await tick(); await tick();
+    expect(socket.sendMessage).toHaveBeenCalledTimes(1);
+    expect(socket.sendMessage.mock.calls[0]?.[0]).toBe('966500000002@s.whatsapp.net');
+    expect(socket.sendMessage.mock.calls[0]?.[1]).toEqual({ document: bytes, mimetype: 'application/pdf', fileName: 'Jotun Soulful Spaces.pdf', caption: '📚 Jotun Soulful Spaces' });
+  });
+
+  it('a failed document send is reported to the caller (the pipeline then apologises) and is not swallowed', async () => {
+    const qr = await import('../../../src/whatsapp/qrConnection');
+    const { replyTransport } = await import('../../../src/whatsapp/replyTransport');
+    let outcome: unknown = 'not run';
+    fixtures.inbound.mockImplementationOnce(async () => {
+      outcome = await replyTransport.getStore()!.document!('ignored', { fileName: 'x.pdf', mimeType: 'application/pdf', bytes: Buffer.from('%PDF-') }).catch((e: Error) => e.message);
+    });
+    await qr.startQrConnection();
+    const socket = fixtures.sockets[0]!;
+    socket.user = { id: '966558190545@s.whatsapp.net' };
+    emit(socket, 'connection.update', { connection: 'open' });
+    socket.sendMessage.mockRejectedValueOnce(new Error('upload failed'));
+    emit(socket, 'messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '966500000002@s.whatsapp.net', fromMe: false, id: 'doc2' }, message: { conversation: 'catalogue' } }] });
+    await tick(); await tick();
+    expect(outcome).toBe('upload failed');
+  });
+
   it('LID chat with senderPn: identifies the customer by phone, replies to the LID address it arrived on, stores the pairing', async () => {
     const qr = await import('../../../src/whatsapp/qrConnection');
     const { replyTransport } = await import('../../../src/whatsapp/replyTransport');

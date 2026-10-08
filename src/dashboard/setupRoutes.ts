@@ -30,6 +30,7 @@ import {
 } from '../automation/menuConfig';
 import { ensureTemplateDefaults, getTemplate, publishTemplate } from '../templates/templateRepo';
 import { getDb } from '../memory/db';
+import { cataloguesEnabledFor } from '../catalogues/catalogueRepo';
 import { invalidateAccountKnowledge, discardConnection } from '../whatsapp/qrConnection';
 
 /**
@@ -93,7 +94,8 @@ export function registerSetupRoutes(router: Router, actor: (req: Request) => str
       source: stored.source,
       updatedAt: stored.updatedAt,
       config: accountId === LEGACY_ACCOUNT_ID ? null : stored.config,
-      limits: { maxItems: MAX_MENU_ITEMS, kinds: MENU_ITEM_KINDS },
+      // "catalogues" is offered in the menu editor only to a business that has the catalogue library.
+      limits: { maxItems: MAX_MENU_ITEMS, kinds: MENU_ITEM_KINDS.filter((k) => k !== 'catalogues' || cataloguesEnabledFor(accountId)) },
       mainMenuText: accountId === LEGACY_ACCOUNT_ID ? null : { en: renderMainMenuText(stored.config, 'en'), ar: renderMainMenuText(stored.config, 'ar') },
     };
   }
@@ -122,7 +124,7 @@ export function registerSetupRoutes(router: Router, actor: (req: Request) => str
         const account = getAccount(id)!;
         const files = listDocuments({ accountId: id }).map((d) => fileView(d, id));
         res.json({
-          account: { id, name: account.name, nameAr: account.nameAr, businessCategory: account.businessCategory, isLegacy: id === LEGACY_ACCOUNT_ID },
+          account: { id, name: account.name, nameAr: account.nameAr, businessCategory: account.businessCategory, isLegacy: id === LEGACY_ACCOUNT_ID, features: { catalogues: cataloguesEnabledFor(id) } },
           profile: profileView(id),
           links: listLinks(id),
           linkKinds: LINK_KINDS,

@@ -95,6 +95,7 @@ import {
 import { FOLLOW_UP_TEMPLATES, DATA_DRIVEN_FALLBACKS } from '../automation/menuRouter';
 import { getMenuTables } from '../automation/menuConfig';
 import { registerSetupRoutes } from './setupRoutes';
+import { registerCatalogueRoutes } from './catalogueRoutes';
 import {
   listCustomerRequests,
   countCustomerRequests,
@@ -391,6 +392,8 @@ export function createDashboardRouter(): Router {
 
   // ---- Business setup: information, links, PDFs/images, Analyze & Generate, menu, delete ----
   registerSetupRoutes(router, actor);
+  // ---- Catalogue library: only a business that has it (every route answers 404 for any other) ----
+  registerCatalogueRoutes(router, actor);
 
   // ---- WhatsApp linked-device (QR) connection — one per account ---------------
   async function qrAction(accountId: number, action: string): Promise<{ notice: string | null } | null> {

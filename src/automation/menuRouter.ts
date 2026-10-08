@@ -4,6 +4,10 @@ import type { TemplateVars } from '../templates/templateRepo';
 import { normalizeNumerals } from '../whatsapp/jid';
 import { MENU_STATES, type FlowSet, type MenuOption } from './menuStatic';
 import { getMenuTables } from './menuConfig';
+import { currentAccountId } from '../accounts/accountContext';
+import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
+import { isCatalogueRequest } from '../catalogues/catalogueIntent';
+import { customerCatalogues } from '../catalogues/catalogueRepo';
 import {
   MENU_IDS,
   detectLanguageFromText,
@@ -76,6 +80,8 @@ export interface RouteResult {
   flowData?: Record<string, string> | null;
   /** A completed multi-step flow to persist; the pipeline fills vars.reference from it. */
   request?: { kind: 'appointment' | 'quotation'; payload: Record<string, string> };
+  /** A catalogue the customer picked: the pipeline sends its PDF after the template bubbles. */
+  catalogueId?: number;
 }
 
 const DIGITS = /^\d{1,2}$/;
@@ -96,7 +102,14 @@ function chooseLanguage(normalized: string, lower: string): CustomerLanguage | u
   return detectLanguageFromText(lower);
 }
 
+/** The catalogue list, generated from the database. With nothing to offer, say so instead of showing an empty list. */
+function catalogueList(): RouteResult {
+  if (customerCatalogues().length === 0) return { kind: 'rule', send: ['catalogues_none'], state: MENU_STATES.MAIN_MENU, flowData: null };
+  return { kind: 'rule', send: ['catalogues_list'], state: MENU_STATES.CATALOGUE_SELECT, flowData: null };
+}
+
 function applyOption(option: MenuOption, current: Customer, flows: FlowSet): RouteResult {
+  if (option.catalogues) return catalogueList();
   if (option.handoff) {
     return { kind: 'human_handoff', send: ['human_support'], state: MENU_STATES.MAIN_MENU, flowData: null };
   }
@@ -186,6 +199,9 @@ export function routeMenu(input: RouteInput): RouteResult | null {
   if (isHumanSupportRequest(raw)) {
     return { kind: 'human_handoff', send: ['human_support'], state: MENU_STATES.MAIN_MENU, flowData: null };
   }
+  // Catalogue library (only a business that has it; the original business never enters these branches).
+  const hasCatalogues = accountHasFeature(currentAccountId(), FEATURES.CATALOGUES);
+  if (hasCatalogues && isCatalogueRequest(raw)) return catalogueList();
 
   // 4. Multi-step flows consume the whole message as the answer.
   for (const kind of ['appointment', 'quotation'] as const) {
@@ -194,6 +210,14 @@ export function routeMenu(input: RouteInput): RouteResult | null {
       const step = Number(state.slice(prefix.length));
       if (Number.isFinite(step) && step >= 1) return continueFlow(tables.flows, kind, step, raw, customer);
     }
+  }
+
+  // 4b. Choosing from the catalogue list: the number is the position in the live, enabled list.
+  if (hasCatalogues && state === MENU_STATES.CATALOGUE_SELECT) {
+    if (!DIGITS.test(normalized)) return null; // free text → AI
+    const picked = customerCatalogues()[Number(normalized) - 1];
+    if (!picked) return invalidChoice();
+    return { kind: 'rule', send: [], catalogueId: picked.id, state: MENU_STATES.CATALOGUE_SELECT, flowData: null };
   }
 
   // 5. Sub-menus.

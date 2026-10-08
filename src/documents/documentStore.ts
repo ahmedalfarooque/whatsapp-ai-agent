@@ -123,7 +123,7 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-export function validateDocument(input: { originalName: string; mimeType: string; bytes: Buffer }): { ext: string; mime: string } {
+export function validateDocument(input: { originalName: string; mimeType: string; bytes: Buffer; maxBytes?: number }): { ext: string; mime: string } {
   // eslint-disable-next-line no-control-regex -- strip C0 control characters from client-supplied names
   const safeName = path.basename(input.originalName).replace(/[\u0000-\u001f]/g, '');
   const ext = safeName.includes('.') ? safeName.split('.').pop()!.toLowerCase() : '';
@@ -134,7 +134,8 @@ export function validateDocument(input: { originalName: string; mimeType: string
     throw new DocumentValidationError(`MIME type ${mime} does not match .${ext}`);
   }
   if (input.bytes.length === 0) throw new DocumentValidationError('File is empty');
-  if (input.bytes.length > MAX_DOCUMENT_BYTES) throw new DocumentValidationError(`File exceeds ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB`);
+  const limit = input.maxBytes ?? MAX_DOCUMENT_BYTES;
+  if (input.bytes.length > limit) throw new DocumentValidationError(`File exceeds ${limit / 1024 / 1024} MB`);
   if (!sniff(input.bytes, ext)) throw new DocumentValidationError(`File content does not look like a .${ext} file`);
   return { ext, mime: allowed[0]! };
 }
@@ -144,7 +145,7 @@ function toDoc(row: BusinessDocument): BusinessDocument {
 }
 
 export function saveDocument(
-  input: { originalName: string; mimeType: string; bytes: Buffer; visibility?: DocumentVisibility; title?: string | null; uploadedBy?: string; accountId?: number; purpose?: string | null; caption?: string | null },
+  input: { originalName: string; mimeType: string; bytes: Buffer; visibility?: DocumentVisibility; title?: string | null; uploadedBy?: string; accountId?: number; purpose?: string | null; caption?: string | null; maxBytes?: number },
   db: Database.Database = getDb(),
 ): BusinessDocument {
   const accountId = input.accountId ?? currentAccountId();
@@ -263,7 +264,7 @@ export function updateDocument(
 /** Replaces the bytes of an existing document (same id, new file). */
 export function replaceDocumentFile(
   id: number,
-  input: { originalName: string; mimeType: string; bytes: Buffer },
+  input: { originalName: string; mimeType: string; bytes: Buffer; maxBytes?: number },
   db: Database.Database = getDb(),
   accountId: number = currentAccountId(),
 ): BusinessDocument | undefined {
@@ -312,7 +313,15 @@ export function serveContentType(doc: BusinessDocument): string {
 
 /** Text the AI may use: active documents marked ai_knowledge or customer with extracted text. */
 export function documentsForAiContext(db: Database.Database = getDb(), accountId: number = currentAccountId()): { title: string; text: string; customerVisible: boolean }[] {
+  // Catalogue PDFs are large and are answered from through the search tool (src/catalogues), not pasted into every prompt.
+  let catalogueDocs = new Set<number>();
+  try {
+    catalogueDocs = new Set((db.prepare('SELECT document_id FROM account_catalogues WHERE whatsapp_account_id = ?').all(accountId) as { document_id: number }[]).map((r) => r.document_id));
+  } catch {
+    /* older databases have no catalogue table */
+  }
   return listDocuments({ status: 'active', accountId }, db)
+    .filter((d) => !catalogueDocs.has(d.id))
     .filter((d) => (d.visibility === 'ai_knowledge' || d.visibility === 'customer') && d.extracted_text)
     .map((d) => ({ title: d.title || d.original_name, text: d.extracted_text!.slice(0, 4000), customerVisible: d.visibility === 'customer' }));
 }

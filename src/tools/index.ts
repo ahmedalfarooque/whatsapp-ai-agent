@@ -2,6 +2,8 @@ import { TOOL_NAMES } from '../config/constants';
 import { LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 import { checkAvailabilitySchema, checkAvailabilityHandler } from './checkAvailability';
 import { bookAppointmentSchema, bookAppointmentHandler } from './bookAppointment';
+import { searchCataloguesSchema, searchCataloguesHandler } from './searchCatalogues';
+import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 
 /** Context available to every tool handler, independent of whatever the LLM supplied as arguments. */
 export interface ToolContext {
@@ -29,9 +31,14 @@ export const toolRegistry: Record<string, ToolDefinition> = {
     schema: bookAppointmentSchema,
     handler: bookAppointmentHandler,
   },
+  [TOOL_NAMES.SEARCH_CATALOGUES]: {
+    schema: searchCataloguesSchema,
+    handler: searchCataloguesHandler,
+  },
 };
 
-export const toolSchemas = Object.values(toolRegistry).map((t) => t.schema);
+/** The original business's tools: the two calendar tools, exactly as before the catalogue library existed. */
+export const toolSchemas = [toolRegistry[TOOL_NAMES.CHECK_AVAILABILITY]!.schema, toolRegistry[TOOL_NAMES.BOOK_APPOINTMENT]!.schema];
 
 /**
  * The calendar integration (Google Calendar service account + calendar id) is
@@ -45,5 +52,8 @@ export function accountHasCalendar(accountId: number): boolean {
 }
 
 export function toolSchemasForAccount(accountId: number): typeof toolSchemas {
-  return accountHasCalendar(accountId) ? toolSchemas : [];
+  if (accountHasCalendar(accountId)) return toolSchemas;
+  // A business with its own catalogue library may look things up in its own catalogues and linked official pages.
+  if (accountHasFeature(accountId, FEATURES.CATALOGUES)) return [searchCataloguesSchema];
+  return [];
 }

@@ -15,6 +15,8 @@ export const MENU_STATES = {
   SUBMENU_CARE: 'SUBMENU_CARE',
   SUBMENU_TINT: 'SUBMENU_TINT',
   SUBMENU_PRICES: 'SUBMENU_PRICES',
+  /** The customer is looking at a numbered list of catalogues (businesses with the catalogue library only). */
+  CATALOGUE_SELECT: 'CATALOGUE_SELECT',
 } as const;
 
 export interface MenuOption {
@@ -26,6 +28,8 @@ export interface MenuOption {
   flow?: 'appointment' | 'quotation';
   /** Pauses automation and hands the customer to staff. */
   handoff?: boolean;
+  /** Shows the business's catalogue list (only ever set by a non-original business's own menu). */
+  catalogues?: boolean;
 }
 
 export interface SubmenuDef {

@@ -3,6 +3,7 @@ import { getBusinessSettings, formatBusinessHours, formatAddress } from '../conf
 import { listCustomerVisibleOffers, renderOfferLine } from '../offers/offerRepo';
 import { documentsForAiContext } from '../documents/documentStore';
 import { listLinks } from '../setup/linksRepo';
+import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { accountHasCalendar } from '../tools';
 import { currentAccountId, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 import type { KnowledgeBase } from '../knowledge/loader';
@@ -11,6 +12,23 @@ const LANGUAGE_NAMES: Record<string, string> = {
   en: 'English',
   ar: 'Arabic',
 };
+
+const CATALOGUE_RULES = `
+
+CATALOGUES AND OFFICIAL SOURCES (this business has a library of official catalogues and linked official web pages):
+- For ANY question about products, colours (names or codes), finishes, collections or colour advice, FIRST call the search_catalogues tool
+  and answer only from the passages it returns. Passages marked "website" are the current official source; passages marked "catalogue"
+  come from the uploaded catalogues. If they differ, the website wins. Never say a catalogue is the newest or current one unless a passage says so.
+- Never invent products, prices, stock, availability, coverage, technical specifications, colours, phone numbers or opening hours. If the
+  sources do not contain the answer, say it is not currently available and offer a human (the customer can reply "human").
+- Answer naturally and briefly, in the customer's language. Do NOT dump long lists: for colour questions suggest the few most relevant
+  colours (name and code) and offer to share more. Keep brand and product names exactly as written (do not translate or alter them).
+- Catalogue colours on screen or in print are approximations: when a customer wants an exact colour match, say so and recommend checking an
+  applied sample / the in-store colour matching service, as the sources describe.
+- If the customer wants a catalogue, brochure or colour book, tell them to reply "catalogue" (or "كتالوج") and the PDF will be sent. Do not claim
+  to attach files yourself.
+- The results of the search_catalogues tool count as approved business knowledge for this business.
+`;
 
 export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string): string {
   const languageInstruction = language && LANGUAGE_NAMES[language]
@@ -66,12 +84,15 @@ export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string): 
     /* offers/documents tables may not exist in very old test databases */
   }
 
+  // A business with a catalogue library answers product/colour questions from ITS OWN catalogues and linked official pages.
+  const catalogueSection = accountHasFeature(accountId, FEATURES.CATALOGUES) ? CATALOGUE_RULES : '';
+
   return `You are the WhatsApp customer assistant for ${settings.businessName}.
 
 BUSINESS PROFILE (published by staff — authoritative):
 ${profileLines}
 
-${offersSection}${documentsSection}
+${offersSection}${documentsSection}${catalogueSection}
 
 SCOPE AND HONESTY RULES (never break these):
 - Only answer using the "BUSINESS KNOWLEDGE" section below. Never invent

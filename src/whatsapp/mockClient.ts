@@ -1,5 +1,5 @@
 import { logger } from '../logger';
-import type { OutboundInteractiveMessage, SendTextMessageResponse } from './types';
+import type { OutboundDocument, OutboundInteractiveMessage, SendTextMessageResponse } from './types';
 
 /**
  * Mock WhatsApp Cloud API provider used whenever env.shouldUseMockProviders
@@ -28,6 +28,21 @@ export async function sendInteractiveMessageMock(
   logger.info(
     { toWaId, message },
     '[MOCK WhatsApp] would send this interactive message — development mode, no real message sent',
+  );
+  return {
+    messaging_product: 'whatsapp',
+    contacts: [{ input: toWaId, wa_id: toWaId }],
+    messages: [{ id: `mock-wamid-${Date.now()}` }],
+  };
+}
+
+export async function sendDocumentMessageMock(
+  toWaId: string,
+  document: OutboundDocument,
+): Promise<SendTextMessageResponse> {
+  logger.info(
+    { toWaId, fileName: document.fileName, bytes: document.bytes.length, caption: document.caption },
+    '[MOCK WhatsApp] would send this document — development mode, no real message sent',
   );
   return {
     messaging_product: 'whatsapp',

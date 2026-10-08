@@ -129,12 +129,14 @@ export async function deleteAccount(accountId: number, confirm: unknown, deps: D
     del('requests', 'DELETE FROM customer_requests WHERE whatsapp_account_id = ?', accountId);
     del('conversations', 'DELETE FROM conversations WHERE whatsapp_account_id = ?', accountId);
     del('customers', 'DELETE FROM customers WHERE whatsapp_account_id = ?', accountId);
+    del('catalogues', 'DELETE FROM account_catalogues WHERE whatsapp_account_id = ?', accountId);
     del('documents', 'DELETE FROM business_documents WHERE whatsapp_account_id = ?', accountId);
     del('offers', 'DELETE FROM offers WHERE whatsapp_account_id = ?', accountId);
     del('templates', 'DELETE FROM reply_templates WHERE whatsapp_account_id = ?', accountId);
     del('links', 'DELETE FROM business_links WHERE whatsapp_account_id = ?', accountId);
     del('drafts', 'DELETE FROM setup_drafts WHERE whatsapp_account_id = ?', accountId);
     del('menus', 'DELETE FROM account_menus WHERE whatsapp_account_id = ?', accountId);
+    del('features', 'DELETE FROM account_features WHERE whatsapp_account_id = ?', accountId);
     del('adminAccess', 'DELETE FROM admin_account_access WHERE whatsapp_account_id = ?', accountId);
     del('automation', 'DELETE FROM automation_settings WHERE id = ?', accountId);
     del('profile', 'DELETE FROM business_settings WHERE id = ?', accountId);

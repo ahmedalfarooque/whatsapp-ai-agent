@@ -76,3 +76,11 @@ export type OutboundInteractiveMessage =
       header?: string;
       footer?: string;
     };
+
+/** A file sent to a customer (the catalogue PDFs): the bytes, the name WhatsApp shows, and an optional caption. */
+export interface OutboundDocument {
+  fileName: string;
+  mimeType: string;
+  bytes: Buffer;
+  caption?: string;
+}

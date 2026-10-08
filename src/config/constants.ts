@@ -2,6 +2,7 @@ export const TOOL_NAMES = {
   CHECK_AVAILABILITY: 'check_availability',
   BOOK_APPOINTMENT: 'book_appointment',
   GET_BUSINESS_INFORMATION: 'get_business_information',
+  SEARCH_CATALOGUES: 'search_catalogues',
 } as const;
 
 export const CONVERSATION_STATUS = {

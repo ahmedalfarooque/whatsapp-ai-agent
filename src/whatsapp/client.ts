@@ -9,8 +9,8 @@ import {
   isRetryableHttpError,
   isRetryableForNonIdempotentSend,
 } from '../utils/retry';
-import { sendTextMessageMock, markMessageAsReadMock, sendInteractiveMessageMock } from './mockClient';
-import type { OutboundInteractiveMessage, SendTextMessageResponse } from './types';
+import { sendTextMessageMock, markMessageAsReadMock, sendInteractiveMessageMock, sendDocumentMessageMock } from './mockClient';
+import type { OutboundDocument, OutboundInteractiveMessage, SendTextMessageResponse } from './types';
 
 function graphUrl(pathSegment: string): string {
   return `https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${pathSegment}`;
@@ -112,6 +112,24 @@ function buildInteractivePayload(message: OutboundInteractiveMessage): Record<st
       })),
     },
   };
+}
+
+export class DocumentDeliveryUnsupportedError extends Error {
+  constructor() {
+    super('This WhatsApp connection cannot send documents');
+    this.name = 'DocumentDeliveryUnsupportedError';
+  }
+}
+
+/**
+ * Sends a file (a catalogue PDF) through the SAME transport the inbound message arrived on. Only the QR (Baileys)
+ * connection delivers documents; there is no second transport and no fake URL fallback.
+ */
+export async function sendDocumentMessage(toWaId: string, document: OutboundDocument): Promise<SendTextMessageResponse> {
+  const transport = replyTransport.getStore();
+  if (transport?.document) return transport.document(toWaId, document);
+  if (env.shouldUseMockProviders && !transport) return sendDocumentMessageMock(toWaId, document);
+  throw new DocumentDeliveryUnsupportedError();
 }
 
 /** Sends an interactive (button or list) message to a customer's WhatsApp number. */
