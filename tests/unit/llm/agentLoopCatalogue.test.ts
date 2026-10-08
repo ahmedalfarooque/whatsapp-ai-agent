@@ -74,8 +74,39 @@ describe('agent loop tool permissions', () => {
       const tools = vi.mocked(chatCompletion).mock.calls[0]![0].tools as Array<{ function: { name: string } }> | undefined;
       return (tools ?? []).map((t) => t.function.name);
     };
-    expect(await names(JOTUN)).toEqual(['search_catalogues']);
-    expect(await names(PLAIN)).toEqual([]);
-    expect(await names(1)).toEqual(['check_availability', 'book_appointment']);
+    // Every business may look up current public information; only the others' own tools stay separate.
+    expect(await names(JOTUN)).toEqual(['search_catalogues', 'web_search']);
+    expect(await names(PLAIN)).toEqual(['web_search']);
+    expect(await names(1)).toEqual(['check_availability', 'book_appointment', 'web_search']);
+  });
+
+  it('web search runs for any business, returns only public results, and does not unlock the calendar or the catalogues', async () => {
+    const { setWebSearchProvider, resetWebSearchRateLimit } = await import('../../../src/tools/webSearch');
+    const { setLinkFetcher } = await import('../../../src/setup/linkFetcher');
+    resetWebSearchRateLimit();
+    setWebSearchProvider(async () => [{ title: 'Official', url: 'https://www.jotun.com/sa-en/decorative', snippet: 'Decorative paints' }]);
+    setLinkFetcher(async () => ({ ok: true, httpStatus: 200, title: 'P', text: 'Decorative paints for Saudi homes.', error: null, sha256: 'x' }));
+    try {
+      for (const account of [PLAIN, JOTUN, 1]) {
+        const result = (await toolResultFor(account, 'web_search', { query: 'Jotun decorative paint Saudi' })) as { results: Array<{ url: string }> };
+        expect(result.results[0]!.url).toBe('https://www.jotun.com/sa-en/decorative');
+      }
+      // The plain business is offered web search only: the catalogue search and the calendar stay refused.
+      expect(await toolResultFor(PLAIN, 'search_catalogues', { query: 'x' })).toEqual({ error: 'unknown tool: search_catalogues' });
+      expect(await toolResultFor(PLAIN, 'book_appointment', { service: 'x' })).toEqual({ error: 'unknown tool: book_appointment' });
+    } finally {
+      setWebSearchProvider(null);
+      setLinkFetcher(null);
+    }
+  });
+
+  it('with web search switched off, a business without other tools is offered none', async () => {
+    const { env } = await import('../../../src/config/env');
+    (env as { WEB_SEARCH_ENABLED: boolean }).WEB_SEARCH_ENABLED = false;
+    try {
+      expect(await toolResultFor(PLAIN, 'web_search', { query: 'x' })).toEqual({ error: 'unknown tool: web_search' });
+    } finally {
+      (env as { WEB_SEARCH_ENABLED: boolean }).WEB_SEARCH_ENABLED = true;
+    }
   });
 });

@@ -115,6 +115,11 @@ const envSchema = z
     // back to password-only.
     RESEND_API_KEY: z.string().optional().default(''),
     RESEND_FROM_EMAIL: z.string().optional().default(''),
+    // Lets the assistant look up CURRENT public information (see src/tools/webSearch.ts). Set to false to switch it off everywhere.
+    WEB_SEARCH_ENABLED: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim() !== '' ? ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase()) : undefined),
+      z.boolean().default(true),
+    ),
     RESEND_OTP_ENABLED: z.preprocess(
       (value) => (typeof value === 'string' && value.trim() !== '' ? ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase()) : undefined),
       z.boolean().default(false),

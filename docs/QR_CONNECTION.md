@@ -63,6 +63,42 @@ normalised. Universal commands: `0`/menu/القائمة/back/greetings → main 
 language/اللغة → language switch; agent/موظف → human handoff; restart/00 →
 full reset. Free text that is not a number or command goes to the AI.
 
+These three behaviours apply to **every** business (the original one, the
+second one, and any added later) — they live in the shared pipeline, not in a
+per-business setting:
+
+- **Change language is always on the main menu.** The main menu is rendered
+  with a permanent line `0️⃣ 🌐 Change language` / `0️⃣ 🌐 تغيير اللغة` in the
+  customer's language (`src/templates/languageOption.ts`, applied by the one
+  shared renderer, so the dashboard preview matches). Sending `0` on the main
+  menu opens the language choice; in a sub-menu or a flow `0` still means "back
+  to the main menu". The words `language` / `تغيير اللغة` work from anywhere.
+  Switching only changes the language: the conversation and its history are kept.
+- **Only plain text is answered.** A voice note, audio, photo, video, document
+  or file of any kind, sticker, location, contact, reaction, poll or edit gets
+  **no automatic reply at all** — no apology, no menu, no AI
+  (`src/whatsapp/messageKind.ts` classifies Baileys payloads, including
+  disappearing and view-once wrappers). Media is stored in the conversation as
+  `[voice]`, `[image] caption` … for staff, who can still reply by hand. A caption
+  under a photo is shown to staff but is not answered as customer text.
+- **Free text is understood by the AI.** Anything that is not a menu number,
+  command, catalogue pick or flow answer goes to the AI with that business's own
+  profile, knowledge, documents, offers, catalogues and menu. A new customer's
+  first message that is a real question (a question mark, or three or more
+  words) is answered in the language it was written in instead of being stopped
+  at the language prompt; greetings and fragments keep the welcome.
+- **Web search** (`web_search` tool) lets the assistant look up *current public*
+  information when the business's own sources do not answer. Source order:
+  business profile and data → knowledge and documents → catalogues and linked
+  official pages → web → general knowledge. It is never used for the business's
+  own prices, stock, hours, phone, address or offers. The query is stripped of
+  e-mail addresses and phone numbers; the search page and every result page are
+  read through the same guarded fetcher as business links (public hosts only,
+  private/internal/metadata addresses refused); each business is rate limited.
+  Set `WEB_SEARCH_ENABLED=false` to switch it off everywhere. The default search
+  source is the public Bing results page; swap the provider in
+  `src/tools/webSearch.ts` (`setWebSearchProvider`) to use a paid search API.
+
 ## Connection page actions (dashboard → WhatsApp Connection)
 
 | Button | Does | Never does |

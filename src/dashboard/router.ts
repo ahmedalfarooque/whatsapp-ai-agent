@@ -641,8 +641,8 @@ export function createDashboardRouter(): Router {
       try { return { key: rule.fallback, text: resolveTemplate(rule.fallback, lang, PREVIEW_VARS), reason: 'No customer-visible offers right now — customers receive this template instead.' }; } catch { return null; }
     };
     res.json({
-      ar: typeof body.ar === 'string' ? renderTemplateText(body.ar, { ...PREVIEW_VARS, language: 'ar' }) : '',
-      en: typeof body.en === 'string' ? renderTemplateText(body.en, { ...PREVIEW_VARS, language: 'en' }) : '',
+      ar: typeof body.ar === 'string' ? renderTemplateText(body.ar, { ...PREVIEW_VARS, language: 'ar', templateKey: req.params.key }) : '',
+      en: typeof body.en === 'string' ? renderTemplateText(body.en, { ...PREVIEW_VARS, language: 'en', templateKey: req.params.key }) : '',
       followUp: { ar: followUp('ar'), en: followUp('en') },
       fallback: { ar: fallbackFor('ar'), en: fallbackFor('en') },
       sourceType: templateSourceType(`${typeof body.ar === 'string' ? body.ar : ''}${typeof body.en === 'string' ? body.en : ''}`),

@@ -29,7 +29,7 @@ import { sendTextMessage, sendDocumentMessage } from '../whatsapp/client';
 import { getDeliverableCatalogue } from '../catalogues/catalogueRepo';
 import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
-import { MENU_IDS, isHardRestart, isHumanSupportRequest, isMenuKeyword } from '../automation/menu';
+import { MENU_IDS, detectLanguageFromScript, isHardRestart, isHumanSupportRequest, isMenuKeyword, isSubstantiveFreeText } from '../automation/menu';
 import { MENU_STATES, DATA_DRIVEN_FALLBACKS, routeMenu, type RouteResult } from '../automation/menuRouter';
 import { renderCustomerOffers } from '../offers/offerRepo';
 import { resolveTemplate, type TemplateVars } from '../templates/templateRepo';
@@ -90,12 +90,18 @@ async function replyTemplate(ctx: ReplyContext, key: string, kind: ReplyActivity
 function storeInbound(conversationId: number, msg: InboundMessage): void {
   appendMessage(conversationId, {
     role: 'user',
-    content: msg.text ?? (msg.interactiveId ? `[${msg.interactiveId}]` : `[${msg.type}]`),
+    // Media keeps its kind visible to staff; a caption is shown after it. Text and menu taps are stored as typed.
+    content: msg.type === 'text' || msg.type === 'interactive'
+      ? (msg.text ?? (msg.interactiveId ? `[${msg.interactiveId}]` : `[${msg.type}]`))
+      : (msg.text ? `[${msg.type}] ${msg.text}` : `[${msg.type}]`),
     whatsappMessageId: msg.messageId,
     direction: MESSAGE_DIRECTION.INBOUND,
     messageType: msg.type,
   });
 }
+
+/** Protocol-level noise (reactions, edits, receipts): not worth a row in the conversation or the activity list. */
+const SILENT_UNSTORED_TYPES = new Set(['reaction', 'other']);
 
 async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessDependencies): Promise<void> {
   const maskedId = maskWaId(msg.waId);
@@ -107,6 +113,17 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
   const language: CustomerLanguage = customer.language ?? 'en';
   const ctx: ReplyContext = { msg, customer, conversationId: conversation.id, channel, language };
 
+  // Only plain text (and menu taps) enters the automatic conversation. A voice note, audio, photo, video, document, sticker,
+  // location, reaction... is recorded for the team and NEVER answered: no apology, no menu, no AI. Staff can still reply by hand.
+  if (msg.type !== 'text' && msg.type !== 'interactive') {
+    logger.info({ waId: maskedId, type: msg.type }, 'non-text inbound message recorded; no automatic reply');
+    if (!SILENT_UNSTORED_TYPES.has(msg.type)) {
+      storeInbound(conversation.id, msg);
+      recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: `${msg.type} message — not answered automatically` });
+    }
+    return;
+  }
+
   if (!settings.autoRepliesEnabled) {
     recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: 'Automatic replies are disabled' });
     logger.info({ waId: maskedId }, 'automatic replies disabled — inbound message stored only');
@@ -114,16 +131,6 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
     return;
   }
 
-  if (msg.type !== 'text' && msg.type !== 'interactive') {
-    logger.info({ waId: maskedId, type: msg.type }, 'ignoring unsupported inbound message type');
-    storeInbound(conversation.id, msg);
-    try {
-      await replyTemplate(ctx, 'unsupported_message');
-    } catch (error) {
-      logger.error({ waId: maskedId, error }, 'failed to notify customer of unsupported message type');
-    }
-    return;
-  }
   if (msg.type === 'text' && !msg.text) return;
 
   storeInbound(conversation.id, msg);
@@ -161,6 +168,17 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
     await replyTemplate(ctx, 'human_support', 'human_handoff');
     await replyOutOfHours(ctx);
     return;
+  }
+
+  // A brand-new customer whose very first message is a real question gets an ANSWER (in the language they wrote), not a language prompt.
+  if (msg.type === 'text' && !customer.language && settings.aiRepliesEnabled && isSubstantiveFreeText(msg.text)) {
+    const detected = detectLanguageFromScript(msg.text);
+    if (detected) {
+      customer = setCustomerLanguage(customer.id, detected);
+      customer = setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
+      ctx.customer = customer;
+      ctx.language = detected;
+    }
   }
 
   if (settings.ruleRepliesEnabled) {

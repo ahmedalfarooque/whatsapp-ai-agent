@@ -19,6 +19,7 @@ import { getAutomationSettings, updateAutomationSettings } from '../../../src/au
 import { createCustomerRequest, listCustomerRequests, getCustomerRequest, getCustomerRequestByReference, countCustomerRequests } from '../../../src/memory/customerRequestRepo';
 import { saveDocument, listDocuments, getDocument } from '../../../src/documents/documentStore';
 import { buildSystemPrompt } from '../../../src/llm/buildSystemPrompt';
+import { withLanguageOption } from '../../../src/templates/languageOption';
 import { enqueueNotification, listOutbox, flushOutbox, registerOutboxSender, NotConnectedError, outboxSummary } from '../../../src/notifications/outbox';
 import { changeRequestStatus, businessNotificationJid, handleOperatorCommand } from '../../../src/requests/requestService';
 import { processInboundMessage } from '../../../src/pipeline/processInboundMessage';
@@ -106,8 +107,9 @@ describe('no cross-account data leakage', () => {
     expect(salonBefore.liveEn).not.toContain('Car Audio');
     expect(salonBefore.liveEn).toContain('{business}');
     runWithAccount(SALON, () => publishTemplate('main_menu', { ar: 'قائمة الصالون', en: 'Salon menu' }, 'test'));
-    expect(runWithAccount(SALON, () => resolveTemplate('main_menu', 'en'))).toBe('Salon menu');
-    expect(resolveTemplate('main_menu', 'en')).toBe(cars);
+    // The staff-edited text is shown as written, plus the permanent "Change language" line every business's main menu carries.
+    expect(runWithAccount(SALON, () => resolveTemplate('main_menu', 'en'))).toBe(withLanguageOption('Salon menu', 'en'));
+    expect(resolveTemplate('main_menu', 'en')).toBe(withLanguageOption(cars, 'en')); // the car business's own text is untouched
     const salonKeys = runWithAccount(SALON, () => listTemplates()).map((t) => t.key);
     expect(salonKeys).not.toContain('car_audio');
     expect(salonKeys).toContain('menu_about');

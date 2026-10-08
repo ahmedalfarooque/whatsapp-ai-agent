@@ -17,6 +17,7 @@ import { getOrCreateActiveConversation, getRecentMessages } from '../../../src/m
 import { listCustomerRequests } from '../../../src/memory/customerRequestRepo';
 import { MENU_IDS } from '../../../src/automation/menu';
 import { resolveTemplate } from '../../../src/templates/templateRepo';
+import { LANGUAGE_OPTION_EN, LANGUAGE_OPTION_AR } from '../../../src/templates/languageOption';
 import type { InboundMessage } from '../../../src/webhook/parseInboundPayload';
 
 const KNOWLEDGE = { sections: [], asPromptText: '' };
@@ -116,6 +117,43 @@ describe('processInboundMessage — language-first guided menu (templates are th
     expect(sent()).toEqual([live('language_changed', 'ar'), live('main_menu', 'ar')]);
   });
 
+  it('H2: the main menu itself offers "0 — Change language"; sending 0 there opens the choice, and switching works both ways', async () => {
+    const waId = '15550000040';
+    await processInboundMessage(textMsg(waId, 'hi'), { knowledge: KNOWLEDGE });
+    await processInboundMessage(textMsg(waId, '2'), { knowledge: KNOWLEDGE });
+    expect(sent()[1]).toContain(LANGUAGE_OPTION_EN);
+    vi.clearAllMocks();
+    await processInboundMessage(textMsg(waId, '0'), { knowledge: KNOWLEDGE });
+    expect(sent()).toEqual([live('language_switch_prompt')]);
+    expect(getCustomerByWaId(waId)?.menu_state).toBe('AWAITING_LANGUAGE_SWITCH');
+    vi.clearAllMocks();
+    await processInboundMessage(textMsg(waId, '1'), { knowledge: KNOWLEDGE });
+    expect(getCustomerByWaId(waId)?.language).toBe('ar');
+    expect(sent()).toEqual([live('language_changed', 'ar'), live('main_menu', 'ar')]);
+    expect(sent()[1]).toContain(LANGUAGE_OPTION_AR);
+    expect(sent()[1]).not.toContain(LANGUAGE_OPTION_EN);
+    // The option is still there afterwards, in Arabic, and switches back to English.
+    vi.clearAllMocks();
+    await processInboundMessage(textMsg(waId, '0'), { knowledge: KNOWLEDGE });
+    await processInboundMessage(textMsg(waId, '2'), { knowledge: KNOWLEDGE });
+    expect(getCustomerByWaId(waId)?.language).toBe('en');
+    expect(sent()[sent().length - 1]).toContain(LANGUAGE_OPTION_EN);
+    expect(runAgentLoop).not.toHaveBeenCalled();
+  });
+
+  it('H3: switching language keeps the conversation: earlier messages are still stored and nothing is reset', async () => {
+    const waId = '15550000041';
+    await selectEnglish(waId);
+    await processInboundMessage(textMsg(waId, 'Do you have Pioneer speakers?'), { knowledge: KNOWLEDGE });
+    const before = getRecentMessages(getOrCreateActiveConversation(getCustomerByWaId(waId)!.id).id, 50).length;
+    await processInboundMessage(textMsg(waId, 'language'), { knowledge: KNOWLEDGE });
+    await processInboundMessage(textMsg(waId, '1'), { knowledge: KNOWLEDGE });
+    const conversation = getOrCreateActiveConversation(getCustomerByWaId(waId)!.id);
+    expect(getRecentMessages(conversation.id, 100).length).toBeGreaterThan(before);
+    expect(getRecentMessages(conversation.id, 100).map((m) => m.content)).toContain('Do you have Pioneer speakers?');
+    expect(getCustomerByWaId(waId)?.language).toBe('ar');
+  });
+
   it('I: a greeting after language is set reopens the menu without the AI', async () => {
     const waId = '15550000009';
     await selectEnglish(waId);
@@ -179,10 +217,82 @@ describe('processInboundMessage — language-first guided menu (templates are th
     deleteOffer(offer.id, 'test');
   });
 
-  it('N: an unsupported message type (e.g. image) gets the unsupported_message template', async () => {
-    const waId = '15550000014';
-    await processInboundMessage({ waId, messageId: 'wamid.img', timestamp: Date.now(), type: 'image' }, { knowledge: KNOWLEDGE });
-    expect(sent()).toEqual([live('unsupported_message')]);
+  describe('N: media and files are never answered automatically', () => {
+    const MEDIA = ['voice', 'audio', 'image', 'video', 'document', 'sticker', 'location', 'contact', 'reaction', 'poll', 'other', 'unsupported'];
+    const media = (waId: string, type: string, text?: string): InboundMessage => ({ waId, messageId: `wamid.${Math.random()}`, timestamp: Date.now(), type, ...(text ? { text } : {}) });
+    const silent = () => {
+      expect(sendTextMessage).not.toHaveBeenCalled();
+      expect(sendInteractiveMessage).not.toHaveBeenCalled();
+      expect(runAgentLoop).not.toHaveBeenCalled();
+    };
+
+    it.each(MEDIA)('a %s message from a brand-new customer produces ZERO outbound messages', async (type) => {
+      await processInboundMessage(media(`1555100${MEDIA.indexOf(type) + 10}`, type), { knowledge: KNOWLEDGE });
+      silent();
+    });
+
+    it.each(MEDIA)('a %s message from a customer already in the menu produces ZERO outbound messages and keeps the menu state', async (type) => {
+      const waId = `1555200${MEDIA.indexOf(type) + 10}`;
+      await selectEnglish(waId);
+      await processInboundMessage(textMsg(waId, '1'), { knowledge: KNOWLEDGE });
+      vi.clearAllMocks();
+      await processInboundMessage(media(waId, type), { knowledge: KNOWLEDGE });
+      silent();
+      expect(getCustomerByWaId(waId)?.menu_state).toBe('SUBMENU_AUDIO');
+      expect(getCustomerByWaId(waId)?.language).toBe('en');
+    });
+
+    it('the old "I can currently only read text messages" reply is never sent', async () => {
+      const waId = '15550000014';
+      await processInboundMessage(media(waId, 'voice'), { knowledge: KNOWLEDGE });
+      expect(sent().join(' ')).not.toMatch(/only read text|قراءة الرسائل النصية/);
+      silent();
+    });
+
+    it('a caption under a photo is shown to staff but is NOT answered as customer text', async () => {
+      const waId = '15550000031';
+      await selectEnglish(waId);
+      await processInboundMessage(media(waId, 'image', 'How much for this one?'), { knowledge: KNOWLEDGE });
+      silent();
+      const conversation = getOrCreateActiveConversation(getCustomerByWaId(waId)!.id);
+      expect(getRecentMessages(conversation.id, 5).map((m) => m.content)).toContain('[image] How much for this one?');
+    });
+
+    it('media is stored for staff, and a voice note is recorded as a voice note', async () => {
+      const waId = '15550000032';
+      await selectEnglish(waId);
+      await processInboundMessage(media(waId, 'voice'), { knowledge: KNOWLEDGE });
+      await processInboundMessage(media(waId, 'document'), { knowledge: KNOWLEDGE });
+      await processInboundMessage(media(waId, 'reaction'), { knowledge: KNOWLEDGE });
+      const conversation = getOrCreateActiveConversation(getCustomerByWaId(waId)!.id);
+      const stored = getRecentMessages(conversation.id, 10).map((m) => m.content);
+      expect(stored).toEqual(expect.arrayContaining(['[voice]', '[document]']));
+      expect(stored).not.toContain('[reaction]');
+      silent();
+    });
+
+    it('media does not break the very next text message: it is answered normally', async () => {
+      const waId = '15550000033';
+      await selectEnglish(waId);
+      await processInboundMessage(media(waId, 'voice'), { knowledge: KNOWLEDGE });
+      await processInboundMessage(textMsg(waId, 'Do you have Pioneer speakers?'), { knowledge: KNOWLEDGE });
+      expect(runAgentLoop).toHaveBeenCalledOnce();
+      expect(sendTextMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('media while a human has taken over, or while automatic replies are off, is still silent', async () => {
+      const { updateAutomationSettings } = await import('../../../src/automation/settingsRepo');
+      const waId = '15550000034';
+      await selectEnglish(waId);
+      await processInboundMessage(textMsg(waId, 'human'), { knowledge: KNOWLEDGE });
+      vi.clearAllMocks();
+      await processInboundMessage(media(waId, 'voice'), { knowledge: KNOWLEDGE });
+      silent();
+      updateAutomationSettings({ autoRepliesEnabled: false });
+      await processInboundMessage(media('15550000035', 'image'), { knowledge: KNOWLEDGE });
+      silent();
+      updateAutomationSettings({ autoRepliesEnabled: true });
+    });
   });
 
   it('S: the appointment flow (main menu 7) collects answers and records a pending request with a reference', async () => {
@@ -301,7 +411,10 @@ describe('processInboundMessage — automation controls & human handoff', () => 
     publishTemplate('main_menu', undefined, 'test');
     const waId2 = '15550000025';
     await processInboundMessage(textMsg(waId2, '2'), { knowledge: KNOWLEDGE });
-    expect(sent()[0]).toBe('DRAFT MENU');
+    // The staff-edited text is shown as written; the permanent "Change language" line is the only addition.
+    expect(sent()[0]).toBe(`DRAFT MENU
+
+${LANGUAGE_OPTION_EN}`);
     resetTemplateToDefault('main_menu', 'test');
   });
 });

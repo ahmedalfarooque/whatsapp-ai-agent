@@ -35,6 +35,7 @@ import { recordReplyActivity } from '../automation/settingsRepo';
 import { replyTransport, type ReplyTransport } from './replyTransport';
 import type { OutboundDocument } from './types';
 import { isDirectChatJid, isLidJid, jidToPhoneNumber, jidToUser } from './jid';
+import { classifyMessage } from './messageKind';
 import { registerOutboxSender, flushOutbox, NotConnectedError } from '../notifications/outbox';
 import { parseOperatorCommand, handleOperatorCommand } from '../requests/requestService';
 
@@ -170,20 +171,6 @@ function pidAlive(pid: number): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
-}
-
-function extractText(message: WAMessage): string {
-  const m = message.message;
-  if (!m) return '';
-  return (
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    m.buttonsResponseMessage?.selectedDisplayText ||
-    m.listResponseMessage?.title ||
-    ''
-  ).trim();
 }
 
 /** Flattens an interactive menu to numbered text; personal WhatsApp sessions have no button API. */
@@ -534,7 +521,7 @@ class QrConnection {
     // Operator commands: typed by the business account itself (any of its devices) — "CONFIRM APT-2026-3777".
     // key.fromMe is the authorization: customers can never produce a fromMe message. Scoped to this account's requests.
     if (message.key.fromMe && message.message && message.key.id && !this.ownSentIds.has(message.key.id) && isDirectChatJid(remoteJid)) {
-      const command = parseOperatorCommand(extractText(message));
+      const command = parseOperatorCommand(classifyMessage(message).text);
       if (command) {
         const eventId = this.accountId === LEGACY_ACCOUNT_ID ? `qr-op:${message.key.id}` : `qr-op:${this.accountId}:${message.key.id}`;
         if (!claimWebhookEvent(eventId, 'operator command')) {
@@ -568,7 +555,9 @@ class QrConnection {
       return;
     }
     const { replyJid, customerJid, phoneJid } = resolveIdentity(message);
-    const text = extractText(message);
+    // Only plain text is answered automatically; voice, audio, images, files, stickers... are recorded and left to staff.
+    const classified = classifyMessage(message);
+    const text = classified.text;
     // Event ids are namespaced per account: the same phone sending the same message id to two businesses is two events.
     const messageId = message.key.id ? (this.accountId === LEGACY_ACCOUNT_ID ? `qr:${message.key.id}` : `qr:${this.accountId}:${message.key.id}`) : null;
     const sentAt = Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)) * 1000;
@@ -605,14 +594,15 @@ class QrConnection {
     await runWithAccount(this.accountId, () =>
       replyTransport.run(transport, async () => {
         try {
-          logger.info({ account: this.accountId, customer: maskWaId(customerJid), type: text ? 'text' : 'unsupported' }, '[WA-INBOUND] processInboundMessage started');
+          logger.info({ account: this.accountId, customer: maskWaId(customerJid), type: classified.kind }, '[WA-INBOUND] processInboundMessage started');
           await processInboundMessage(
             {
               waId: customerJid,
               messageId,
               timestamp: sentAt,
-              type: text ? 'text' : 'unsupported',
-              text: text || undefined,
+              type: classified.kind,
+              // A caption under media is kept for staff to read, but it is not a message the assistant answers.
+              text: text || classified.caption || undefined,
               contactName: message.pushName ?? undefined,
               channel: QR_CHANNEL,
               accountId: this.accountId,

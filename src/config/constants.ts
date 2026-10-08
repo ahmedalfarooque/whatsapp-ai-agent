@@ -3,6 +3,7 @@ export const TOOL_NAMES = {
   BOOK_APPOINTMENT: 'book_appointment',
   GET_BUSINESS_INFORMATION: 'get_business_information',
   SEARCH_CATALOGUES: 'search_catalogues',
+  WEB_SEARCH: 'web_search',
 } as const;
 
 export const CONVERSATION_STATUS = {

@@ -208,9 +208,10 @@ describe('what the assistant can use', () => {
 
   it('the search tool and the prompt rules exist only for businesses with the library', async () => {
     const names = (id: number) => toolSchemasForAccount(id).map((t) => (t.function as { name: string }).name);
-    expect(names(JOTUN)).toEqual(['search_catalogues']);
-    expect(names(OTHER)).toEqual([]);
-    expect(names(1)).toEqual(['check_availability', 'book_appointment']); // the original business: unchanged
+    // The catalogue search belongs to the businesses that have the library; web search for public information is offered to all.
+    expect(names(JOTUN)).toEqual(['search_catalogues', 'web_search']);
+    expect(names(OTHER)).toEqual(['web_search']);
+    expect(names(1)).toEqual(['check_availability', 'book_appointment', 'web_search']); // the original business keeps its calendar tools
     expect(runWithAccount(JOTUN, () => buildSystemPrompt(KNOWLEDGE, 'en'))).toContain('search_catalogues');
     expect(runWithAccount(JOTUN, () => buildSystemPrompt(KNOWLEDGE, 'en'))).toContain('Never invent products');
     expect(runWithAccount(OTHER, () => buildSystemPrompt(KNOWLEDGE, 'en'))).not.toContain('search_catalogues');

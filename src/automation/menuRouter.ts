@@ -190,6 +190,10 @@ export function routeMenu(input: RouteInput): RouteResult | null {
   }
 
   // 3. Universal commands (work in every state once a language is known).
+  // "0" on the MAIN menu is its permanent "Change language" option. In a sub-menu or a flow "0" still means "back to the main menu".
+  if (normalized === '0' && state === MENU_STATES.MAIN_MENU && !input.interactiveId) {
+    return { kind: 'rule', send: ['language_switch_prompt'], state: MENU_STATES.AWAITING_LANGUAGE_SWITCH, flowData: null };
+  }
   if (isChangeLanguageKeyword(raw)) {
     return { kind: 'rule', send: ['language_switch_prompt'], state: MENU_STATES.AWAITING_LANGUAGE_SWITCH, flowData: null };
   }

@@ -78,6 +78,30 @@ export function isChangeLanguageKeyword(text: string | undefined, _language?: Cu
   return CHANGE_LANGUAGE_KEYWORDS.includes(normalize(text));
 }
 
+/** The language a message is written in, judged by its script: Arabic letters → 'ar', Latin letters → 'en', otherwise unknown. */
+export function detectLanguageFromScript(text: string | undefined): CustomerLanguage | undefined {
+  if (!text) return undefined;
+  const arabic = (text.match(/[؀-ۿݐ-ݿ]/g) ?? []).length;
+  const latin = (text.match(/[A-Za-z]/g) ?? []).length;
+  if (arabic === 0 && latin === 0) return undefined;
+  // Arabic messages often carry Latin brand names ("أريد Jotun Lady"), so a modest share of Arabic letters is enough.
+  return arabic / (arabic + latin) >= 0.3 ? 'ar' : 'en';
+}
+
+/**
+ * A real question or request typed as free text — not a greeting, a number, a menu or language word, or a request for a person.
+ * Used on a customer's FIRST message: such a message deserves an answer, not a language prompt. Short fragments ("hi there",
+ * "random text") keep the welcome; a question mark or three or more words count as a real message.
+ */
+export function isSubstantiveFreeText(text: string | undefined): boolean {
+  if (!text) return false;
+  const normalized = normalize(text);
+  if (!normalized || /^[\d\s.,]+$/.test(normalized)) return false;
+  if (isGreeting(text) || isMenuKeyword(text) || isChangeLanguageKeyword(text) || isHumanSupportRequest(text) || detectLanguageFromText(text)) return false;
+  const words = normalized.split(/\s+/).filter(Boolean).length;
+  return words >= 3 || /[?؟]\s*$/.test(text.trim());
+}
+
 export function isGreeting(text: string | undefined): boolean {
   if (!text) return false;
   return GREETINGS.includes(normalize(text));

@@ -1,3 +1,4 @@
+import { withLanguageOption } from '../../../src/templates/languageOption';
 import { describe, it, expect, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createTestDb } from '../../../src/memory/db';
@@ -41,8 +42,8 @@ describe('reply templates — default / draft / live separation', () => {
     expect(t.status).toBe('draft');
     expect(t.hasDraft).toBe(true);
     expect(t.draftEn).toBe('DRAFT ONLY');
-    expect(resolveTemplate('main_menu', 'en', {}, db)).toBe(t.defaultEn);
-    expect(resolveTemplate('main_menu', 'ar', {}, db)).toBe(t.defaultAr);
+    expect(resolveTemplate('main_menu', 'en', {}, db)).toBe(withLanguageOption(t.defaultEn, 'en'));
+    expect(resolveTemplate('main_menu', 'ar', {}, db)).toBe(withLanguageOption(t.defaultAr, 'ar'));
   });
 
   it('publishing promotes the draft to live, clears the draft, and keeps the default intact', () => {
@@ -53,8 +54,8 @@ describe('reply templates — default / draft / live separation', () => {
     expect(published.draftEn).toBeNull();
     expect(published.defaultEn).toBe(TEMPLATE_DEFAULTS.find((t) => t.key === 'main_menu')!.en);
     expect(published.isModified).toBe(true);
-    expect(resolveTemplate('main_menu', 'en', {}, db)).toBe('New menu');
-    expect(resolveTemplate('main_menu', 'ar', {}, db)).toBe('القائمة الجديدة');
+    expect(resolveTemplate('main_menu', 'en', {}, db)).toBe(withLanguageOption('New menu', 'en'));
+    expect(resolveTemplate('main_menu', 'ar', {}, db)).toBe(withLanguageOption('القائمة الجديدة', 'ar'));
   });
 
   it('discarding a draft leaves live content untouched', () => {
@@ -117,8 +118,8 @@ describe('reply templates — default / draft / live separation', () => {
 
   it('dashboard preview renderer produces byte-identical output to the runtime resolver for every template', () => {
     for (const t of listTemplates(db)) {
-      expect(renderTemplateText(t.liveEn, { ...PREVIEW_VARS, language: 'en' })).toBe(resolveTemplate(t.key, 'en', PREVIEW_VARS, db));
-      expect(renderTemplateText(t.liveAr, { ...PREVIEW_VARS, language: 'ar' })).toBe(resolveTemplate(t.key, 'ar', PREVIEW_VARS, db));
+      expect(renderTemplateText(t.liveEn, { ...PREVIEW_VARS, language: 'en', templateKey: t.key })).toBe(resolveTemplate(t.key, 'en', PREVIEW_VARS, db));
+      expect(renderTemplateText(t.liveAr, { ...PREVIEW_VARS, language: 'ar', templateKey: t.key })).toBe(resolveTemplate(t.key, 'ar', PREVIEW_VARS, db));
     }
   });
 

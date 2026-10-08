@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getDb } from '../memory/db';
+import { withLanguageOption } from './languageOption';
 import { getBusinessSettings, formatBusinessHours, formatAddress } from '../config/businessSettings';
 import { renderCustomerOffers } from '../offers/offerRepo';
 import { renderCustomerCatalogues } from '../catalogues/catalogueRepo';
@@ -204,6 +205,8 @@ export interface TemplateVars {
   catalogues?: string;
   /** The title of the catalogue being sent ({catalogue}). */
   catalogue?: string;
+  /** The template being rendered. Only used to add the permanent "Change language" line to the main menu. */
+  templateKey?: string;
   /** Location notes ({notes}) in the message language. */
   notes?: string;
   /** Request fields ({service} {date} {time} {vehicle} {details} {customer} {status} {kind} {actor}). */
@@ -264,7 +267,7 @@ function dropEmptyPlaceholderLine(out: string[], line: string): string[] {
   return out;
 }
 
-export function renderTemplateText(text: string, vars: TemplateVars = {}): string {
+function renderTemplateBody(text: string, vars: TemplateVars): string {
   const settings = getBusinessSettings();
   const language: CustomerLanguage = vars.language ?? 'en';
   const values: Record<string, string> = {
@@ -303,6 +306,15 @@ export function renderTemplateText(text: string, vars: TemplateVars = {}): strin
     .trim();
 }
 
+/**
+ * The ONE renderer for customer text (runtime and dashboard preview alike). Given the template key it also applies the permanent
+ * "Change language" line of the main menu, so a preview shows exactly what customers receive.
+ */
+export function renderTemplateText(text: string, vars: TemplateVars = {}): string {
+  const rendered = renderTemplateBody(text, vars);
+  return vars.templateKey === 'main_menu' ? withLanguageOption(rendered, vars.language ?? 'en') : rendered;
+}
+
 /** The live message resolver. Reads live_* only — drafts are never sent to customers. */
 export function resolveTemplate(
   key: string,
@@ -314,5 +326,5 @@ export function resolveTemplate(
   const template = getTemplate(key, db, accountId);
   if (!template) throw new Error(`Unknown reply template: ${key}`);
   const text = language === 'ar' ? template.liveAr : template.liveEn;
-  return renderTemplateText(text, { ...vars, language });
+  return renderTemplateText(text, { ...vars, language, templateKey: key });
 }

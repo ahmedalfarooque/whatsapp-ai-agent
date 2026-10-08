@@ -195,6 +195,36 @@ describe('Baileys QR connection lifecycle', () => {
     expect(fixtures.activity).toHaveBeenCalledWith(expect.objectContaining({ kind: 'suppressed' }));
   });
 
+  it('passes voice notes, audio, images, files and captions to the pipeline as MEDIA — never as customer text', async () => {
+    const qr = await import('../../../src/whatsapp/qrConnection');
+    await qr.startQrConnection();
+    const socket = fixtures.sockets[0]!;
+    socket.user = { id: '966558190545@s.whatsapp.net' };
+    emit(socket, 'connection.update', { connection: 'open' });
+    const wrap = (id: string, message: Record<string, unknown>) => ({ key: { remoteJid: '966500000001@s.whatsapp.net', fromMe: false, id }, message, messageTimestamp: Math.floor(Date.now() / 1000) });
+    emit(socket, 'messages.upsert', { type: 'notify', messages: [
+      wrap('v1', { audioMessage: { ptt: true } }),
+      wrap('a1', { audioMessage: { ptt: false } }),
+      wrap('i1', { imageMessage: { caption: 'how much?' } }),
+      wrap('d1', { documentMessage: { fileName: 'x.pdf' } }),
+      wrap('e1', { ephemeralMessage: { message: { audioMessage: { ptt: true } } } }),
+      wrap('r1', { reactionMessage: { text: '👍' } }),
+      wrap('t1', { conversation: 'Do you have exterior paint?' }),
+    ] });
+    await tick(); await tick();
+    const seen = fixtures.inbound.mock.calls.map((c) => c[0] as { messageId: string; type: string; text?: string });
+    const by = (id: string) => seen.find((x) => x.messageId === `qr:${id}`)!;
+    expect(by('v1')).toMatchObject({ type: 'voice', text: undefined });
+    expect(by('a1')).toMatchObject({ type: 'audio', text: undefined });
+    expect(by('i1')).toMatchObject({ type: 'image', text: 'how much?' });
+    expect(by('d1')).toMatchObject({ type: 'document' });
+    expect(by('e1')).toMatchObject({ type: 'voice' });
+    expect(by('r1')).toMatchObject({ type: 'reaction' });
+    expect(by('t1')).toMatchObject({ type: 'text', text: 'Do you have exterior paint?' });
+    // The connection itself never answers anything — only the pipeline can, and it ignores every non-text type.
+    expect(socket.sendMessage).not.toHaveBeenCalled();
+  });
+
   it('sends replies through the same socket and flattens interactive menus to numbered text', async () => {
     const qr = await import('../../../src/whatsapp/qrConnection');
     const { replyTransport } = await import('../../../src/whatsapp/replyTransport');

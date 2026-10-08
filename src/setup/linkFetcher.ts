@@ -113,7 +113,7 @@ interface RawResponse {
   truncated: boolean;
 }
 
-function requestOnce(url: URL): Promise<RawResponse> {
+function requestOnce(url: URL, extraHeaders: Record<string, string> = {}): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? https : http;
     const req = client.request(
@@ -126,6 +126,7 @@ function requestOnce(url: URL): Promise<RawResponse> {
           Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1',
           'Accept-Language': 'ar,en;q=0.8',
           'Accept-Encoding': 'gzip, deflate, br',
+          ...extraHeaders,
         },
         timeout: TIMEOUT_MS,
       },
@@ -262,4 +263,58 @@ export function setLinkFetcher(next: LinkFetcher | null): void {
 
 export async function fetchLinkContent(url: string): Promise<FetchedPage> {
   return fetcher(url);
+}
+
+// ---------------------------------------------------------------- raw HTML (web search result pages)
+
+export interface RawHtmlPage {
+  ok: boolean;
+  httpStatus: number | null;
+  finalUrl: string | null;
+  html: string;
+  error: string | null;
+}
+
+export type RawHtmlFetcher = (url: string, headers?: Record<string, string>) => Promise<RawHtmlPage>;
+
+/** Same protections as page reading — public hosts only, DNS answers checked at connect time, redirects followed manually (max 4), size capped — but returns the HTML itself. */
+async function defaultRawHtmlFetcher(rawUrl: string, headers: Record<string, string> = {}): Promise<RawHtmlPage> {
+  const fail = (httpStatus: number | null, error: string): RawHtmlPage => ({ ok: false, httpStatus, finalUrl: null, html: '', error });
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return fail(null, 'This is not a valid link.');
+  }
+  try {
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return fail(null, 'Only http and https links can be read.');
+      if (isForbiddenHostName(url.hostname)) return fail(null, 'This address is private or internal and cannot be read.');
+      const response = await requestOnce(url, headers);
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.location;
+        if (!location) return fail(response.status, 'The site redirected without saying where.');
+        url = new URL(location, url);
+        continue;
+      }
+      if (response.status < 200 || response.status >= 300) return fail(response.status, `The site answered with HTTP ${response.status}.`);
+      return { ok: true, httpStatus: response.status, finalUrl: url.toString(), html: decodeBody(response), error: null };
+    }
+    return fail(null, 'Too many redirects.');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EBLOCKEDADDR') return fail(null, 'This address is private or internal and cannot be read.');
+    return fail(null, (error as Error).message.slice(0, 160) || 'The site could not be reached.');
+  }
+}
+
+let rawFetcher: RawHtmlFetcher = defaultRawHtmlFetcher;
+
+/** Tests replace the network. */
+export function setRawHtmlFetcher(next: RawHtmlFetcher | null): void {
+  rawFetcher = next ?? defaultRawHtmlFetcher;
+}
+
+export async function fetchRawHtml(url: string, headers?: Record<string, string>): Promise<RawHtmlPage> {
+  return rawFetcher(url, headers);
 }
