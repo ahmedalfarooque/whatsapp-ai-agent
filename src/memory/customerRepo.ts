@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { getDb } from './db';
 import { currentAccountId } from '../accounts/accountContext';
+import { requestHandoff, returnToAi } from '../handoff/handoffRepo';
 
 export type CustomerLanguage = 'en' | 'ar';
 
@@ -83,19 +84,26 @@ export function setCustomerLanguage(
   return db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId) as Customer;
 }
 
-/** Pauses automation for one customer (human takes over). Idempotent. */
+/**
+ * Pauses automation for one customer (a human is needed). Idempotent. Since human handoffs exist this records a handoff (HUMAN_REQUESTED,
+ * so the customer appears in the queue) and keeps the old flag in step; the flag alone is still honoured by the message pipeline.
+ */
 export function pauseCustomerAutomation(
   customerId: number,
   reason: string,
   db: Database.Database = getDb(),
 ): Customer {
+  requestHandoff({ customerId, source: 'staff', reason }, { type: 'system' }, db);
   db.prepare(
-    `UPDATE customers SET automation_paused = 1, paused_at = datetime('now'), pause_reason = ?, updated_at = datetime('now') WHERE id = ?`,
+    `UPDATE customers SET automation_paused = 1, paused_at = COALESCE(paused_at, datetime('now')), pause_reason = ?, updated_at = datetime('now') WHERE id = ?`,
   ).run(reason, customerId);
   return db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId) as Customer;
 }
 
+/** Gives the customer back to the assistant: ends the open handoff (if any) and clears the flag. */
 export function resumeCustomerAutomation(customerId: number, db: Database.Database = getDb()): Customer {
+  const open = db.prepare(`SELECT id, whatsapp_account_id FROM human_handoffs WHERE customer_id = ? AND state <> 'AI_ACTIVE'`).get(customerId) as { id: number; whatsapp_account_id: number } | undefined;
+  if (open) returnToAi(open.id, { type: 'system' }, open.whatsapp_account_id, db);
   db.prepare(
     `UPDATE customers SET automation_paused = 0, paused_at = NULL, pause_reason = NULL, updated_at = datetime('now') WHERE id = ?`,
   ).run(customerId);

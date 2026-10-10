@@ -642,19 +642,34 @@ route(/^#\/conversations\/(?<id>\d+)$/, 'Conversation', '', async (view, params)
     <section class="panel detail">
       <h3>${esc(conversation.customerLabel || conversation.waId)} ${badge(conversation.status, stateTone(conversation.status))}</h3>
       <p class="muted">Started ${formatDate(conversation.started_at)}${conversation.ended_at ? ` · Ended ${formatDate(conversation.ended_at)}` : ''}</p>
+      <div class="handoff-strip">
+        ${data.handoff
+          ? `${handoffBadge(data.handoff.state)} <a class="btn small" href="#/handoffs/${data.handoff.id}">Open handoff</a>`
+          : (can('support', 'edit') ? '<span class="muted">The assistant is answering this customer.</span> <button class="btn small" id="take-over">Take over this conversation</button>' : '')}
+      </div>
       <div class="transcript">
         ${
           messages.length
             ? messages
                 .map(
                   (m) =>
-                    `<div class="bubble ${m.role === 'user' ? 'in' : m.role === 'assistant' ? 'out' : 'sys'}"><div class="bubble-role">${esc(m.role)}${m.toolName ? ` · ${esc(m.toolName)}` : ''}</div><div class="bubble-text">${esc(m.content)}</div><div class="bubble-time">${formatDate(m.createdAt)}</div></div>`,
+                    `<div class="bubble ${m.role === 'user' ? 'in' : m.role === 'assistant' ? 'out' : 'sys'}"><div class="bubble-role">${esc(m.staff ? 'staff' : m.role)}${m.toolName ? ` · ${esc(m.toolName)}` : ''}</div><div class="bubble-text">${esc(m.content)}</div><div class="bubble-time">${formatDate(m.createdAt)}</div></div>`,
                 )
                 .join('')
             : emptyView('No messages recorded for this conversation.')
         }
       </div>
     </section>`;
+  view.querySelector('#take-over')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const result = await api(`/api/dashboard/customers/${conversation.customerId}/take-over`, { method: 'POST' });
+      location.hash = `#/handoffs/${result.handoffId}`;
+    } catch (error) {
+      toast(error.message, 'error');
+      event.currentTarget.disabled = false;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------

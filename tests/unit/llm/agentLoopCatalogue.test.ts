@@ -74,10 +74,10 @@ describe('agent loop tool permissions', () => {
       const tools = vi.mocked(chatCompletion).mock.calls[0]![0].tools as Array<{ function: { name: string } }> | undefined;
       return (tools ?? []).map((t) => t.function.name);
     };
-    // Every business may look up current public information; only the others' own tools stay separate.
-    expect(await names(JOTUN)).toEqual(['search_catalogues', 'web_search']);
-    expect(await names(PLAIN)).toEqual(['web_search']);
-    expect(await names(1)).toEqual(['check_availability', 'book_appointment', 'web_search']);
+    // Every business may look up current public information and hand over to a person; only the others' own tools stay separate.
+    expect(await names(JOTUN)).toEqual(['search_catalogues', 'web_search', 'request_human_handoff']);
+    expect(await names(PLAIN)).toEqual(['web_search', 'request_human_handoff']);
+    expect(await names(1)).toEqual(['check_availability', 'book_appointment', 'web_search', 'request_human_handoff']);
   });
 
   it('web search runs for any business, returns only public results, and does not unlock the calendar or the catalogues', async () => {

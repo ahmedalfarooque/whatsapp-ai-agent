@@ -383,3 +383,9 @@ select.input,.field select{width:100%;height:42px;padding:0 12px;border-radius:1
 @media (prefers-reduced-motion:reduce){
   .dskel,.skeleton i{animation:none}
 }
+
+/* ---- Human handoff console ---- */
+.reply-form{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+.reply-form textarea{width:100%;min-height:72px;resize:vertical;font:inherit}
+.reply-form .actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.handoff-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 0}

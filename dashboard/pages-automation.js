@@ -385,33 +385,171 @@ function maskNumber(v) {
 }
 
 // ---------------------------------------------------------------------
-// Human Support Queue
+// Human Support Queue — human handoffs: customers who asked for a person, the staff who took them, and finished ones
+// waiting to be returned to the assistant. Every button calls a real API; the server checks permissions and ownership again.
 // ---------------------------------------------------------------------
 
-route('#/support', 'Human Support Queue', 'Customers whose automation is paused and are waiting for a person.', async (view) => {
+const HANDOFF_STATES = {
+  HUMAN_REQUESTED: { label: 'Waiting for staff', tone: 'amber' },
+  HUMAN_ACTIVE: { label: 'In progress', tone: 'blue' },
+  RESOLVED: { label: 'Resolved — AI still paused', tone: 'green' },
+  AI_ACTIVE: { label: 'Back with the assistant', tone: '' },
+};
+function handoffBadge(state) {
+  const s = HANDOFF_STATES[state] || { label: state, tone: '' };
+  return badge(s.label, s.tone);
+}
+function newClientMessageId() {
+  const bytes = new Uint8Array(12);
+  (window.crypto || window.msCrypto).getRandomValues(bytes);
+  return `m${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
+
+route('#/support', 'Human Support Queue', 'Customers who asked for a person. While a customer is here the assistant does not answer them.', async (view) => {
+  const state = { filter: 'open' };
+  let timer = null;
+  let disposed = false;
+  disposeView = () => { disposed = true; clearTimeout(timer); };
+
+  async function act(path, button, okMessage) {
+    button.disabled = true;
+    try {
+      await api(path, { method: 'POST' });
+      toast(okMessage, 'success');
+      await draw();
+    } catch (error) {
+      toast(error.message, 'error');
+      button.disabled = false;
+      await draw();
+    }
+  }
+
   async function draw() {
-    const data = await api('/api/dashboard/support-queue');
+    const data = await api(`/api/dashboard/handoffs?state=${state.filter}`);
+    if (disposed) return;
+    const canAct = can('support', 'edit');
+    const tab = (key, label, n) => `<button class="btn ${state.filter === key ? 'primary' : ''}" data-filter="${key}">${esc(label)}${n === null ? '' : ` (${n})`}</button>`;
     view.innerHTML = `
       <section class="panel">
-        <div class="panel-head"><div><p class="eyebrow">WAITING FOR A HUMAN</p><h3>${data.queue.length} customer${data.queue.length === 1 ? '' : 's'}</h3></div></div>
-        ${data.queue.length ? `<table class="data-table"><thead><tr><th>Customer</th><th>Number</th><th>Last message</th><th>Paused</th><th>Reason</th><th></th></tr></thead><tbody>
-          ${data.queue.map((c) => `<tr><td>${esc(c.display_name || 'Customer')} ${c.language ? badge(c.language.toUpperCase(), 'blue') : ''}</td><td class="file">${esc(maskNumber(c.wa_id))}</td><td style="max-width:320px">${esc(c.lastMessage || '—')}</td><td>${formatDate(c.paused_at)}</td><td class="muted">${esc(c.pause_reason || '—')}</td><td><a class="btn small" href="#/conversations">Open chats</a> <button class="btn small success" data-resume="${c.id}">Resume automation</button></td></tr>`).join('')}
-        </tbody></table>` : emptyView('No one is waiting. When a customer asks for a person (e.g. “agent” or “موظف”), they appear here and automatic replies stop for them until you resume.')}
-        <p class="muted" style="margin-top:14px">Reply to these customers from the WhatsApp app on the connected phone; the workspace only pauses the assistant. Resuming sends the main menu again.</p>
+        <div class="panel-head"><div><p class="eyebrow">HUMAN HANDOFF</p><h3>${data.counts.waiting} waiting · ${data.counts.active} in progress · ${data.counts.resolved} resolved</h3></div></div>
+        <div class="toolbar">${tab('open', 'All open', null)}${tab('waiting', 'Waiting', data.counts.waiting)}${tab('active', 'In progress', data.counts.active)}${tab('resolved', 'Resolved', data.counts.resolved)}</div>
+        ${data.handoffs.length ? `<table class="data-table"><thead><tr><th>Customer</th><th>Number</th><th>Status</th><th>Handled by</th><th>Last message</th><th>Waiting since</th><th></th></tr></thead><tbody>
+          ${data.handoffs.map((h) => `<tr>
+            <td>${esc(h.customerName || 'Customer')} ${h.customerLanguage ? badge(h.customerLanguage.toUpperCase(), 'blue') : ''}${h.requestCount > 1 ? ` <span class="muted" title="The customer asked ${h.requestCount} times">×${h.requestCount}</span>` : ''}</td>
+            <td class="file">${esc(maskNumber(h.customerWaId))}</td>
+            <td>${handoffBadge(h.state)}${h.state === 'RESOLVED' && h.lastMessageAt && h.resolvedAt && h.lastMessageAt > h.resolvedAt ? ` ${badge('new message', 'amber')}` : ''}</td>
+            <td>${esc(h.assignedToName || '—')}</td>
+            <td style="max-width:300px">${esc(h.lastMessage || '—')}</td>
+            <td>${formatDate(h.requestedAt)}</td>
+            <td>
+              ${h.state === 'HUMAN_REQUESTED' && canAct ? `<button class="btn small primary" data-accept="${h.id}">Accept</button> ` : ''}
+              <a class="btn small" href="#/handoffs/${h.id}">Open</a>
+              ${h.state === 'RESOLVED' && canAct ? `<button class="btn small success" data-return="${h.id}">Return to AI</button>` : ''}
+            </td></tr>`).join('')}
+        </tbody></table>` : emptyView('No one is waiting. When a customer asks for a person (for example “I want to talk to someone” or “موظف”), they appear here and the assistant stops answering them until staff hand the conversation back.')}
+        <p class="muted" style="margin-top:14px">Accept a request to become the person handling it, answer from the conversation page, mark it resolved and then return it to the assistant. Notifications are not part of this screen: check it regularly.</p>
       </section>`;
-    view.querySelectorAll('[data-resume]').forEach((btn) => btn.addEventListener('click', async () => {
+    view.querySelectorAll('[data-filter]').forEach((btn) => btn.addEventListener('click', () => { state.filter = btn.dataset.filter; draw(); }));
+    view.querySelectorAll('[data-accept]').forEach((btn) => btn.addEventListener('click', async () => {
       btn.disabled = true;
       try {
-        await api(`/api/dashboard/customers/${btn.dataset.resume}/resume`, { method: 'POST' });
-        toast('Automation resumed for this customer', 'success');
-        await draw();
+        await api(`/api/dashboard/handoffs/${btn.dataset.accept}/accept`, { method: 'POST' });
+        location.hash = `#/handoffs/${btn.dataset.accept}`;
       } catch (error) {
         toast(error.message, 'error');
-        btn.disabled = false;
+        await draw();
       }
     }));
+    view.querySelectorAll('[data-return]').forEach((btn) => btn.addEventListener('click', () => act(`/api/dashboard/handoffs/${btn.dataset.return}/return-to-ai`, btn, 'The conversation is back with the assistant')));
+    clearTimeout(timer);
+    if (!disposed) timer = setTimeout(() => draw().catch(() => {}), 15000);
   }
   await draw();
+});
+
+route(/^#\/handoffs\/(?<id>\d+)$/, 'Handoff', '', async (view, params) => {
+  let timer = null;
+  let disposed = false;
+  let draftText = '';
+  let sending = false;
+  let pendingId = null; // the id of a send that has not been confirmed yet: pressing Send again retries it, never duplicates it
+  disposeView = () => { disposed = true; clearTimeout(timer); };
+
+  async function load(keepDraft) {
+    const data = await api(`/api/dashboard/handoffs/${params.id}`);
+    if (disposed) return;
+    if (keepDraft) { const box = view.querySelector('#hf-text'); if (box) draftText = box.value; }
+    const h = data.handoff;
+    const you = data.you;
+    const mine = h.state === 'HUMAN_ACTIVE' && (you.owns || you.canOverride);
+    const messages = data.messages;
+    view.innerHTML = `
+      <a class="back-link" href="#/support">← Back to the support queue</a>
+      <section class="panel detail">
+        <div class="panel-head"><div>
+          <h3>${esc((data.customer && data.customer.name) || 'Customer')} ${handoffBadge(h.state)}</h3>
+          <p class="muted">${data.customer ? esc(maskNumber(data.customer.waId)) : ''} · asked ${formatDate(h.requestedAt)}${h.requestCount > 1 ? ` (${h.requestCount} times)` : ''} · ${data.assignedTo ? `handled by ${esc(data.assignedTo.name)}` : 'nobody has taken it yet'}</p>
+        </div>
+        <div class="actions">
+          ${h.state === 'HUMAN_REQUESTED' && you.canAct ? '<button class="btn primary" id="hf-accept">Accept and take over</button>' : ''}
+          ${h.state === 'HUMAN_ACTIVE' && you.canAct && (you.owns || you.canOverride) ? '<button class="btn success" id="hf-resolve">Mark resolved</button>' : ''}
+          ${(h.state === 'RESOLVED' || h.state === 'HUMAN_REQUESTED' || (h.state === 'HUMAN_ACTIVE' && (you.owns || you.canOverride))) && you.canAct ? '<button class="btn" id="hf-return">Return to AI</button>' : ''}
+        </div></div>
+        ${h.state === 'HUMAN_REQUESTED' ? '<p class="muted">The assistant is not answering this customer. Accept the request to reply.</p>' : ''}
+        ${h.state === 'HUMAN_ACTIVE' && !mine ? `<p class="muted">${esc(data.assignedTo ? data.assignedTo.name : 'Another staff member')} is handling this conversation; only they (or a manager) can reply or resolve it.</p>` : ''}
+        ${h.state === 'RESOLVED' ? '<p class="muted">Resolved. The assistant stays silent for this customer until you press “Return to AI”.</p>' : ''}
+        <div class="transcript" id="hf-transcript">
+          ${messages === null ? emptyView('You do not have access to the conversation history.') : messages.length
+            ? messages.map((m) => `<div class="bubble ${m.role === 'user' ? 'in' : 'out'}"><div class="bubble-role">${m.role === 'user' ? 'customer' : m.staff ? 'staff' : 'assistant'}</div><div class="bubble-text">${esc(m.content)}</div><div class="bubble-time">${formatDate(m.createdAt)}</div></div>`).join('')
+            : emptyView('No messages yet.')}
+        </div>
+        ${mine && you.canSeeConversation ? `
+        <form id="hf-form" class="reply-form" autocomplete="off">
+          <textarea id="hf-text" rows="3" maxlength="4000" placeholder="Write your reply to the customer…" aria-label="Reply to the customer">${esc(draftText)}</textarea>
+          <div class="actions"><span class="muted" id="hf-note">Sent through this business's WhatsApp number.</span><button class="btn primary" id="hf-send" type="submit">Send</button></div>
+        </form>` : ''}
+        <h4 style="margin-top:18px">History</h4>
+        <ul class="muted" style="list-style:none;padding:0;margin:6px 0 0">${data.events.map((e) => `<li>${formatDate(e.at)} — ${esc(e.event.replace(/_/g, ' '))} (${esc(e.actor)})${e.detail ? ` · ${esc(e.detail)}` : ''}</li>`).join('')}</ul>
+      </section>`;
+    const box = view.querySelector('#hf-transcript');
+    if (box) box.scrollTop = box.scrollHeight;
+
+    const run = async (path, ok, button) => {
+      button.disabled = true;
+      try { await api(path, { method: 'POST' }); toast(ok, 'success'); } catch (error) { toast(error.message, 'error'); }
+      await load(false);
+    };
+    view.querySelector('#hf-accept')?.addEventListener('click', (e) => run(`/api/dashboard/handoffs/${params.id}/accept`, 'You are now handling this conversation', e.currentTarget));
+    view.querySelector('#hf-resolve')?.addEventListener('click', (e) => run(`/api/dashboard/handoffs/${params.id}/resolve`, 'Marked as resolved', e.currentTarget));
+    view.querySelector('#hf-return')?.addEventListener('click', (e) => run(`/api/dashboard/handoffs/${params.id}/return-to-ai`, 'The conversation is back with the assistant', e.currentTarget));
+    view.querySelector('#hf-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (sending) return;
+      const text = view.querySelector('#hf-text').value.trim();
+      if (!text) { toast('Write a message first', 'error'); return; }
+      sending = true;
+      const sendButton = view.querySelector('#hf-send');
+      sendButton.disabled = true;
+      // The same id is reused until the server confirms, so a double click or a retry after an error can never deliver the message twice.
+      if (!pendingId) pendingId = newClientMessageId();
+      try {
+        await api(`/api/dashboard/handoffs/${params.id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, clientMessageId: pendingId }) });
+        pendingId = null;
+        draftText = '';
+        toast('Message sent', 'success');
+        await load(false);
+      } catch (error) {
+        toast(error.message, 'error'); // the draft stays in the box; pressing Send again retries the same message
+        sending = false;
+        sendButton.disabled = false;
+        return;
+      }
+      sending = false;
+    });
+    clearTimeout(timer);
+    if (!disposed) timer = setTimeout(() => { if (!sending && !(document.activeElement && document.activeElement.id === 'hf-text')) load(true).catch(() => {}); }, 8000);
+  }
+  await load(false);
 });
 
 // ---------------------------------------------------------------------

@@ -365,6 +365,10 @@ WhatsApp menu, and disable / delete (the original business is protected).
 Details, the database audit and the **production rollback strategy** are in
 `docs/BUSINESS_SETUP.md`.
 
+**Human handoff.** A customer who asks for a person (English or Arabic, menu option or free text) is held for staff: the assistant
+stops answering them, staff accept, reply from the dashboard, resolve and return the conversation to the AI. State is stored in the
+database and enforced in the message pipeline; see `docs/HUMAN_HANDOFF.md`. Notification delivery is not part of it.
+
 ## 11b. Rotating DASHBOARD_MASTER_KEY
 
 If the key needs to change (suspected compromise, routine security hygiene),

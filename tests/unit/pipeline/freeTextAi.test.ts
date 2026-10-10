@@ -168,7 +168,7 @@ describe('what the model is given: the business\'s own context, rules for unders
     const { system, tools } = firstCall();
     expect(system).toContain('Rowad Alfa Auto Care');
     expect(system).toContain('Car Audio');
-    expect(tools).toEqual(['check_availability', 'book_appointment', 'web_search']);
+    expect(tools).toEqual(['check_availability', 'book_appointment', 'web_search', 'request_human_handoff']);
     expect(system).not.toContain('Alpha Paints');
   });
 

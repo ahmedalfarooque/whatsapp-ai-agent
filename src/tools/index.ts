@@ -4,6 +4,7 @@ import { checkAvailabilitySchema, checkAvailabilityHandler } from './checkAvaila
 import { bookAppointmentSchema, bookAppointmentHandler } from './bookAppointment';
 import { searchCataloguesSchema, searchCataloguesHandler } from './searchCatalogues';
 import { webSearchSchema, webSearchHandler } from './webSearch';
+import { requestHumanHandoffSchema, requestHumanHandoffHandler } from './requestHumanHandoff';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { env } from '../config/env';
 
@@ -41,6 +42,10 @@ export const toolRegistry: Record<string, ToolDefinition> = {
     schema: webSearchSchema,
     handler: webSearchHandler,
   },
+  [TOOL_NAMES.REQUEST_HUMAN_HANDOFF]: {
+    schema: requestHumanHandoffSchema,
+    handler: requestHumanHandoffHandler,
+  },
 };
 
 /** The original business's tools: the two calendar tools, exactly as before the catalogue library existed. */
@@ -61,12 +66,14 @@ export function accountHasCalendar(accountId: number): boolean {
  * What THIS business's assistant may call. Being offered one tool never unlocks another (the agent loop checks each call):
  *  - the original business: its two calendar tools;
  *  - a business with its own catalogue library: the catalogue search over its own catalogues and linked official pages;
- *  - every business: web search for current public information (switch off everywhere with WEB_SEARCH_ENABLED=false).
+ *  - every business: web search for current public information (switch off everywhere with WEB_SEARCH_ENABLED=false);
+ *  - every business: the hand-over to a person (request_human_handoff), last in the list.
  */
 export function toolSchemasForAccount(accountId: number): ToolDefinition['schema'][] {
   const tools: ToolDefinition['schema'][] = [];
   if (accountHasCalendar(accountId)) tools.push(...toolSchemas);
   if (accountHasFeature(accountId, FEATURES.CATALOGUES)) tools.push(searchCataloguesSchema);
   if (env.WEB_SEARCH_ENABLED) tools.push(webSearchSchema);
+  tools.push(requestHumanHandoffSchema);
   return tools;
 }

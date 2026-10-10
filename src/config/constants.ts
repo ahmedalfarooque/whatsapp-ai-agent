@@ -4,6 +4,7 @@ export const TOOL_NAMES = {
   GET_BUSINESS_INFORMATION: 'get_business_information',
   SEARCH_CATALOGUES: 'search_catalogues',
   WEB_SEARCH: 'web_search',
+  REQUEST_HUMAN_HANDOFF: 'request_human_handoff',
 } as const;
 
 export const CONVERSATION_STATUS = {

@@ -58,6 +58,7 @@ const ROUTE_ACCESS = {
   '#/automation': 'menus',
   '#/replies': 'menus',
   '#/support': 'support',
+  '#/handoffs': 'support',
   '#/bookings': 'requests',
   '#/services': 'ai',
   '#/products': 'ai',

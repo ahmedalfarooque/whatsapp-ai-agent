@@ -7,8 +7,7 @@ import {
   setCustomerLanguage,
   setCustomerMenuState,
   getCustomerFlowData,
-  pauseCustomerAutomation,
-  resumeCustomerAutomation,
+  getCustomerById,
   type Customer,
   type CustomerLanguage,
 } from '../memory/customerRepo';
@@ -31,13 +30,16 @@ import { getDeliverableCatalogue } from '../catalogues/catalogueRepo';
 import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
 import { AiCredentialError } from '../llm/aiCredentialError';
-import { MENU_IDS, detectLanguageFromScript, isHardRestart, isHumanSupportRequest, isMenuKeyword, isSubstantiveFreeText } from '../automation/menu';
+import { MENU_IDS, detectLanguageFromScript, isHardRestart, isMenuKeyword, isSubstantiveFreeText } from '../automation/menu';
 import { MENU_STATES, DATA_DRIVEN_FALLBACKS, routeMenu, type RouteResult } from '../automation/menuRouter';
 import { renderCustomerOffers } from '../offers/offerRepo';
 import { resolveTemplate, type TemplateVars } from '../templates/templateRepo';
 import { getAutomationSettings, recordReplyActivity, type ReplyActivityKind } from '../automation/settingsRepo';
 import { currentAccountId, runWithAccount, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 import { isOutsideBusinessHours } from '../setup/hours';
+import { getMenuTables } from '../automation/menuConfig';
+import { detectHumanHandoffIntent } from '../handoff/intent';
+import { customerLeavesHold, getHold, requestHandoff, type Handoff } from '../handoff/handoffRepo';
 
 export interface ProcessDependencies {
   /** The knowledge base of the account the message belongs to. */
@@ -73,6 +75,9 @@ interface ReplyContext {
 
 /** Persists an outbound bubble, sends it, and records the activity. One call = one WhatsApp message. */
 async function reply(ctx: ReplyContext, text: string, kind: ReplyActivityKind, templateKey?: string, detail?: string): Promise<void> {
+  // The last line of defence for human takeover: whatever path got here, a customer held for staff is never answered automatically
+  // (the hand-over acknowledgement itself is the one automatic message allowed).
+  if (kind !== 'human_handoff' && suppressedByHandoff(ctx)) return;
   appendMessage(ctx.conversationId, {
     role: 'assistant',
     content: text,
@@ -87,6 +92,22 @@ async function reply(ctx: ReplyContext, text: string, kind: ReplyActivityKind, t
 async function replyTemplate(ctx: ReplyContext, key: string, kind: ReplyActivityKind = 'rule', vars: TemplateVars = {}, detail?: string): Promise<void> {
   const text = resolveTemplate(key, ctx.language, { name: ctx.customer.display_name ?? ctx.msg.contactName ?? '', ...vars });
   await reply(ctx, text, kind, key, detail);
+}
+
+/**
+ * True (and the reason recorded) when a human now owns this customer. Read fresh from the database every time it matters, so a
+ * takeover pressed while a reply was being prepared is honoured: the reply is dropped instead of sent.
+ */
+function suppressedByHandoff(ctx: ReplyContext, hold: Handoff | null = getHold(ctx.customer.id)): boolean {
+  if (!hold) return false;
+  recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'suppressed', detail: `Human handoff (${hold.state}) — no automatic reply` });
+  logger.info({ waId: maskWaId(ctx.msg.waId), handoffId: hold.id, state: hold.state }, 'automatic reply withheld: a human owns this conversation');
+  return true;
+}
+
+function inGuidedFlow(state: string | null): boolean {
+  if (!state) return false;
+  return Object.values(getMenuTables().flows).some((flow) => state.startsWith(flow.statePrefix));
 }
 
 function storeInbound(conversationId: number, msg: InboundMessage): void {
@@ -155,8 +176,34 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
 
   storeInbound(conversation.id, msg);
 
+  // Human handoff: a customer held for staff (waiting for a person, being handled by one, or resolved but not yet returned to the AI)
+  // gets NO automatic reply — no menu, no template, no AI. Enforced here on the server, before anything else can answer.
+  const hold = getHold(customer.id);
+  const isRestart = msg.type === 'text' && (isRestartCommand(msg.text) || isHardRestart(msg.text));
+  if (hold) {
+    const wantsMenu = msg.interactiveId === MENU_IDS.MAIN_MENU || (msg.type === 'text' && isMenuKeyword(msg.text));
+    if (hold.state !== 'HUMAN_ACTIVE' && (wantsMenu || isRestart)) {
+      // The customer leaves a waiting or finished handoff by asking for the menu / starting over. A handoff a person is handling is theirs to end.
+      customerLeavesHold(customer.id);
+      customer = getCustomerById(customer.id, undefined, null) ?? customer;
+      ctx.customer = customer;
+      if (!isRestart) {
+        setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
+        await replyTemplate({ ...ctx, customer }, 'main_menu', 'rule', {}, 'Customer returned from human support');
+        return;
+      }
+    } else {
+      // Asking again for a person only updates the existing handoff (and reopens a resolved one); it never creates another or answers.
+      if (msg.type === 'text' && detectHumanHandoffIntent(msg.text).requested) {
+        requestHandoff({ customerId: customer.id, conversationId: conversation.id, source: 'customer' });
+      }
+      suppressedByHandoff(ctx, hold);
+      return;
+    }
+  }
+
   // Restart: forget language, menu position, and booking state; the next turn starts from the welcome.
-  if (msg.type === 'text' && (isRestartCommand(msg.text) || isHardRestart(msg.text))) {
+  if (isRestart) {
     clearBookingSession(conversation.id);
     customer = setCustomerLanguage(customer.id, null);
     setCustomerMenuState(customer.id, null, null);
@@ -169,25 +216,18 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
     return;
   }
 
-  // Human takeover: stay silent until staff resume or the customer asks for the menu again.
-  if (customer.automation_paused === 1) {
-    if (msg.interactiveId === MENU_IDS.MAIN_MENU || (msg.type === 'text' && isMenuKeyword(msg.text))) {
-      customer = resumeCustomerAutomation(customer.id);
+  // The customer asks for a person: a persistent handoff is created (once — repeating the request only updates it) and the
+  // assistant goes quiet for this customer. Inside a guided request only the exact keywords count (see handoff/intent.ts).
+  if (msg.type === 'text') {
+    const intent = detectHumanHandoffIntent(msg.text, { inGuidedFlow: inGuidedFlow(customer.menu_state) });
+    if (intent.requested) {
+      requestHandoff({ customerId: customer.id, conversationId: conversation.id, source: 'customer', reason: 'Customer requested a human' });
       setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
-      await replyTemplate({ ...ctx, customer }, 'main_menu', 'rule', {}, 'Customer returned from human support');
+      logger.info({ waId: maskedId, rule: intent.rule }, 'customer asked for a person: handoff requested');
+      await replyTemplate(ctx, 'human_support', 'human_handoff');
+      await replyOutOfHours(ctx);
       return;
     }
-    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: 'Human support mode — automation paused for this customer' });
-    logger.info({ waId: maskedId }, 'automation paused for customer (human support mode)');
-    return;
-  }
-
-  if (msg.type === 'text' && isHumanSupportRequest(msg.text)) {
-    pauseCustomerAutomation(customer.id, 'Customer requested a human');
-    setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
-    await replyTemplate(ctx, 'human_support', 'human_handoff');
-    await replyOutOfHours(ctx);
-    return;
   }
 
   // A brand-new customer whose very first message is a real question gets an ANSWER (in the language they wrote), not a language prompt.
@@ -218,20 +258,35 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
   const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit);
   const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined);
 
-  let finalText: string;
+  let finalText = '';
   let kind: 'ai' | 'error' = 'ai';
   let failureDetail = 'AI failed; fallback sent';
+  let verdict: 'send' | 'ai_handoff' | 'dropped' = 'send';
+  let heldBy: Handoff | null = null;
   try {
     const loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
     finalText = loopResult.finalText;
-    for (const generated of loopResult.generatedMessages) {
-      appendMessage(conversation.id, {
-        role: generated.role,
-        content: generated.content,
-        toolCallId: generated.toolCallId,
-        toolName: generated.toolName,
-        direction: generated.role === 'assistant' ? MESSAGE_DIRECTION.OUTBOUND : undefined,
-      });
+    // The model took a while: ownership may have changed meanwhile. Decide from the database NOW, before anything is stored or sent.
+    heldBy = getHold(customer.id);
+    if (heldBy && heldBy.source === 'ai' && heldBy.state === 'HUMAN_REQUESTED') {
+      // The assistant itself asked for a person (its handoff tool): keep the tool trail, drop its text, send the hand-over acknowledgement.
+      for (const generated of loopResult.generatedMessages.filter((g) => g.role === 'tool' || g.content.startsWith('[requested tools:'))) {
+        appendMessage(conversation.id, { role: generated.role, content: generated.content, toolCallId: generated.toolCallId, toolName: generated.toolName, direction: generated.role === 'assistant' ? MESSAGE_DIRECTION.OUTBOUND : undefined });
+      }
+      verdict = 'ai_handoff';
+    } else if (heldBy) {
+      // A staff member took over while the answer was being written: it is discarded, never stored as sent, never sent.
+      verdict = 'dropped';
+    } else {
+      for (const generated of loopResult.generatedMessages) {
+        appendMessage(conversation.id, {
+          role: generated.role,
+          content: generated.content,
+          toolCallId: generated.toolCallId,
+          toolName: generated.toolName,
+          direction: generated.role === 'assistant' ? MESSAGE_DIRECTION.OUTBOUND : undefined,
+        });
+      }
     }
   } catch (error) {
     const credentialProblem = error instanceof AiCredentialError ? error : null;
@@ -247,9 +302,25 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
       }
       failureDetail = `AI credential problem (${credentialProblem.reason}): fallback sent. Enter a valid OpenRouter key in the dashboard (Providers).`;
     }
-    kind = 'error';
-    finalText = resolveTemplate('fallback_error', language);
-    appendMessage(conversation.id, { role: 'assistant', content: finalText, direction: MESSAGE_DIRECTION.OUTBOUND });
+    heldBy = getHold(customer.id); // staff may have taken over while the model call was failing
+    if (heldBy) {
+      verdict = 'dropped';
+    } else {
+      kind = 'error';
+      finalText = resolveTemplate('fallback_error', language);
+      appendMessage(conversation.id, { role: 'assistant', content: finalText, direction: MESSAGE_DIRECTION.OUTBOUND });
+    }
+  }
+
+  if (verdict === 'ai_handoff') {
+    setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
+    await replyTemplate(ctx, 'human_support', 'human_handoff', {}, 'The assistant handed the conversation to staff');
+    await replyOutOfHours(ctx);
+    return;
+  }
+  if (verdict === 'dropped') {
+    suppressedByHandoff(ctx, heldBy);
+    return;
   }
 
   try {
@@ -269,7 +340,10 @@ async function applyRoute(ctx: ReplyContext, route: RouteResult): Promise<void> 
     const flowData = route.flowData === undefined ? getCustomerFlowData(customer) : route.flowData;
     customer = setCustomerMenuState(customer.id, route.state === undefined ? customer.menu_state : route.state, flowData);
   }
-  if (route.kind === 'human_handoff') customer = pauseCustomerAutomation(customer.id, 'Customer chose "Talk to staff"');
+  if (route.kind === 'human_handoff') {
+    requestHandoff({ customerId: customer.id, conversationId: ctx.conversationId, source: 'menu', reason: 'Customer chose "Talk to staff"' });
+    customer = getCustomerById(customer.id, undefined, null) ?? customer;
+  }
 
   const vars: TemplateVars = { ...route.vars };
   if (route.request) {

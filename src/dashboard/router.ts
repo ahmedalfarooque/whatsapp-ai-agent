@@ -68,9 +68,11 @@ import { getQrSession } from '../memory/qrSessionRepo';
 import { resolveDashboardAccount, assertAccountAccess } from './accountMiddleware';
 import { authorizeDashboardRequest } from './authorize';
 import { registerUserRoutes } from './userRoutes';
+import { registerHandoffRoutes } from './handoffRoutes';
+import { HandoffError, returnToAi, getHold, getOpenHandoff, takeOverCustomer, type HandoffActor } from '../handoff/handoffRepo';
 import { buildOverview, getAiState, OVERVIEW_RANGES, type OverviewRange } from './overview';
 import { accountUiStatus } from '../accounts/accountStatus';
-import { canManageConfiguration, canManageConnections } from './permissions';
+import { canManageConfiguration, canManageConnections, featureLevel, levelAtLeast, type AuthUser } from './permissions';
 import { runWithAccount } from '../accounts/accountContext';
 import {
   listAccountsForAdmin, getAccount, createAccount, updateAccount, setAccountEnabled, AccountValidationError, accountIdsForAdmin, grantAccountAccess, type WhatsappAccount,
@@ -114,7 +116,7 @@ import {
   listReplyActivity,
   type ReplyActivityKind,
 } from '../automation/settingsRepo';
-import { listPausedCustomers, pauseCustomerAutomation, resumeCustomerAutomation } from '../memory/customerRepo';
+import { listPausedCustomers } from '../memory/customerRepo';
 
 function parsePageParams(req: Request): { limit: number; offset: number } {
   const limit = Number.parseInt(String(req.query.limit ?? '25'), 10);
@@ -331,6 +333,7 @@ export function createDashboardRouter(): Router {
     authorizeDashboardRequest(req, res, next);
   });
   registerUserRoutes(router);
+  registerHandoffRoutes(router);
 
   // ---- WhatsApp accounts (businesses) ----------------------------------------
   function accountView(account: WhatsappAccount) {
@@ -764,16 +767,34 @@ export function createDashboardRouter(): Router {
   router.get('/api/dashboard/support-queue', (_req, res) => {
     res.json({ queue: listPausedCustomers() });
   });
+  // Pause / resume are kept for older screens and API users; they run through the handoff lifecycle, so ownership rules apply:
+  // pausing makes the caller the owner of the conversation, resuming returns it to the AI (only the owner, or a manager, may release one that is taken).
+  const staffFor = (req: Request): Extract<HandoffActor, { type: 'staff' }> => {
+    const user = req.authUser as AuthUser;
+    return { type: 'staff', adminId: user.id, canManage: levelAtLeast(featureLevel(user, req.accountId as number, 'support'), 'manage') };
+  };
   router.post('/api/dashboard/customers/:id/pause', (req, res) => {
     const id = Number.parseInt(req.params.id, 10);
     if (!getCustomerById(id)) { res.status(404).json({ error: 'Customer not found' }); return; }
-    const reason = typeof (req.body as { reason?: unknown })?.reason === 'string' ? String((req.body as { reason: string }).reason).slice(0, 200) : 'Paused by staff';
-    res.json(pauseCustomerAutomation(id, reason));
+    try {
+      takeOverCustomer(id, staffFor(req), req.accountId as number);
+      res.json(getCustomerById(id));
+    } catch (error) {
+      if (error instanceof HandoffError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
+      throw error;
+    }
   });
   router.post('/api/dashboard/customers/:id/resume', (req, res) => {
     const id = Number.parseInt(req.params.id, 10);
     if (!getCustomerById(id)) { res.status(404).json({ error: 'Customer not found' }); return; }
-    res.json(resumeCustomerAutomation(id));
+    try {
+      const hold = getHold(id);
+      if (hold) returnToAi(hold.id, staffFor(req), req.accountId as number);
+      res.json(getCustomerById(id));
+    } catch (error) {
+      if (error instanceof HandoffError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
+      throw error;
+    }
   });
 
   router.get('/api/dashboard/summary', (_req, res) => {
@@ -849,15 +870,21 @@ export function createDashboardRouter(): Router {
       res.status(404).json({ error: 'conversation not found' });
       return;
     }
-    const messages = getConversationMessages(id).map((m) => ({
-      id: m.id,
-      role: m.role,
-      content: m.content,
-      direction: m.direction,
-      toolName: m.tool_name,
-      createdAt: m.created_at,
-    }));
-    res.json({ conversation, messages });
+    const messages = getConversationMessages(id).map((m) => {
+      let staff = false;
+      try { staff = Boolean(m.metadata && (JSON.parse(m.metadata) as { staff?: boolean }).staff); } catch { staff = false; }
+      return {
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        direction: m.direction,
+        toolName: m.tool_name,
+        staff,
+        createdAt: m.created_at,
+      };
+    });
+    const open = getOpenHandoff(conversation.customerId);
+    res.json({ conversation, messages, handoff: open ? { id: open.id, state: open.state, assignedAdminId: open.assignedAdminId } : null });
   });
 
   // ---- Bookings -----------------------------------------------------------

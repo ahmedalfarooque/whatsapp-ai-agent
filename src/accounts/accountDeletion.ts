@@ -124,6 +124,9 @@ export async function deleteAccount(accountId: number, confirm: unknown, deps: D
     del('bookingSessions', 'DELETE FROM booking_sessions WHERE conversation_id IN (SELECT id FROM conversations WHERE whatsapp_account_id = ?)', accountId);
     del('bookingLocks', 'DELETE FROM booking_locks WHERE conversation_id IN (SELECT id FROM conversations WHERE whatsapp_account_id = ?)', accountId);
     del('requestEvents', 'DELETE FROM request_events WHERE request_id IN (SELECT id FROM customer_requests WHERE whatsapp_account_id = ?)', accountId);
+    del('handoffMessages', 'DELETE FROM human_handoff_messages WHERE whatsapp_account_id = ?', accountId);
+    del('handoffEvents', 'DELETE FROM human_handoff_events WHERE whatsapp_account_id = ?', accountId);
+    del('handoffs', 'DELETE FROM human_handoffs WHERE whatsapp_account_id = ?', accountId);
     del('outbox', 'DELETE FROM notification_outbox WHERE whatsapp_account_id = ?', accountId);
     del('activity', 'DELETE FROM reply_activity WHERE whatsapp_account_id = ?', accountId);
     del('requests', 'DELETE FROM customer_requests WHERE whatsapp_account_id = ?', accountId);

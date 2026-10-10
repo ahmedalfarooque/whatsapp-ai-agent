@@ -29,7 +29,7 @@ export const FEATURES = [
   { key: 'conversations', label: 'Conversations', description: 'Customer conversation history' },
   { key: 'customers', label: 'Customers', description: 'Customer list and details' },
   { key: 'requests', label: 'Requests & appointments', description: 'Quotation and appointment requests, bookings' },
-  { key: 'support', label: 'Human support queue', description: 'Customers waiting for a person; pause or resume automation' },
+  { key: 'support', label: 'Human support queue', description: 'Customers waiting for a person: accept, reply (with conversations), resolve and return them to the AI; manage = act on another person\'s conversation' },
   { key: 'offers', label: 'Offers', description: 'Offers and their pictures and files' },
   { key: 'catalogues', label: 'Catalogues', description: 'Catalogue library (where enabled)' },
   { key: 'documents', label: 'Documents', description: 'Uploaded documents and files' },
