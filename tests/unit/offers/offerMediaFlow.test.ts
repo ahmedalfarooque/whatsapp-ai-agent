@@ -22,7 +22,8 @@ import { createAccount } from '../../../src/accounts/accountRepo';
 import { runWithAccount } from '../../../src/accounts/accountContext';
 import { documentPath, getDocument, saveDocument, updateDocument } from '../../../src/documents/documentStore';
 import { createOffer, deleteOffer, getOffer, setOfferStatus, updateOffer, OfferValidationError } from '../../../src/offers/offerRepo';
-import { customerOfferMedia, MAX_OFFER_MEDIA_FILES } from '../../../src/offers/offerMedia';
+import { customerOfferMedia, MAX_IMAGE_CAPTION_CHARS, MAX_OFFER_MEDIA_FILES } from '../../../src/offers/offerMedia';
+import { getOrCreateActiveConversation } from '../../../src/memory/conversationRepo';
 import { inspectOfferFile } from '../../../src/offers/offerFiles';
 import { getMenuConfig } from '../../../src/automation/menuConfig';
 import { getCustomerByWaId } from '../../../src/memory/customerRepo';
@@ -89,26 +90,118 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe('A. an offer with an image reaches the customer as a real WhatsApp image', () => {
-  it('Account 1: the offers text, then the picture — actual image media with the right bytes, MIME type and caption', async () => {
+describe('A. an offer with an image reaches the customer as ONE real WhatsApp image message with the offers text as its caption', () => {
+  it('Account 1: actual image media with the right bytes and MIME type, and the complete offers text underneath — no separate text bubble', async () => {
     const bytes = png('account-1-summer');
     const image = doc(LEGACY, 'summer.png', bytes);
     offer(LEGACY, { imageDocumentId: image.id });
     const waId = await openOffers(LEGACY);
 
-    expect(sentTexts().some((t) => t.includes('Summer deal') && t.includes('Details here'))).toBe(true);
     expect(imageCalls()).toHaveLength(1);
     const sent = imageCalls()[0]!;
     expect(sent.mimeType).toBe('image/png');
-    expect(sent.caption).toBe('Summer deal');
     expect(Buffer.isBuffer(sent.bytes)).toBe(true);
     expect(sent.bytes.equals(bytes)).toBe(true);
     expect(vi.mocked(sendImageMessage).mock.calls[0]![0]).toBe(waId);
-    // Order: the offer text first, the picture after it.
-    expect(events.findIndex((e) => e.startsWith('text:🎁'))).toBeGreaterThanOrEqual(0);
-    expect(events.findIndex((e) => e === 'image:Summer deal')).toBeGreaterThan(events.findIndex((e) => e.startsWith('text:🎁')));
+    // The caption is the whole offers reply: header, the offer, the call to action, and the menu options.
+    expect(sent.caption).toContain('🎁 Current Verified Offers at Rowad Alfa:');
+    expect(sent.caption).toContain('Summer deal');
+    expect(sent.caption).toContain('Details here');
+    expect(sent.caption).toContain('💡 To claim an offer, reply with your vehicle model or request a custom quotation.');
+    expect(sent.caption).toContain('4️⃣ Custom Quotation');
+    expect(sent.caption).toContain('0️⃣ Main Menu');
+    expect(sent.caption!.length).toBeLessThanOrEqual(MAX_IMAGE_CAPTION_CHARS);
+    // ...and nothing else was sent for the offers: the offers text is NOT also sent as a message of its own.
+    expect(sentTexts().some((t) => t.includes('Summer deal') || t.includes('Current Verified Offers'))).toBe(false);
+    expect(events.filter((e) => e.startsWith('text:🎁'))).toHaveLength(0);
     // It is NOT just a link in the text: no path, URL or storage name was put into any message.
-    for (const t of sentTexts()) expect(t).not.toMatch(/uploads|\.png|https?:\/\/.*\/api\/dashboard|stored/i);
+    for (const t of [...sentTexts(), sent.caption!]) expect(t).not.toMatch(/uploads|\.png|https?:\/\/.*\/api\/dashboard|stored/i);
+  });
+
+  it('choosing Offers produces exactly one outbound message — the picture with its caption — and the same offer is never sent twice', async () => {
+    offer(LEGACY, { titleEn: 'OFFERS', titleAr: 'عروض', descriptionEn: '', descriptionAr: '', imageDocumentId: doc(LEGACY, 'offers.png', png('offers-image')).id });
+    const waId = `96650${String(++counter).padStart(7, '0')}`;
+    await say(LEGACY, waId, 'hi');
+    await say(LEGACY, waId, '2');
+    await say(LEGACY, waId, '5');
+    vi.mocked(sendTextMessage).mockClear();
+    vi.mocked(sendImageMessage).mockClear();
+    vi.mocked(sendDocumentMessage).mockClear();
+
+    await say(LEGACY, waId, '3');
+
+    expect(vi.mocked(sendTextMessage)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendDocumentMessage)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendImageMessage)).toHaveBeenCalledTimes(1);
+    const caption = imageCalls()[0]!.caption!;
+    const lines = caption.split('\n').filter((l) => l.trim());
+    expect(lines).toEqual([
+      '🎁 Current Verified Offers at Rowad Alfa:',
+      expect.stringContaining('OFFERS'),
+      expect.stringContaining('Price on request'),
+      '💡 To claim an offer, reply with your vehicle model or request a custom quotation.',
+      '4️⃣ Custom Quotation',
+      '0️⃣ Main Menu',
+    ]);
+    expect(caption.match(/OFFERS/g)).toHaveLength(1);
+  });
+
+  it('the conversation record shows what the customer saw: one picture entry holding the whole offers text', async () => {
+    offer(LEGACY, { titleEn: 'Recorded', imageDocumentId: doc(LEGACY, 'rec.png', png('rec')).id });
+    const waId = await openOffers(LEGACY);
+    const customer = getCustomerByWaId(waId, undefined, LEGACY)!;
+    const conversation = getOrCreateActiveConversation(customer.id);
+    const outbound = getDb()
+      .prepare("SELECT content, message_type FROM conversation_messages WHERE conversation_id = ? AND direction = 'outbound' ORDER BY id")
+      .all(conversation.id) as Array<{ content: string; message_type: string }>;
+    const withOffers = outbound.filter((m) => m.content.includes('Recorded'));
+    expect(withOffers).toHaveLength(1);
+    expect(withOffers[0]!.message_type).toBe('image');
+    expect(withOffers[0]!.content).toContain('Current Verified Offers');
+    expect(withOffers[0]!.content).toContain('0️⃣ Main Menu');
+  });
+});
+
+describe('A2. when the picture cannot carry the text, the customer still receives the offers — once', () => {
+  it('a text longer than a WhatsApp caption can hold is sent in full as text (never truncated) plus the picture', async () => {
+    offer(LEGACY, { titleEn: 'Long one', descriptionEn: 'x'.repeat(900), imageDocumentId: doc(LEGACY, 'long.png', png('long')).id });
+    offer(LEGACY, { titleEn: 'Long two', descriptionEn: 'y'.repeat(900) });
+    await openOffers(LEGACY);
+    const offersTexts = sentTexts().filter((t) => t.includes('Current Verified Offers'));
+    expect(offersTexts).toHaveLength(1);
+    expect(offersTexts[0]).toContain('x'.repeat(900));
+    expect(offersTexts[0]).toContain('y'.repeat(900));
+    expect(offersTexts[0]).toContain('0️⃣ Main Menu');
+    expect(imageCalls()).toHaveLength(1);
+    expect(imageCalls()[0]!.caption).toBe('Long one');
+  });
+
+  it('a failed picture send falls back to the offers text — one text, and the picture is not retried', async () => {
+    offer(LEGACY, { titleEn: 'Fallback deal', imageDocumentId: doc(LEGACY, 'fb.png', png('fb')).id });
+    vi.mocked(sendImageMessage).mockRejectedValue(new Error('socket closed'));
+    await openOffers(LEGACY);
+    expect(vi.mocked(sendImageMessage)).toHaveBeenCalledTimes(1);
+    expect(sentTexts().filter((t) => t.includes('Fallback deal'))).toHaveLength(1);
+  });
+
+  it('several offers with pictures: the first picture carries the whole text, every other picture carries only its own title', async () => {
+    offer(LEGACY, { titleEn: 'First deal', imageDocumentId: doc(LEGACY, 'p1.png', png('p1')).id, priority: 5 });
+    offer(LEGACY, { titleEn: 'Second deal', imageDocumentId: doc(LEGACY, 'p2.png', png('p2')).id, priority: 1 });
+    await openOffers(LEGACY);
+    expect(sentTexts().some((t) => t.includes('First deal'))).toBe(false);
+    expect(imageCalls()).toHaveLength(2);
+    expect(imageCalls()[0]!.caption).toContain('Current Verified Offers');
+    expect(imageCalls()[0]!.caption).toContain('First deal');
+    expect(imageCalls()[0]!.caption).toContain('Second deal');
+    expect(imageCalls()[1]!.caption).toBe('Second deal');
+  });
+
+  it('a PDF-only offer: the offers text goes as one text message and the PDF follows as a document', async () => {
+    offer(LEGACY, { titleEn: 'Pdf only', documentId: doc(LEGACY, 'only.pdf', makePdf(['only'])).id });
+    await openOffers(LEGACY);
+    expect(sentTexts().filter((t) => t.includes('Pdf only'))).toHaveLength(1);
+    expect(imageCalls()).toHaveLength(0);
+    expect(documentCalls()).toHaveLength(1);
   });
 });
 
@@ -129,14 +222,16 @@ describe('B. an offer with a PDF (or other file) reaches the customer as a real 
     expect(sent.bytes.subarray(0, 4).toString()).toBe('%PDF');
   });
 
-  it('an offer with both: text first, then the image, then the document', async () => {
+  it('an offer with both: the picture (carrying the offers text) first, then the document — and no separate text message', async () => {
     const image = doc(LEGACY, 'both.png', png('both'));
     const file = doc(LEGACY, 'both.pdf', makePdf(['both']));
     offer(LEGACY, { imageDocumentId: image.id, documentId: file.id });
     await openOffers(LEGACY);
     const media = events.filter((e) => e.startsWith('image:') || e.startsWith('document:'));
-    expect(media).toEqual(['image:Summer deal', 'document:Summer deal.pdf']);
-    expect(events.findIndex((e) => e.startsWith('text:🎁'))).toBeLessThan(events.indexOf('image:Summer deal'));
+    expect(media).toHaveLength(2);
+    expect(media[0]).toMatch(/^image:🎁 Current Verified Offers/);
+    expect(media[1]).toBe('document:Summer deal.pdf');
+    expect(events.filter((e) => e.startsWith('text:🎁'))).toHaveLength(0);
   });
 
   it('other supported file types keep their own MIME type', async () => {
@@ -179,7 +274,8 @@ describe('D / F. every business — the second one and one created later — get
     expect(documentCalls()).toHaveLength(1);
     expect(imageCalls()[0]!.bytes.equals(ownPng)).toBe(true);
     expect(documentCalls()[0]!.bytes.equals(ownPdf)).toBe(true);
-    expect(imageCalls()[0]!.caption).toBe(`OWN-${accountId}`);
+    expect(imageCalls()[0]!.caption).toContain(`OWN-${accountId}`);
+    expect(sentTexts().some((t) => t.includes(`OWN-${accountId}`))).toBe(false); // the offers text rides in the picture's caption
     const everything = JSON.stringify([sentTexts(), imageCalls().map((i) => [i.caption, i.fileName]), documentCalls().map((d) => [d.caption, d.fileName])]);
     expect(everything).not.toContain('ACCOUNT-ONE');
     expect(imageCalls()[0]!.bytes.includes(Buffer.from('one-secret'))).toBe(false);
@@ -289,7 +385,7 @@ describe('G. a missing, empty or broken attachment never crashes anything and ne
     offer(LEGACY, { titleEn: 'Second', imageDocumentId: doc(LEGACY, 'good.png', good).id, priority: 1 });
     await openOffers(LEGACY);
     expect(imageCalls()).toHaveLength(1);
-    expect(imageCalls()[0]!.caption).toBe('Second');
+    expect(imageCalls()[0]!.caption).toContain('Second'); // the usable picture carries the offers text
     expect(imageCalls()[0]!.bytes.equals(good)).toBe(true);
   });
 
@@ -308,8 +404,11 @@ describe('G. a missing, empty or broken attachment never crashes anything and ne
     offer(LEGACY, { titleEn: 'Two', imageDocumentId: doc(LEGACY, '2.png', png('2')).id, priority: 1 });
     vi.mocked(sendImageMessage).mockRejectedValueOnce(new Error('socket closed'));
     await openOffers(LEGACY);
+    // The first picture (which carried the offers text) failed: the text goes as a normal message, the failed picture is not retried,
+    // and the next picture is still delivered with its own title.
     expect(vi.mocked(sendImageMessage)).toHaveBeenCalledTimes(2);
     expect(events.filter((e) => e.startsWith('image:'))).toEqual(['image:Two']);
+    expect(sentTexts().filter((t) => t.includes('One') && t.includes('Two'))).toHaveLength(1);
   });
 
   it('a connection that cannot carry media (Meta Cloud API) still delivers the text and stops after one note', async () => {
@@ -350,7 +449,9 @@ describe('H. offers that must not be shown are not shown — and neither are the
     offer(LEGACY, { titleEn: 'Visible', imageDocumentId: doc(LEGACY, 'v.png', visible).id });
     offer(LEGACY, { titleEn: 'Hidden', visibility: 'internal', ...attach() });
     await openOffers(LEGACY);
-    expect(imageCalls().map((i) => i.caption)).toEqual(['Visible']);
+    expect(imageCalls()).toHaveLength(1);
+    expect(imageCalls()[0]!.caption).toContain('Visible');
+    expect(imageCalls()[0]!.caption).not.toContain('Hidden');
     expect(JSON.stringify(sentTexts())).not.toContain('Hidden');
   });
 
@@ -393,10 +494,12 @@ describe('J. Arabic and English, without changing which business is served', () 
   it('the caption and offer text follow the customer\'s language, and the customer\'s language is kept', async () => {
     offer(SECOND, { titleEn: 'English title', titleAr: 'عنوان عربي', imageDocumentId: doc(SECOND, 'l.png', png('lang')).id, documentId: doc(SECOND, 'l.pdf', makePdf(['lang'])).id });
     const arabicCustomer = await openOffers(SECOND, 'ar');
-    expect(imageCalls()[0]!.caption).toBe('عنوان عربي');
+    expect(imageCalls()[0]!.caption).toContain('عنوان عربي');
+    expect(imageCalls()[0]!.caption).toContain('العروض الحالية'); // the Arabic offers template, in the picture's caption
+    expect(imageCalls()[0]!.caption).not.toContain('English title');
     expect(documentCalls()[0]!.caption).toBe('عنوان عربي');
     expect(documentCalls()[0]!.fileName).toBe('عنوان عربي.pdf');
-    expect(sentTexts().some((t) => t.includes('عنوان عربي'))).toBe(true);
+    expect(sentTexts().some((t) => t.includes('عنوان عربي'))).toBe(false);
     expect(getCustomerByWaId(arabicCustomer, undefined, SECOND)?.language).toBe('ar');
 
     vi.clearAllMocks();
@@ -404,7 +507,7 @@ describe('J. Arabic and English, without changing which business is served', () 
     vi.mocked(sendDocumentMessage).mockResolvedValue({ messaging_product: 'whatsapp', contacts: [], messages: [{ id: 'd' }] });
     vi.mocked(sendTextMessage).mockResolvedValue({ messaging_product: 'whatsapp', contacts: [], messages: [{ id: 't' }] });
     const englishCustomer = await openOffers(SECOND, 'en');
-    expect(imageCalls()[0]!.caption).toBe('English title');
+    expect(imageCalls()[0]!.caption).toContain('English title');
     expect(documentCalls()[0]!.fileName).toBe('English title.pdf');
     expect(getCustomerByWaId(englishCustomer, undefined, SECOND)?.language).toBe('en');
   });
@@ -412,13 +515,16 @@ describe('J. Arabic and English, without changing which business is served', () 
   it('asking for the offers again, after switching language, sends the media again in the new language', async () => {
     offer(LEGACY, { titleEn: 'Switch EN', titleAr: 'تبديل', imageDocumentId: doc(LEGACY, 'sw.png', png('sw')).id });
     const waId = await openOffers(LEGACY, 'en');
-    expect(imageCalls().map((i) => i.caption)).toEqual(['Switch EN']);
+    expect(imageCalls()).toHaveLength(1);
+    expect(imageCalls()[0]!.caption).toContain('Switch EN');
     await say(LEGACY, waId, '0'); // main menu... then language
     await say(LEGACY, waId, 'language');
     await say(LEGACY, waId, '1'); // Arabic
     await say(LEGACY, waId, '5');
     await say(LEGACY, waId, '3');
-    expect(imageCalls().map((i) => i.caption)).toEqual(['Switch EN', 'تبديل']);
+    expect(imageCalls()).toHaveLength(2);
+    expect(imageCalls()[1]!.caption).toContain('تبديل');
+    expect(imageCalls()[1]!.caption).not.toContain('Switch EN');
     expect(getCustomerByWaId(waId, undefined, LEGACY)?.language).toBe('ar');
   });
 });
@@ -428,7 +534,7 @@ describe('the conversation record and limits', () => {
     offer(LEGACY, { titleEn: 'Logged', imageDocumentId: doc(LEGACY, 'log.png', png('log')).id, documentId: doc(LEGACY, 'log.pdf', makePdf(['log'])).id });
     await openOffers(LEGACY);
     const activity = listReplyActivity({ limit: 30, accountId: LEGACY }).map((r) => r.detail ?? '');
-    expect(activity).toEqual(expect.arrayContaining(['Offer image sent: Logged', 'Offer document sent: Logged']));
+    expect(activity).toEqual(expect.arrayContaining(['Offers sent as one picture message (text in the caption)', 'Offer document sent: Logged']));
   });
 
   it('a long list is capped per request, and the files left out are reported rather than dropped silently', () => {

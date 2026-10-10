@@ -13,6 +13,12 @@ import { inspectOfferFile, type OfferFileProblem, type OfferFileSlot } from './o
 /** A safety cap per request so a long offer list can never flood a chat. Skipped files are reported, never dropped silently. */
 export const MAX_OFFER_MEDIA_FILES = 12;
 
+/**
+ * WhatsApp shows at most 1,024 characters under a picture. The offers text goes in the picture's caption (one message) only when it
+ * fits; a longer list is sent as ordinary text plus the pictures, so nothing is ever cut off.
+ */
+export const MAX_IMAGE_CAPTION_CHARS = 1024;
+
 export interface OfferMediaItem {
   offerId: number;
   documentId: number;

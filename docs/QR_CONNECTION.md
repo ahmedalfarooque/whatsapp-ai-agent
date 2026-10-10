@@ -165,10 +165,18 @@ a property of WhatsApp identities, not of a business).
 
 ### Offers: pictures and files reach the customer as real media
 
-When a customer opens the **Offers** option (every business's menu routes to the same offers template), the offers text is sent
-first. After it, each currently visible offer's **image** is sent as a real WhatsApp **image** and its **supporting file** as a real
-WhatsApp **document**, one after another, each captioned with the offer title in the customer's language. Nothing is a link or a
-path in the text, and the same Baileys connection that received the message carries the media.
+When a customer opens the **Offers** option (every business's menu routes to the same offers template), an offer with a picture
+arrives as **one WhatsApp message**: the first visible offer's **image** with the **complete offers text as its caption** (header,
+the offers, the call to action and the menu options) — there is no separate text bubble beside it. Any further pictures follow as
+their own images captioned with their offer title, and each **supporting file** as a real WhatsApp **document** captioned with its
+offer title, in the customer's language. Nothing is a link or a path in the text, and the same Baileys connection that received the
+message carries the media.
+
+- **Caption limit:** WhatsApp shows at most 1,024 characters under a picture (`MAX_IMAGE_CAPTION_CHARS`). A longer offers text is
+  never truncated: it is sent as one ordinary text message and the pictures follow with their titles.
+- **Always delivered, never twice:** with no picture (or a PDF-only offer), a connection that cannot carry media (Meta Cloud API),
+  or a failed picture send, the offers text goes as one ordinary message. A picture whose send was attempted is not sent again.
+  Media sends are not retried, and inbound messages are de-duplicated by id before the pipeline runs.
 
 - **What is sent:** only offers that are published, inside their validity window, customer-visible, and not draft, finished,
   archived or deleted — the same filter as the offers text. Files are looked up only among **that business's own** documents
@@ -177,7 +185,7 @@ path in the text, and the same Baileys connection that received the message carr
   not a picture, and the Offers form shows why. An attachment that did not change is not re-checked, so older offers stay editable.
 - **Safety at send time:** the stored file must exist, not be empty or over 16 MB, and match its type (PDF, PNG, JPG, WEBP, Office
   signatures); the storage path is confined to the business's uploads folder. A file that fails is skipped with a log line (offer and
-  document ids only, never a path) and an activity-log entry; the offer text has already been sent and the other files still go.
+  document ids only, never a path) and an activity-log entry; the offer text is still delivered and the other files still go.
 - **Limits:** at most 12 files per request; any left out are reported as `over_limit`, never dropped silently. A file used by two
   offers is sent once. The Meta Cloud API connection cannot carry media: the text is delivered and a single note is logged.
 - **Storage:** uploads live in the data folder next to the database (`<data>/uploads` for the original business,

@@ -26,7 +26,7 @@ import { buildSystemPrompt } from '../llm/buildSystemPrompt';
 import { runAgentLoop } from '../llm/agentLoop';
 import fs from 'node:fs';
 import { sendTextMessage, sendDocumentMessage, sendImageMessage, ImageDeliveryUnsupportedError, DocumentDeliveryUnsupportedError } from '../whatsapp/client';
-import { customerOfferMedia } from '../offers/offerMedia';
+import { customerOfferMedia, MAX_IMAGE_CAPTION_CHARS, type OfferMediaItem } from '../offers/offerMedia';
 import { getDeliverableCatalogue } from '../catalogues/catalogueRepo';
 import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
@@ -286,24 +286,31 @@ async function applyRoute(ctx: ReplyContext, route: RouteResult): Promise<void> 
   const language: CustomerLanguage = (route.language ?? customer.language) || 'en';
   const nextCtx: ReplyContext = { ...ctx, customer, language };
   for (const key of route.send) {
-    await replyTemplate(nextCtx, resolveDataDrivenKey(key, language, vars), route.kind, vars);
+    const resolved = resolveDataDrivenKey(key, language, vars);
+    // The Offers option (every business's menu routes to this one template) — nothing here is specific to any business.
+    if (resolved === OFFERS_LIST_TEMPLATE) await deliverOffers(nextCtx, resolved, route.kind, vars);
+    else await replyTemplate(nextCtx, resolved, route.kind, vars);
   }
   if (route.catalogueId !== undefined) await deliverCatalogue(nextCtx, route.catalogueId);
-  // The Offers option (every business's menu routes to this one template): after the offers text, send each visible offer's picture
-  // and supporting file as real WhatsApp media. Nothing here is specific to any business.
-  if (route.send.includes(OFFERS_LIST_TEMPLATE)) await deliverOfferMedia(nextCtx);
   if (route.kind === 'human_handoff') await replyOutOfHours(nextCtx);
 }
 
 const OFFERS_LIST_TEMPLATE = 'prices_offers_list';
 
+interface LoadedOfferFile {
+  item: OfferMediaItem;
+  bytes: Buffer;
+}
+
 /**
- * Sends the pictures and files attached to the offers this business currently shows customers — as real WhatsApp image media and
- * WhatsApp documents through the SAME connection the message arrived on, one after another, each captioned with its offer title.
- * Only THIS business's offers and documents are read. A missing or unreadable file is skipped with a safe log line (offer and
- * document ids, never a path); the offer text has already been sent, and one bad file never stops the rest or crashes anything.
+ * The Offers reply. When an offer has a picture the customer gets ONE WhatsApp message: the first picture with the complete offers
+ * text as its caption (so there is never a separate text bubble beside it). Any further pictures and supporting files follow as
+ * their own messages — each is a different file, never the same offer twice. Everything falls back to plain text so the customer
+ * always receives the offers: no picture, a text longer than a caption may hold, a connection that cannot carry media, or a send
+ * failure. Only THIS business's offers and documents are read; a missing or unreadable file is skipped with a safe log line (offer
+ * and document ids, never a path) and never crashes anything.
  */
-async function deliverOfferMedia(ctx: ReplyContext): Promise<void> {
+async function deliverOffers(ctx: ReplyContext, key: string, kind: ReplyActivityKind, vars: TemplateVars): Promise<void> {
   const accountId = currentAccountId();
   const { items, skipped } = customerOfferMedia(ctx.language);
   for (const s of skipped) {
@@ -312,38 +319,74 @@ async function deliverOfferMedia(ctx: ReplyContext): Promise<void> {
   if (skipped.length > 0) {
     recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'error', detail: `${skipped.length} offer attachment(s) could not be sent (${[...new Set(skipped.map((s) => s.reason))].join(', ')})` });
   }
+
+  const files: LoadedOfferFile[] = [];
   for (const item of items) {
-    let bytes: Buffer;
     try {
-      bytes = fs.readFileSync(item.path);
+      files.push({ item, bytes: fs.readFileSync(item.path) });
     } catch {
       logger.warn({ account: accountId, offerId: item.offerId, documentId: item.documentId }, 'offer attachment could not be read at send time');
       recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'error', detail: `Offer attachment could not be read (offer ${item.offerId})` });
-      continue;
     }
-    try {
-      if (item.kind === 'image') await sendImageMessage(ctx.msg.waId, { fileName: item.fileName, mimeType: item.mimeType, bytes, caption: item.title });
-      else await sendDocumentMessage(ctx.msg.waId, { fileName: item.fileName, mimeType: item.mimeType, bytes, caption: item.title });
-    } catch (error) {
-      if (error instanceof ImageDeliveryUnsupportedError || error instanceof DocumentDeliveryUnsupportedError) {
-        // This connection (the Meta Cloud API one) cannot carry media: the offer text was delivered, say so once and stop.
-        logger.warn({ account: accountId, channel: ctx.channel }, 'this WhatsApp connection cannot deliver offer media');
-        recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'error', detail: 'Offer attachments need the QR (linked device) connection' });
-        return;
-      }
-      logger.error({ account: accountId, offerId: item.offerId, documentId: item.documentId, errorName: (error as Error)?.name }, 'offer attachment could not be sent');
-      recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'error', detail: `Offer attachment could not be sent (offer ${item.offerId})` });
-      continue;
-    }
-    appendMessage(ctx.conversationId, {
-      role: 'assistant',
-      content: `[${item.kind}] ${item.title}`,
-      direction: MESSAGE_DIRECTION.OUTBOUND,
-      messageType: item.kind,
-      metadata: { offerId: item.offerId },
-    });
-    recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'rule', templateKey: 'offer_media', detail: `Offer ${item.kind} sent: ${item.title}` });
   }
+
+  const text = resolveTemplate(key, ctx.language, { name: ctx.customer.display_name ?? ctx.msg.contactName ?? '', ...vars });
+  let mediaUnsupported = false;
+  let captioned: LoadedOfferFile | undefined;
+  let attempted: LoadedOfferFile | undefined; // a picture whose send was tried is never sent a second time, even if it failed
+  const firstImage = files.find((f) => f.item.kind === 'image');
+  if (firstImage && text.length <= MAX_IMAGE_CAPTION_CHARS) {
+    attempted = firstImage;
+    const outcome = await sendOfferFile(ctx, firstImage, text, { templateKey: key, detail: 'Offers sent as one picture message (text in the caption)' });
+    if (outcome === 'sent') captioned = firstImage;
+    else if (outcome === 'unsupported') mediaUnsupported = true;
+  } else if (firstImage) {
+    logger.info({ account: accountId, length: text.length, limit: MAX_IMAGE_CAPTION_CHARS }, 'offers text is longer than a picture caption can hold; sending it as text plus the pictures');
+  }
+
+  // No caption message went out: the offers text goes as an ordinary message so the customer always receives it.
+  if (!captioned) await reply(ctx, text, kind, key);
+
+  for (const file of files) {
+    if (file === attempted) continue;
+    if (mediaUnsupported) break;
+    const outcome = await sendOfferFile(ctx, file, file.item.title, { templateKey: 'offer_media', detail: `Offer ${file.item.kind} sent: ${file.item.title}` });
+    if (outcome === 'unsupported') mediaUnsupported = true;
+  }
+}
+
+/** Sends one offer picture/file with the given caption. 'unsupported' = this connection cannot carry media at all. */
+async function sendOfferFile(
+  ctx: ReplyContext,
+  file: LoadedOfferFile,
+  caption: string,
+  record: { templateKey: string; detail: string },
+): Promise<'sent' | 'unsupported' | 'failed'> {
+  const { item, bytes } = file;
+  const payload = { fileName: item.fileName, mimeType: item.mimeType, bytes, caption };
+  try {
+    if (item.kind === 'image') await sendImageMessage(ctx.msg.waId, payload);
+    else await sendDocumentMessage(ctx.msg.waId, payload);
+  } catch (error) {
+    if (error instanceof ImageDeliveryUnsupportedError || error instanceof DocumentDeliveryUnsupportedError) {
+      // This connection (the Meta Cloud API one) cannot carry media: the offer text still goes as plain text.
+      logger.warn({ account: currentAccountId(), channel: ctx.channel }, 'this WhatsApp connection cannot deliver offer media');
+      recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'error', detail: 'Offer attachments need the QR (linked device) connection' });
+      return 'unsupported';
+    }
+    logger.error({ account: currentAccountId(), offerId: item.offerId, documentId: item.documentId, errorName: (error as Error)?.name }, 'offer attachment could not be sent');
+    recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'error', detail: `Offer attachment could not be sent (offer ${item.offerId})` });
+    return 'failed';
+  }
+  appendMessage(ctx.conversationId, {
+    role: 'assistant',
+    content: `[${item.kind}] ${caption}`,
+    direction: MESSAGE_DIRECTION.OUTBOUND,
+    messageType: item.kind,
+    metadata: { offerId: item.offerId, templateKey: record.templateKey },
+  });
+  recordReplyActivity({ customerId: ctx.customer.id, waId: ctx.msg.waId, channel: ctx.channel, kind: 'rule', templateKey: record.templateKey, detail: record.detail });
+  return 'sent';
 }
 
 /**
