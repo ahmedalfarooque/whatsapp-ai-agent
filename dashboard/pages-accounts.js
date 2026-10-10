@@ -13,8 +13,9 @@ route('#/accounts', 'WhatsApp Accounts', 'Every business this workspace answers 
     const accounts = data.accounts || [];
     const selected = getSelectedAccountId();
 
+    const manage = hasCap('connection'); // creating, editing, enabling/disabling accounts and opening the QR need connection access
     view.innerHTML = `
-      <section class="panel" style="margin-bottom:18px">
+      ${manage ? `<section class="panel" style="margin-bottom:18px">
         <div class="panel-head"><div><p class="eyebrow">ADD A BUSINESS</p><h3>New WhatsApp account</h3></div></div>
         <form id="account-create" class="form-grid" autocomplete="off">
           <div class="field"><label for="acc-name">Business name (English) *</label><input id="acc-name" name="name" type="text" maxlength="200" required placeholder="e.g. Noor Salon"></div>
@@ -23,10 +24,11 @@ route('#/accounts', 'WhatsApp Accounts', 'Every business this workspace answers 
           <div class="field" style="align-self:end"><button type="submit" class="btn primary">Create account</button></div>
         </form>
         <p class="muted" style="margin-top:10px">After creating the account, select it and open <b>WhatsApp Connection</b> to scan its QR code with that business's phone. Its profile, catalogue, offers, templates and knowledge start empty and never share data with other accounts.</p>
-      </section>
+      </section>` : ''}
       <div class="account-grid" id="account-cards">${accounts.length ? accounts.map((a) => card(a, a.id === selected)).join('') : '<p class="muted">No accounts yet.</p>'}</div>`;
 
-    view.querySelector('#account-create').addEventListener('submit', async (e) => {
+    const createForm = view.querySelector('#account-create');
+    if (createForm) createForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const form = e.currentTarget;
       const body = { name: form.name.value.trim(), nameAr: form.nameAr.value.trim() || null, businessCategory: form.businessCategory.value.trim() || null };
@@ -91,13 +93,13 @@ route('#/accounts', 'WhatsApp Accounts', 'Every business this workspace answers 
         <dt>Last error</dt><dd class="${a.lastError ? '' : 'muted'}">${esc(a.lastError || 'None')}</dd>
       </dl>
       <div class="actions">
-        <button class="btn primary" data-act="setup" data-id="${a.id}">Set up business</button>
+        ${can('business') || hasCap('connection') ? `<button class="btn primary" data-act="setup" data-id="${a.id}">Set up business</button>` : ''}
         ${isSelected ? '<button class="btn" disabled>Selected</button>' : `<button class="btn" data-act="select" data-id="${a.id}">Switch to this account</button>`}
-        <button class="btn" data-act="connection" data-id="${a.id}">${a.uiStatus === 'connected' ? 'Open connection' : 'Connect / show QR'}</button>
+        ${hasCap('connection') ? `<button class="btn" data-act="connection" data-id="${a.id}">${a.uiStatus === 'connected' ? 'Open connection' : 'Connect / show QR'}</button>
         <button class="btn ghost" data-act="edit" data-id="${a.id}">Edit</button>
         ${a.enabled
           ? `<button class="btn danger" data-act="disable" data-id="${a.id}" ${a.isLegacy ? 'title="The original business account can be disabled too; its session is kept."' : ''}>Disable</button>`
-          : `<button class="btn" data-act="enable" data-id="${a.id}">Enable</button>`}
+          : `<button class="btn" data-act="enable" data-id="${a.id}">Enable</button>`}` : ''}
       </div>
     </section>`;
   }

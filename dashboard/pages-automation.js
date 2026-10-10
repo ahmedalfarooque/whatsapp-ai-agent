@@ -41,12 +41,23 @@ function updateHeaderConnection(status) {
   }
 }
 
+// The connection pill follows the selected account from the accounts list the app already polls (everyone may see an
+// account's connection STATE; only users who manage connections can open the QR itself).
+function syncHeaderConnectionFromAccount() {
+  const account = typeof currentAccount === 'function' ? currentAccount() : null;
+  if (account) updateHeaderConnection({ phase: account.phase, phoneNumber: account.phoneNumber });
+}
+document.addEventListener('workspace:accounts', syncHeaderConnectionFromAccount);
+
 let headerTimer;
 async function pollHeaderConnection() {
   clearTimeout(headerTimer);
   try {
-    const [status, automation] = await Promise.all([api('/api/dashboard/whatsapp/qr'), api('/api/dashboard/automation')]);
-    updateHeaderConnection(status);
+    syncHeaderConnectionFromAccount();
+    // Menu counters need the "menus" permission; a user without it simply sees no counters (no request is made, none is refused).
+    if (!can('menus')) { headerTimer = setTimeout(pollHeaderConnection, 5000); return; }
+    const automation = await api('/api/dashboard/automation');
+    updateHeaderConnection(automation.connection);
     const drafts = automation.templates.filter((t) => t.hasDraft).length;
     const draftsEl = document.querySelector('#nav-drafts');
     draftsEl.textContent = drafts;
@@ -286,12 +297,16 @@ route('#/automation', 'Auto-Reply Control Center', 'Decide what answers customer
   disposeView = () => { disposed = true; clearTimeout(timer); };
 
   async function draw() {
-    const [data, conn, activity, errors] = await Promise.all([
+    // The QR/connection details need connection access and the activity log needs its own permission; without them the
+    // page still works from what /automation already reports (state only) and shows an empty log.
+    const noActivity = { activity: [] };
+    const [data, qr, activity, errors] = await Promise.all([
       api('/api/dashboard/automation'),
-      api('/api/dashboard/whatsapp/qr'),
-      api('/api/dashboard/automation/activity?limit=40'),
-      api('/api/dashboard/automation/activity?kind=error&limit=10'),
+      hasCap('connection') ? api('/api/dashboard/whatsapp/qr').catch(() => null) : Promise.resolve(null),
+      can('activity') ? api('/api/dashboard/automation/activity?limit=40') : Promise.resolve(noActivity),
+      can('activity') ? api('/api/dashboard/automation/activity?kind=error&limit=10') : Promise.resolve(noActivity),
     ]);
+    const conn = qr || data.connection;
     if (disposed) return;
     const s = data.settings;
     const published = data.templates.filter((t) => !t.hasDraft);
@@ -597,7 +612,14 @@ route(/^#\/replies\/(?<key>[\w-]+)$/, 'Manual Reply Editor', 'Edit every automat
 // ---------------------------------------------------------------------
 
 route('#/flow', 'Auto-Reply Flow Map', 'How an incoming message travels through the assistant — built from the router\'s real menu tree and the live templates.', async (view) => {
-  const [data, conn, tree, ai] = await Promise.all([api('/api/dashboard/automation'), api('/api/dashboard/whatsapp/qr'), api('/api/dashboard/menu-tree'), api('/api/dashboard/ai')]);
+  // QR details need connection access and the AI summary needs the "ai" permission; the map degrades gracefully without them.
+  const [data, qr, tree, ai] = await Promise.all([
+    api('/api/dashboard/automation'),
+    hasCap('connection') ? api('/api/dashboard/whatsapp/qr').catch(() => null) : Promise.resolve(null),
+    api('/api/dashboard/menu-tree'),
+    can('ai') ? api('/api/dashboard/ai').catch(() => null) : Promise.resolve(null),
+  ]);
+  const conn = qr || data.connection;
   const t = (k) => data.templates.find((x) => x.key === k) || { titleEn: k, titleAr: '', hasDraft: false };
   const node = (k, label, note) => `<div class="rule-row"><a href="#/replies/${k}"><b>${esc(label || t(k).titleEn)}</b>${note ? `<br><span class="muted">${esc(note)}</span>` : ''}</a>${badge(t(k).hasDraft ? 'draft pending' : 'live', t(k).hasDraft ? 'amber' : 'green')}</div>`;
   const optionLabel = (o) => o.handoff ? 'Talk to staff → pauses automation, joins Support Queue' : o.flow ? `${o.flow === 'appointment' ? 'Appointment' : 'Quotation'} flow (${tree.flows[o.flow].fields.length} questions)` : t(o.template).titleEn;
@@ -613,7 +635,7 @@ route('#/flow', 'Auto-Reply Flow Map', 'How an incoming message travels through 
       <section class="panel"><p class="eyebrow">FLOW</p><h3>Appointment request (main menu 7)</h3><div class="rule-list">${tree.flows.appointment.steps.map((k, i) => node(k, `Question ${i + 1} · ${tree.flows.appointment.fields[i]}`)).join('')}${node('appointment_confirm', 'Confirmation', 'Saved as a pending request with a reference (staff confirm on the Bookings page).')}</div></section>
       <section class="panel"><p class="eyebrow">FLOW</p><h3>Custom quotation (prices 4)</h3><div class="rule-list">${tree.flows.quotation.steps.map((k, i) => node(k, `Question ${i + 1} · ${tree.flows.quotation.fields[i]}`)).join('')}${node('quotation_confirm', 'Confirmation', 'Saved as a pending request with an INQ reference.')}</div></section>
       <section class="panel"><p class="eyebrow">ANY TIME</p><h3>Universal commands</h3><div class="rule-list">${node('main_menu', '0 · menu · القائمة · back · greetings', 'Reopen the main menu from any state.')}${node('language_switch_prompt', 'language · اللغة · change language', 'Then 1/2 confirms:')}${node('language_changed', 'Language changed', 'Followed by the main menu in the new language.')}${node('restart_confirmation', 'restart · reset · 00', 'Clears language and menu position, then step 1.')}${node('human_support', 'agent · support · موظف · خدمة العملاء', 'Pauses automation for that customer; "menu"/"0" resumes.')}</div></section>
-      <section class="panel"><p class="eyebrow">FREE TEXT</p><h3>AI answer</h3><div class="rule-list"><div class="rule-row"><span><b>OpenRouter · ${esc(ai.model)}</b><br><span class="muted">Any text that is not a number or a command. Grounded in Knowledge Sources; replies in the customer's language.</span></span>${badge(data.settings.aiRepliesEnabled ? 'on' : 'off', data.settings.aiRepliesEnabled ? 'purple' : '')}</div>${node('ai_disabled', 'AI disabled notice', 'Sent instead when AI replies are switched off.')}${node('fallback_error', 'Fallback / error', 'Sent if the AI call fails.')}${node('unsupported_message', 'Non-text message', 'Images, voice notes, stickers.')}</div></section>
+      <section class="panel"><p class="eyebrow">FREE TEXT</p><h3>AI answer</h3><div class="rule-list"><div class="rule-row"><span><b>OpenRouter${ai ? ` · ${esc(ai.model)}` : ''}</b><br><span class="muted">Any text that is not a number or a command. Grounded in Knowledge Sources; replies in the customer's language.</span></span>${badge(data.settings.aiRepliesEnabled ? 'on' : 'off', data.settings.aiRepliesEnabled ? 'purple' : '')}</div>${node('ai_disabled', 'AI disabled notice', 'Sent instead when AI replies are switched off.')}${node('fallback_error', 'Fallback / error', 'Sent if the AI call fails.')}${node('unsupported_message', 'Non-text message', 'Images, voice notes, stickers.')}</div></section>
     </div>`;
 });
 
@@ -1039,7 +1061,12 @@ route('#/offers', 'Offers & Discounts', 'Promotions the assistant may mention. C
 // ---------------------------------------------------------------------
 
 route('#/analytics', 'Analytics & Reports', 'Counts from the live database. No estimates.', async (view) => {
-  const [summary, activity, queue] = await Promise.all([api('/api/dashboard/summary'), api('/api/dashboard/automation/activity?limit=200'), api('/api/dashboard/support-queue')]);
+  // The reply log and the support queue need their own permissions ("activity", "support"); without them those cards show what is available.
+  const [summary, activity, queue] = await Promise.all([
+    api('/api/dashboard/summary'),
+    can('activity') ? api('/api/dashboard/automation/activity?limit=200') : Promise.resolve({ activity: [] }),
+    can('support') ? api('/api/dashboard/support-queue') : Promise.resolve({ queue: [] }),
+  ]);
   const byKind = activity.activity.reduce((m, a) => { m[a.kind] = (m[a.kind] || 0) + 1; return m; }, {});
   const byChannel = activity.activity.reduce((m, a) => { m[a.channel] = (m[a.channel] || 0) + 1; return m; }, {});
   const cards = [['Customers', summary.customers], ['Conversations', summary.conversations], ['AI replies stored', summary.aiRequests], ['Waiting for a human', queue.queue.length]];
@@ -1061,10 +1088,11 @@ route('#/security', 'Security & Tenant', 'Access controls for this workspace.', 
   view.innerHTML = `
     <div class="cc-grid">
       <section class="panel"><p class="eyebrow">TENANCY</p><h3>Multi-business workspace</h3><dl class="detail-grid"><dt>Database</dt><dd class="file">${esc(sys.databasePath)}</dd><dt>Environment</dt><dd>${esc(sys.environment)}</dd><dt>Isolation</dt><dd>One login and one database; every WhatsApp account is a separate business with its own profile, customers, conversations, requests, offers, documents, knowledge, replies, menu and WhatsApp session. Each dashboard request names its account and the server checks it.</dd></dl></section>
-      <section class="panel"><p class="eyebrow">ADMIN ACCESS</p><h3>Sessions</h3><p class="muted">Dashboard access uses a single administrator account with httpOnly session cookies (12 h sliding, 7 day cap). API routes return 401 without a session.</p><div class="toolbar" style="margin-top:12px"><button class="btn danger" id="logout-all">Log out everywhere</button></div></section>
+      <section class="panel"><p class="eyebrow">ADMIN ACCESS</p><h3>Sessions</h3><p class="muted">Every dashboard user signs in with their own account (httpOnly session cookies, 12 h sliding, 7 day cap). The server checks the user's role, WhatsApp accounts and permissions on every request; API routes return 401 without a session and 403 without permission. Manage people under Users &amp; Permissions.</p>${me && me.superAdmin ? '<div class="toolbar" style="margin-top:12px"><button class="btn danger" id="logout-all">Log out everywhere</button></div>' : ''}</section>
       <section class="panel"><p class="eyebrow">SECRETS</p><h3>What never leaves the server</h3><ul class="plan-list"><li>WhatsApp linked-device credentials (data/baileys-auth) — gitignored, never returned by any API</li><li>OpenRouter / Google keys — AES-256-GCM encrypted at rest, masked in the UI</li><li>Customer phone numbers are masked in logs and activity views</li></ul></section>
     </div>`;
-  view.querySelector('#logout-all').addEventListener('click', async () => {
+  const logoutAll = view.querySelector('#logout-all');
+  if (logoutAll) logoutAll.addEventListener('click', async () => {
     if (!confirmDialog('Revoke every active dashboard session, including this one?')) return;
     try { await api('/api/dashboard/auth/logout-all', { method: 'POST' }); } finally { location.hash = '#/login'; location.reload(); }
   });

@@ -832,6 +832,10 @@
     function managePanel() {
       const a = acc();
       const legacy = S.data.account.isLegacy;
+      // Disabling, enabling and deleting a business need connection access; others see an explanation instead of dead buttons.
+      if (!hasCap('connection')) {
+        return '<section class="panel"><div class="panel-head"><div><p class="eyebrow">Connection</p><h3>Managed by an administrator</h3></div></div><p class="muted">Enabling, disabling or deleting this business, and pairing its WhatsApp number, are limited to the Super Admin and administrators who were given connection access.</p></section>';
+      }
       return `<section class="panel">
         <div class="panel-head"><div><p class="eyebrow">Connection</p><h3>Disable or enable</h3></div></div>
         <p class="muted"><b>Disable</b> closes this business's WhatsApp connection and stops automatic replies, but keeps all its data and its saved WhatsApp session. Enable it again at any time — no new QR scan is needed.</p>

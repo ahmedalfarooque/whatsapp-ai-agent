@@ -160,9 +160,20 @@ async function renderRoute() {
   const topLevelKey = `#${hash.split('/')[1] ? '/' + hash.split('/')[1] : '/'}`;
   const navLink = document.querySelector(`#nav a[data-route="${topLevelKey}"]`) || document.querySelector('#nav a[data-route="#/"]');
   if (navLink) navLink.classList.add('active');
+  syncTopbarForRoute(topLevelKey);
 
   document.querySelector('#page-title').textContent = matched.route.title;
   document.querySelector('#page-subtitle').textContent = matched.route.subtitle || '';
+  // The server refuses these requests anyway; this shows a clear page instead of a failed load.
+  if (hash !== '#/login' && me && topLevelKey === '#/' && !routeAllowed('#/')) {
+    // A user without the dashboard permission lands on the first page they may open instead of an error.
+    const first = [...document.querySelectorAll('#nav a[data-route]')].find((a) => !a.hidden && a.dataset.route !== '#/' && a.dataset.route !== '#/accounts');
+    if (first) { location.hash = first.dataset.route; return; }
+  }
+  if (hash !== '#/login' && me && !routeAllowed(topLevelKey)) {
+    view.innerHTML = `<div class="state-block restricted"><h2>Access restricted</h2><p>Your role does not include this page for the selected WhatsApp account. Ask an administrator if you need it.</p><a class="btn" href="#/">Back to the dashboard</a></div>`;
+    return;
+  }
   view.innerHTML = loadingView();
   try {
     await matched.route.render(view, matched.params);
@@ -250,7 +261,8 @@ function selectAccount(accountId, opts = {}) {
   const current = currentAccount();
   if (changed && current) toast(`Switched to ${current.name}`, 'success');
   document.dispatchEvent(new CustomEvent('workspace:account-changed', { detail: { selected: selectedAccountId } }));
-  if (changed) renderRoute();
+  // Permissions are per account: reload them for the newly selected account before the page is drawn again.
+  if (changed) loadMe().catch(() => {}).finally(() => renderRoute());
 }
 
 let accountsTimer;
@@ -288,17 +300,19 @@ async function pollAccounts() {
 
 async function loadHeader() {
   try {
-    const status = await api('/api/dashboard/status');
+    // Labels come from /me (non-secret and open to every signed-in user); /status needs the dashboard permission.
+    const status = me || (await api('/api/dashboard/me'));
     document.querySelector('#environment').textContent =
       status.environment === 'development' ? 'Development' : status.environment === 'production' ? 'Production' : status.environment;
     document.querySelector('#sidebar-mode').textContent =
       status.providerMode === 'mock' ? 'Signed in · mock providers' : 'Signed in · production providers';
-    document.querySelector('#logout-btn').style.display = 'inline-flex';
+    document.querySelector('#logout-btn').style.display = 'flex';
   } catch {
     document.querySelector('#environment').textContent = 'Unavailable';
   }
 }
 
+decorateNav();
 document.querySelector('#logout-btn').addEventListener('click', async () => {
   try {
     await fetch('/api/dashboard/auth/logout', { method: 'POST', credentials: 'include' });
@@ -320,6 +334,12 @@ async function boot() {
   }
   if (location.hash === '#/login') location.hash = '#/';
   await loadAccounts(); // settles the selected account before any account-scoped request
+  try {
+    await loadMe(); // who is signed in and what they may open on this account
+  } catch (error) {
+    document.querySelector('#view').innerHTML = errorView(error.message, boot);
+    return;
+  }
   await loadHeader();
   document.dispatchEvent(new Event('workspace:authenticated'));
   clearTimeout(accountsTimer);
@@ -490,70 +510,6 @@ async function renderLogin(view) {
   });
 }
 route('#/login', 'Sign in', '', renderLogin);
-
-// ---------------------------------------------------------------------
-// Dashboard home
-// ---------------------------------------------------------------------
-
-route('#/', 'Dashboard', 'A clear view of your customer conversations and agent health.', async (view) => {
-  const [summary, status, conversations, bookings] = await Promise.all([
-    api('/api/dashboard/summary'),
-    api('/api/dashboard/status'),
-    api('/api/dashboard/conversations-recent'),
-    api('/api/dashboard/bookings/upcoming'),
-  ]);
-
-  const cards = [
-    ['Customers', summary.customers, '♙'],
-    ['Conversations', summary.conversations, '◌'],
-    ['Confirmed bookings', summary.bookings, '◷'],
-    ['AI replies sent', summary.aiRequests, '✦'],
-  ];
-
-  view.innerHTML = `
-    <section class="hero">
-      <div>
-        <p class="eyebrow light">SYSTEM OVERVIEW</p>
-        <h2>Every conversation starts here.</h2>
-        <p>${status.providerMode === 'mock' ? 'Your development workspace. Connections use test providers.' : 'Keep your customers, conversations, and assistant in sync.'}</p>
-        <a class="btn primary" style="margin-top:16px" href="#/whatsapp">Open WhatsApp Connection ↗</a>
-      </div>
-      <div class="hero-orb">✦</div>
-    </section>
-    <section class="stats">${cards.map(([l, v, i]) => `<div class="stat"><div class="stat-label"><span>${l}</span><span class="stat-icon">${i}</span></div><div class="stat-value">${esc(v)}</div></div>`).join('')}</section>
-    <div class="grid two">
-      <section class="panel">
-        <div class="panel-head"><div><p class="eyebrow">SERVICE HEALTH</p><h3>Connected systems</h3></div><a class="live" href="#/integrations"><span class="dot green"></span> Details</a></div>
-        <div class="status-list">${status.services.map((s) => `<div class="status-row"><span class="status-name"><span class="dot ${stateTone(s.state) === 'green' || stateTone(s.state) === 'blue' ? 'green' : ''}"></span>${esc(s.name)}</span><span class="state">${esc(s.state)}</span></div>`).join('')}</div>
-      </section>
-      <section class="panel">
-        <div class="panel-head"><div><p class="eyebrow">KNOWLEDGE BASE</p><h3>Source files</h3></div><a class="muted" href="#/knowledge">Manage →</a></div>
-        <div class="knowledge-list">${status.knowledge.map((k) => `<div class="knowledge-row"><span class="knowledge-name"><span class="file">${esc(k.name)}</span></span><span class="${k.status === 'Available' ? 'available' : 'missing'}">${esc(k.status)}</span></div>`).join('')}</div>
-      </section>
-    </div>
-    <div class="grid two lower">
-      <section class="panel">
-        <div class="panel-head"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>Conversations</h3></div><a class="muted" href="#/conversations">View all →</a></div>
-        <div class="list ${conversations.conversations.length ? '' : 'empty'}">${
-          conversations.conversations.length
-            ? conversations.conversations
-                .map((c) => `<div class="activity-row"><div class="activity-main"><div class="activity-name">${esc(c.customer)}</div><div class="activity-text">${esc(c.lastMessage || 'No messages yet')}</div></div><div class="activity-meta">${formatDate(c.updatedAt)}<br>${badge(c.status, stateTone(c.status))}</div></div>`)
-                .join('')
-            : 'No conversations yet. They will appear here as customers message the agent.'
-        }</div>
-      </section>
-      <section class="panel">
-        <div class="panel-head"><div><p class="eyebrow">SCHEDULE</p><h3>Upcoming bookings</h3></div><a class="muted" href="#/bookings">View all →</a></div>
-        <div class="list ${bookings.bookings.length ? '' : 'empty'}">${
-          bookings.bookings.length
-            ? bookings.bookings
-                .map((b) => `<div class="activity-row"><div class="activity-main"><div class="activity-name">${esc(b.customer)}</div><div class="activity-text">${esc(b.date || '—')} ${esc(b.time || '')}</div></div><div class="activity-meta">${badge(b.status, stateTone(b.status))}</div></div>`)
-                .join('')
-            : 'No confirmed bookings yet.'
-        }</div>
-      </section>
-    </div>`;
-});
 
 // ---------------------------------------------------------------------
 // Customers (list + search + pagination + detail)

@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app';
 import { getDb } from '../../src/memory/db';
 import { grantAccountAccess, revokeAccountAccess, dataDir } from '../../src/accounts/accountRepo';
+import { hashPassword } from '../../src/dashboard/auth';
 import { setLinkFetcher } from '../../src/setup/linkFetcher';
 import { knowledgeDirForAccount } from '../../src/knowledge/paths';
 import { makePdf, TINY_PNG } from '../fixtures/makePdf';
@@ -240,21 +241,26 @@ describe('business setup — HTTP API', () => {
   });
 
   it('enforces per-user access to a business on every setup route', async () => {
-    grantAccountAccess(adminId, 1); // this user may now work on the original business only
+    // A second dashboard user (a plain admin) that may work on the original business only. The permanent Super Admin ('agent') is never restricted.
+    const limitedId = Number(getDb().prepare('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)').run('limited-admin', hashPassword('a-very-long-test-password-123')).lastInsertRowid);
+    const limited = request.agent(app);
+    expect((await limited.post('/api/dashboard/auth/login').send({ username: 'limited-admin', password: 'a-very-long-test-password-123' })).status).toBe(200);
+    grantAccountAccess(limitedId, 1);
     try {
       for (const [method, url] of [
         ['get', `/api/dashboard/accounts/${salon}/setup`], ['put', `/api/dashboard/accounts/${salon}/setup/profile`], ['get', `/api/dashboard/accounts/${salon}/setup/links`],
         ['get', `/api/dashboard/accounts/${salon}/setup/files`], ['post', `/api/dashboard/accounts/${salon}/setup/generate`], ['get', `/api/dashboard/accounts/${salon}/delete-preview`],
         ['delete', `/api/dashboard/accounts/${salon}`],
       ] as const) {
-        const res = await agent[method](url).send({ confirm: 'DELETE' });
+        const res = await limited[method](url).send({ confirm: 'DELETE' });
         expect(res.status, `${method} ${url}`).toBe(403);
       }
-      expect((await agent.get('/api/dashboard/accounts/1/setup')).status).toBe(200);
+      expect((await limited.get('/api/dashboard/accounts/1/setup')).status).toBe(200);
     } finally {
-      revokeAccountAccess(adminId, 1);
+      revokeAccountAccess(limitedId, 1);
     }
     expect((await agent.get(`/api/dashboard/accounts/${salon}/setup`)).status).toBe(200);
+    expect(adminId).toBeGreaterThan(0);
   });
 
   it('deletes a business only after typing DELETE, removes all of its data and files, and never touches the others', async () => {

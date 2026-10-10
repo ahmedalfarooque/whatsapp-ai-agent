@@ -6,6 +6,7 @@ import { getOrCreateCustomer } from '../../src/memory/customerRepo';
 import { runWithAccount } from '../../src/accounts/accountContext';
 import { createOffer } from '../../src/offers/offerRepo';
 import { grantAccountAccess, revokeAccountAccess } from '../../src/accounts/accountRepo';
+import { hashPassword } from '../../src/dashboard/auth';
 
 /**
  * One login, one application, several WhatsApp accounts: the dashboard names
@@ -119,19 +120,31 @@ describe('dashboard — WhatsApp accounts', () => {
   });
 
   it('authorization: an admin restricted to one account cannot read another and lands on their own by default', async () => {
-    const adminId = (getDb().prepare('SELECT id FROM admin_users WHERE username = ?').get('multi-admin') as { id: number }).id;
-    grantAccountAccess(adminId, salonId, 'manager');
+    // A second dashboard user (a plain admin) restricted to the salon. The permanent Super Admin ('multi-admin') is never restricted.
+    const restrictedId = Number(getDb().prepare('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)').run('restricted-admin', hashPassword('a-very-long-test-password-123')).lastInsertRowid);
+    const restricted = request.agent(app);
+    expect((await restricted.post('/api/dashboard/auth/login').send({ username: 'restricted-admin', password: 'a-very-long-test-password-123' })).status).toBe(200);
+    grantAccountAccess(restrictedId, salonId, 'manager');
     try {
-      const forbidden = await agent.get('/api/dashboard/customers').set('X-Whatsapp-Account', '1');
+      const forbidden = await restricted.get('/api/dashboard/customers').set('X-Whatsapp-Account', '1');
       expect(forbidden.status).toBe(403);
-      expect((await agent.get('/api/dashboard/accounts/1')).status).toBe(403);
-      const defaulted = await agent.get('/api/dashboard/accounts');
+      expect((await restricted.get('/api/dashboard/accounts/1')).status).toBe(403);
+      const defaulted = await restricted.get('/api/dashboard/accounts');
       expect(defaulted.status).toBe(200);
       expect(defaulted.body.selected).toBe(salonId);
       expect(defaulted.body.accounts.map((a: { id: number }) => a.id)).toEqual([salonId]);
     } finally {
-      revokeAccountAccess(adminId, salonId);
+      revokeAccountAccess(restrictedId, salonId);
     }
-    expect((await agent.get('/api/dashboard/customers').set('X-Whatsapp-Account', '1')).status).toBe(200);
+    expect((await restricted.get('/api/dashboard/customers').set('X-Whatsapp-Account', '1')).status).toBe(200);
+    // The permanent Super Admin keeps every account even if access rows are (wrongly) written for it.
+    const superId = (getDb().prepare('SELECT id FROM admin_users WHERE username = ?').get('multi-admin') as { id: number }).id;
+    grantAccountAccess(superId, salonId, 'manager');
+    try {
+      expect((await agent.get('/api/dashboard/customers').set('X-Whatsapp-Account', '1')).status).toBe(200);
+      expect((await agent.get('/api/dashboard/accounts')).body.accounts.map((a: { id: number }) => a.id)).toContain(1);
+    } finally {
+      revokeAccountAccess(superId, salonId);
+    }
   });
 });

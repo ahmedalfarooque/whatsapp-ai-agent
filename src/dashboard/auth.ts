@@ -39,6 +39,7 @@ interface AdminUserRow {
   id: number;
   username: string;
   password_hash: string;
+  disabled_at: string | null;
 }
 
 export function adminCount(): number {
@@ -51,9 +52,14 @@ export function adminCount(): number {
  * race between two concurrent setup requests creating two admins. */
 export function createAdminUser(username: string, password: string): number {
   const passwordHash = hashPassword(password);
-  const result = getDb()
-    .prepare('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)')
-    .run(username, passwordHash);
+  // The very first account (created by first-time setup) is the permanent Super Admin; users added later through the Users
+  // page are created by users.ts with an explicit role and are never Super Admins.
+  const first = adminCount() === 0;
+  const result = first
+    ? getDb()
+        .prepare("INSERT INTO admin_users (username, password_hash, role, is_protected, all_accounts) VALUES (?, ?, 'super_admin', 1, 1)")
+        .run(username, passwordHash)
+    : getDb().prepare('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)').run(username, passwordHash);
   return Number(result.lastInsertRowid);
 }
 
@@ -67,10 +73,12 @@ export interface AdminCredentialCheck {
 export function checkAdminCredentials(username: string, password: string): AdminCredentialCheck {
   const row = getDb()
     // NOCASE: an email-style username must not depend on how a phone keyboard capitalised it.
-    .prepare('SELECT id, username, password_hash FROM admin_users WHERE username = ? COLLATE NOCASE')
+    .prepare('SELECT id, username, password_hash, disabled_at FROM admin_users WHERE username = ? COLLATE NOCASE')
     .get(username.trim()) as AdminUserRow | undefined;
   if (!row) return { adminUserId: null, adminFound: false };
-  if (!verifyPassword(password, row.password_hash)) return { adminUserId: null, adminFound: true };
+  const passwordOk = verifyPassword(password, row.password_hash);
+  // A disabled account can never sign in, even with the right password (the same generic "invalid username or password" is shown).
+  if (!passwordOk || row.disabled_at !== null) return { adminUserId: null, adminFound: true };
   return { adminUserId: row.id, adminFound: true };
 }
 
@@ -130,11 +138,19 @@ export function createSession(adminUserId: number): CreatedSession {
 export function verifySessionToken(token: string): { adminUserId: number } | null {
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   const row = getDb()
-    .prepare('SELECT id, admin_user_id, created_at, expires_at FROM admin_sessions WHERE token_hash = ?')
+    .prepare(
+      `SELECT s.id, s.admin_user_id, s.created_at, s.expires_at, u.disabled_at
+       FROM admin_sessions s JOIN admin_users u ON u.id = s.admin_user_id WHERE s.token_hash = ?`,
+    )
     .get(tokenHash) as
-    | { id: string; admin_user_id: number; created_at: string; expires_at: string }
+    | { id: string; admin_user_id: number; created_at: string; expires_at: string; disabled_at: string | null }
     | undefined;
   if (!row) return null;
+  if (row.disabled_at !== null) {
+    // The account was disabled while signed in: the session dies immediately.
+    getDb().prepare('DELETE FROM admin_sessions WHERE id = ?').run(row.id);
+    return null;
+  }
 
   const now = Date.now();
   const expiresAt = new Date(row.expires_at).getTime();
@@ -155,6 +171,11 @@ export function verifySessionToken(token: string): { adminUserId: number } | nul
 export function destroySessionByToken(token: string): void {
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   getDb().prepare('DELETE FROM admin_sessions WHERE token_hash = ?').run(tokenHash);
+}
+
+/** Revokes every active session of ONE user (used when that user is disabled or their password is reset). */
+export function destroySessionsForUser(adminUserId: number): number {
+  return getDb().prepare('DELETE FROM admin_sessions WHERE admin_user_id = ?').run(adminUserId).changes;
 }
 
 /** Revokes every active dashboard session (including the caller's own) —

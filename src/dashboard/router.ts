@@ -66,9 +66,14 @@ import {
 import { getBusinessSettings, getBusinessSettingsOverrides, formatBusinessHours, formatAddress } from '../config/businessSettings';
 import { getQrSession } from '../memory/qrSessionRepo';
 import { resolveDashboardAccount, assertAccountAccess } from './accountMiddleware';
+import { authorizeDashboardRequest } from './authorize';
+import { registerUserRoutes } from './userRoutes';
+import { buildOverview, getAiState, OVERVIEW_RANGES, type OverviewRange } from './overview';
+import { accountUiStatus } from '../accounts/accountStatus';
+import { canManageConfiguration, canManageConnections } from './permissions';
 import { runWithAccount } from '../accounts/accountContext';
 import {
-  listAccountsForAdmin, getAccount, createAccount, updateAccount, setAccountEnabled, AccountValidationError, type WhatsappAccount,
+  listAccountsForAdmin, getAccount, createAccount, updateAccount, setAccountEnabled, AccountValidationError, accountIdsForAdmin, grantAccountAccess, type WhatsappAccount,
 } from '../accounts/accountRepo';
 import {
   saveDocument, listDocuments, getDocument, updateDocument, replaceDocumentFile, deleteDocument, documentPath, serveContentType, extractDocumentText,
@@ -316,6 +321,17 @@ export function createDashboardRouter(): Router {
     resolveDashboardAccount(req, res, next);
   });
 
+  // ---- Permissions: EVERY dashboard API request is checked here, on the server (authorize.ts). Hiding a menu item in the
+  // browser is only a convenience; a user without the permission gets 403 even when they call the API directly. ----
+  router.use('/api/dashboard', (req, res, next) => {
+    if (UNAUTHENTICATED_AUTH_ROUTES.includes(req.path)) {
+      next();
+      return;
+    }
+    authorizeDashboardRequest(req, res, next);
+  });
+  registerUserRoutes(router);
+
   // ---- WhatsApp accounts (businesses) ----------------------------------------
   function accountView(account: WhatsappAccount) {
     // Live phase from the running connection when there is one; otherwise the last persisted state.
@@ -332,17 +348,7 @@ export function createDashboardRouter(): Router {
       displayName: account.displayName,
       phase,
       /** Coarse state for the sidebar: connected | connecting | qr_required | disconnected | disabled | error. */
-      uiStatus: !account.enabled
-        ? 'disabled'
-        : phase === 'connected'
-          ? 'connected'
-          : ['starting', 'connecting', 'reconnecting'].includes(phase)
-            ? 'connecting'
-            : ['scan', 'qr_expired', 'idle', 'logged_out'].includes(phase)
-              ? 'qr_required'
-              : phase === 'error'
-                ? 'error'
-                : 'disconnected',
+      uiStatus: accountUiStatus(account, phase),
       connectedAt: account.connectedAt,
       disconnectedAt: account.disconnectedAt,
       lastError: account.lastError,
@@ -359,11 +365,21 @@ export function createDashboardRouter(): Router {
     res.status(500).json({ error: 'Account operation failed' });
   }
   router.get('/api/dashboard/accounts', (req, res) => {
-    res.json({ accounts: listAccountsForAdmin(req.adminUserId as number).map(accountView), selected: req.accountId });
+    // Technical connection errors are shown only to users who may manage connections.
+    const detailed = canManageConnections(req.authUser ?? null);
+    res.json({
+      accounts: listAccountsForAdmin(req.adminUserId as number).map((a) => {
+        const view = accountView(a);
+        return detailed ? view : { ...view, lastError: null };
+      }),
+      selected: req.accountId,
+    });
   });
   router.post('/api/dashboard/accounts', (req, res) => {
     try {
       const account = createAccount(req.body);
+      // An administrator limited to certain accounts must be able to open the account it just created.
+      if (accountIdsForAdmin(req.adminUserId as number) !== 'all') grantAccountAccess(req.adminUserId as number, account.id, 'manager');
       logger.info({ account: account.id, admin: req.adminUserId }, 'dashboard: WhatsApp account created');
       res.status(201).json(accountView(account));
     } catch (error) { accountError(res, error); }
@@ -766,13 +782,32 @@ export function createDashboardRouter(): Router {
 
   router.get('/api/dashboard/status', (req, res) => {
     const qr = getQrStatus(req.accountId);
+    // Server details (database path, calendar id, API version) are shown only to users who may see configuration.
+    const detailed = canManageConfiguration(req.authUser ?? null);
+    const services = [...getServiceStatuses(), { name: 'WhatsApp (QR)', state: qr.phase, detail: qr.detail }];
     res.json({
       environment: env.NODE_ENV,
       providerMode: env.shouldUseMockProviders ? 'mock' : 'production',
       accountId: req.accountId,
-      services: [...getServiceStatuses(), { name: 'WhatsApp (QR)', state: qr.phase, detail: qr.detail }],
+      services: detailed ? services : services.map((s) => ({ ...s, detail: '' })),
       knowledge: getKnowledgeStatus(),
     });
+  });
+
+  // Top-bar indicator: the real state of AI replies for the selected account (no secrets).
+  router.get('/api/dashboard/ai-status', (req, res) => {
+    res.json(getAiState(req.accountId as number));
+  });
+
+  // ---- Dashboard home: one real-data overview for the selected account (sections the user cannot read come back null) ----
+  router.get('/api/dashboard/overview', (req, res) => {
+    const range = OVERVIEW_RANGES.includes(String(req.query.range) as OverviewRange) ? (String(req.query.range) as OverviewRange) : '30';
+    const account = getAccount(req.accountId as number);
+    const visible = listAccountsForAdmin(req.adminUserId as number).map((a) => {
+      const view = accountView(a);
+      return { id: a.id, name: a.name, uiStatus: view.uiStatus, phoneNumber: a.phoneNumber };
+    });
+    res.json(buildOverview({ user: req.authUser!, accountId: req.accountId as number, accountName: account?.name ?? '', accounts: visible, range }));
   });
 
   // ---- Customers --------------------------------------------------------

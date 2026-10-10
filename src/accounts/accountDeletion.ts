@@ -137,6 +137,7 @@ export async function deleteAccount(accountId: number, confirm: unknown, deps: D
     del('drafts', 'DELETE FROM setup_drafts WHERE whatsapp_account_id = ?', accountId);
     del('menus', 'DELETE FROM account_menus WHERE whatsapp_account_id = ?', accountId);
     del('features', 'DELETE FROM account_features WHERE whatsapp_account_id = ?', accountId);
+    del('adminPermissions', 'DELETE FROM admin_account_permissions WHERE whatsapp_account_id = ?', accountId);
     del('adminAccess', 'DELETE FROM admin_account_access WHERE whatsapp_account_id = ?', accountId);
     del('automation', 'DELETE FROM automation_settings WHERE id = ?', accountId);
     del('profile', 'DELETE FROM business_settings WHERE id = ?', accountId);

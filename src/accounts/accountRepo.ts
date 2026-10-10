@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3';
 import { getDb } from '../memory/db';
 import { env } from '../config/env';
 import { LEGACY_ACCOUNT_ID } from './accountContext';
+import { getAuthUser, accessibleAccountIds } from '../dashboard/permissions';
 
 /**
  * WhatsApp accounts = businesses. One row per linked WhatsApp number, each
@@ -291,12 +292,13 @@ export function clearAccountIdentity(accountId: number, db: Database.Database = 
 // ------------------------------------------------------------------ authorization
 
 /**
- * Admins with no rows in admin_account_access see every account (the
- * pre-multi-account behaviour). Rows restrict an admin to those accounts.
+ * The accounts a dashboard user may open (rules in dashboard/permissions.ts): the permanent Super Admin and users explicitly
+ * granted "all accounts" see every account; manager / user / custom users see ONLY their assigned accounts (none = no access);
+ * an admin with no assignment keeps the original behaviour (every account), rows restrict it.
  */
 export function accountIdsForAdmin(adminUserId: number, db: Database.Database = getDb()): number[] | 'all' {
-  const rows = db.prepare('SELECT whatsapp_account_id FROM admin_account_access WHERE admin_user_id = ?').all(adminUserId) as { whatsapp_account_id: number }[];
-  return rows.length ? rows.map((r) => r.whatsapp_account_id) : 'all';
+  const user = getAuthUser(adminUserId, db);
+  return user ? accessibleAccountIds(user, db) : [];
 }
 
 export function canAdminAccessAccount(adminUserId: number, accountId: number, db: Database.Database = getDb()): boolean {
