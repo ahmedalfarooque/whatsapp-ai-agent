@@ -163,6 +163,26 @@ a property of WhatsApp identities, not of a business).
 - Deleting a business (typed `DELETE`; never account 1) logs its phone out and
   removes its rows, `data/accounts/<id>/` and `knowledge/accounts/<id>/`.
 
+### Offers: pictures and files reach the customer as real media
+
+When a customer opens the **Offers** option (every business's menu routes to the same offers template), the offers text is sent
+first. After it, each currently visible offer's **image** is sent as a real WhatsApp **image** and its **supporting file** as a real
+WhatsApp **document**, one after another, each captioned with the offer title in the customer's language. Nothing is a link or a
+path in the text, and the same Baileys connection that received the message carries the media.
+
+- **What is sent:** only offers that are published, inside their validity window, customer-visible, and not draft, finished,
+  archived or deleted — the same filter as the offers text. Files are looked up only among **that business's own** documents
+  (`src/offers/offerFiles.ts`), so one business can never send, attach or preview another's file, whatever id is typed.
+- **Saving an offer** now refuses an attachment that is another business's, internal or AI-only, archived, or (in the image slot)
+  not a picture, and the Offers form shows why. An attachment that did not change is not re-checked, so older offers stay editable.
+- **Safety at send time:** the stored file must exist, not be empty or over 16 MB, and match its type (PDF, PNG, JPG, WEBP, Office
+  signatures); the storage path is confined to the business's uploads folder. A file that fails is skipped with a log line (offer and
+  document ids only, never a path) and an activity-log entry; the offer text has already been sent and the other files still go.
+- **Limits:** at most 12 files per request; any left out are reported as `over_limit`, never dropped silently. A file used by two
+  offers is sent once. The Meta Cloud API connection cannot carry media: the text is delivered and a single note is logged.
+- **Storage:** uploads live in the data folder next to the database (`<data>/uploads` for the original business,
+  `<data>/accounts/<id>/uploads` for each other business), outside Git, and survive restarts and deployments.
+
 ### Which number is bound to which business
 
 The number is never typed in: when a scan completes, the application reads the

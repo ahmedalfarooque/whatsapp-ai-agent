@@ -78,7 +78,8 @@ function dataRoot(): string {
 }
 
 export function uploadsDir(): string {
-  if (env.DATABASE_PATH === ':memory:') return path.join(os.tmpdir(), 'whatsapp-ai-agent-test-uploads');
+  // Tests only (in-memory database): one folder per test worker, so test files running in parallel never delete each other's uploads.
+  if (env.DATABASE_PATH === ':memory:') return path.join(os.tmpdir(), `whatsapp-ai-agent-test-uploads${process.env.VITEST_WORKER_ID ? `-${process.env.VITEST_WORKER_ID}` : ''}`);
   return path.resolve(path.dirname(env.DATABASE_PATH), 'uploads');
 }
 

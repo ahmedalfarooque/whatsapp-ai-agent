@@ -118,7 +118,8 @@ export function requireAccount(id: number, db: Database.Database = getDb()): Wha
 /** The data directory every account's files live under (same parent as the SQLite file). */
 export function dataDir(): string {
   // An in-memory database (tests) must never make the process write next to the source tree.
-  if (env.DATABASE_PATH === ':memory:') return path.join(os.tmpdir(), 'whatsapp-ai-agent-test-data');
+  // Tests only (in-memory database): one folder per test worker, so test files running in parallel never share or delete each other's files.
+  if (env.DATABASE_PATH === ':memory:') return path.join(os.tmpdir(), `whatsapp-ai-agent-test-data${process.env.VITEST_WORKER_ID ? `-${process.env.VITEST_WORKER_ID}` : ''}`);
   return path.resolve(path.dirname(env.DATABASE_PATH));
 }
 

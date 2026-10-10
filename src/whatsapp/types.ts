@@ -78,6 +78,14 @@ export type OutboundInteractiveMessage =
     };
 
 /** A file sent to a customer (the catalogue PDFs): the bytes, the name WhatsApp shows, and an optional caption. */
+/** A picture to send as real WhatsApp image media (shown inline in the chat), with an optional caption. */
+export interface OutboundImage {
+  fileName: string;
+  mimeType: string;
+  bytes: Buffer;
+  caption?: string;
+}
+
 export interface OutboundDocument {
   fileName: string;
   mimeType: string;

@@ -9,8 +9,8 @@ import {
   isRetryableHttpError,
   isRetryableForNonIdempotentSend,
 } from '../utils/retry';
-import { sendTextMessageMock, markMessageAsReadMock, sendInteractiveMessageMock, sendDocumentMessageMock } from './mockClient';
-import type { OutboundDocument, OutboundInteractiveMessage, SendTextMessageResponse } from './types';
+import { sendTextMessageMock, markMessageAsReadMock, sendInteractiveMessageMock, sendDocumentMessageMock, sendImageMessageMock } from './mockClient';
+import type { OutboundDocument, OutboundImage, OutboundInteractiveMessage, SendTextMessageResponse } from './types';
 
 function graphUrl(pathSegment: string): string {
   return `https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${pathSegment}`;
@@ -130,6 +130,24 @@ export async function sendDocumentMessage(toWaId: string, document: OutboundDocu
   if (transport?.document) return transport.document(toWaId, document);
   if (env.shouldUseMockProviders && !transport) return sendDocumentMessageMock(toWaId, document);
   throw new DocumentDeliveryUnsupportedError();
+}
+
+export class ImageDeliveryUnsupportedError extends Error {
+  constructor() {
+    super('This WhatsApp connection cannot send images');
+    this.name = 'ImageDeliveryUnsupportedError';
+  }
+}
+
+/**
+ * Sends a picture (an offer's image) as real WhatsApp image media through the SAME transport the inbound message arrived on.
+ * Only the QR (Baileys) connection delivers media; there is no second transport and no URL-in-text fallback.
+ */
+export async function sendImageMessage(toWaId: string, image: OutboundImage): Promise<SendTextMessageResponse> {
+  const transport = replyTransport.getStore();
+  if (transport?.image) return transport.image(toWaId, image);
+  if (env.shouldUseMockProviders && !transport) return sendImageMessageMock(toWaId, image);
+  throw new ImageDeliveryUnsupportedError();
 }
 
 /** Sends an interactive (button or list) message to a customer's WhatsApp number. */

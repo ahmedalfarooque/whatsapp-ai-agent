@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { getDb } from '../memory/db';
 import { currentAccountId } from '../accounts/accountContext';
+import { checkOfferAttachmentRecord, describeOfferFileProblem } from './offerFiles';
 
 /**
  * Offers & discounts — one resolver for the dashboard, the WhatsApp runtime,
@@ -170,8 +171,33 @@ export function toView(offer: Offer, now: Date = new Date()): OfferView {
   return { ...offer, effectiveStatus: eff, customerVisibleNow: eff === 'published' && offer.visibility === 'customer' && !offer.deleted_at };
 }
 
+/**
+ * An offer may only carry files that belong to THIS business and may be shown to customers. A document id is looked up among this
+ * business's own documents only, so another business's file cannot be attached by typing its id. Attachments that did not change
+ * are not re-checked, so an older offer stays editable even if its file was archived since.
+ */
+function assertAttachmentsAllowed(
+  v: { imageDocumentId: number | null; documentId: number | null },
+  existing: Offer | undefined,
+  db: Database.Database,
+  accountId: number,
+): void {
+  const fields: Record<string, string> = {};
+  const slots = [
+    ['image', 'imageDocumentId', v.imageDocumentId, existing?.image_document_id ?? null],
+    ['document', 'documentId', v.documentId, existing?.document_id ?? null],
+  ] as const;
+  for (const [slot, field, id, previous] of slots) {
+    if (!id || id === previous) continue;
+    const check = checkOfferAttachmentRecord(id, slot, accountId, db);
+    if (!check.ok) fields[field] = describeOfferFileProblem(check.problem, slot);
+  }
+  if (Object.keys(fields).length) throw new OfferValidationError(fields);
+}
+
 export function createOffer(raw: unknown, actor: string, db: Database.Database = getDb(), accountId: number = currentAccountId()): OfferView {
   const v = validateOfferInput(raw);
+  assertAttachmentsAllowed(v, undefined, db, accountId);
   const result = db
     .prepare(
       `INSERT INTO offers (title_ar, title_en, description_ar, description_en, category, related_item, price_status, original_price, promotional_price,
@@ -184,8 +210,10 @@ export function createOffer(raw: unknown, actor: string, db: Database.Database =
 }
 
 export function updateOffer(id: number, raw: unknown, actor: string, db: Database.Database = getDb(), accountId: number = currentAccountId()): OfferView | undefined {
-  if (!getOffer(id, db, accountId)) return undefined;
+  const existing = getOffer(id, db, accountId);
+  if (!existing) return undefined;
   const v = validateOfferInput(raw);
+  assertAttachmentsAllowed(v, existing, db, accountId);
   db.prepare(
     `UPDATE offers SET title_ar=@titleAr, title_en=@titleEn, description_ar=@descriptionAr, description_en=@descriptionEn, category=@category,
        related_item=@relatedItem, price_status=@priceStatus, original_price=@originalPrice, promotional_price=@promotionalPrice, discount_percent=@discountPercent,

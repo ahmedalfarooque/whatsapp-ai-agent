@@ -263,6 +263,45 @@ describe('Baileys QR connection lifecycle', () => {
     expect(socket.sendMessage.mock.calls[0]?.[1]).toEqual({ document: bytes, mimetype: 'application/pdf', fileName: 'Jotun Soulful Spaces.pdf', caption: '📚 Jotun Soulful Spaces' });
   });
 
+  it('sends an offer picture as real WhatsApp IMAGE media (not a document, not a link) through the same socket', async () => {
+    const qr = await import('../../../src/whatsapp/qrConnection');
+    const { replyTransport } = await import('../../../src/whatsapp/replyTransport');
+    const bytes = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from('offer-picture')]);
+    fixtures.inbound.mockImplementationOnce(async () => {
+      await replyTransport.getStore()!.image!('ignored', { fileName: 'Summer deal.png', mimeType: 'image/png', bytes, caption: 'Summer deal' });
+    });
+    await qr.startQrConnection();
+    const socket = fixtures.sockets[0]!;
+    socket.user = { id: '966558190545@s.whatsapp.net' };
+    emit(socket, 'connection.update', { connection: 'open' });
+    emit(socket, 'messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '966500000002@s.whatsapp.net', fromMe: false, id: 'img1' }, message: { conversation: 'offers' } }] });
+    await tick(); await tick();
+    expect(socket.sendMessage).toHaveBeenCalledTimes(1);
+    expect(socket.sendMessage.mock.calls[0]?.[0]).toBe('966500000002@s.whatsapp.net');
+    const content = socket.sendMessage.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(content).toEqual({ image: bytes, mimetype: 'image/png', caption: 'Summer deal' });
+    expect(content).not.toHaveProperty('document');
+    expect(content).not.toHaveProperty('text');
+  });
+
+  it('media is refused once the session is no longer connected (never sent through a dead or replaced socket)', async () => {
+    const qr = await import('../../../src/whatsapp/qrConnection');
+    const { replyTransport } = await import('../../../src/whatsapp/replyTransport');
+    let outcome: unknown = 'not run';
+    fixtures.inbound.mockImplementationOnce(async () => {
+      emit(fixtures.sockets[0]!, 'connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 428 } } } });
+      outcome = await replyTransport.getStore()!.image!('ignored', { fileName: 'x.png', mimeType: 'image/png', bytes: Buffer.from('x') }).catch((e: Error) => e.message);
+    });
+    await qr.startQrConnection();
+    const socket = fixtures.sockets[0]!;
+    socket.user = { id: '966558190545@s.whatsapp.net' };
+    emit(socket, 'connection.update', { connection: 'open' });
+    emit(socket, 'messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '966500000002@s.whatsapp.net', fromMe: false, id: 'img2' }, message: { conversation: 'offers' } }] });
+    await tick(); await tick();
+    expect(String(outcome)).toMatch(/not connected/);
+    expect(socket.sendMessage).not.toHaveBeenCalled();
+  });
+
   it('a failed document send is reported to the caller (the pipeline then apologises) and is not swallowed', async () => {
     const qr = await import('../../../src/whatsapp/qrConnection');
     const { replyTransport } = await import('../../../src/whatsapp/replyTransport');

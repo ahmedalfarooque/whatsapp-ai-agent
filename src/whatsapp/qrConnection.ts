@@ -467,26 +467,31 @@ class QrConnection {
     };
     // Catalogue PDFs: the same socket and the same connected-session guard as text, as a separate method so the
     // text path above is unchanged.
-    const sendFile = async (file: OutboundDocument) => {
-      logger.info({ account: this.accountId, target, jidServer: replyJid.split('@')[1], bytes: file.bytes.length }, '[WA-OUTBOUND] sendDocument started');
+    // One path for every kind of media (documents AND images): the same socket, the same connected-session and generation guards.
+    const sendMedia = async (kind: 'document' | 'image', file: OutboundDocument) => {
+      logger.info({ account: this.accountId, target, jidServer: replyJid.split('@')[1], kind, bytes: file.bytes.length }, `[WA-OUTBOUND] send ${kind} started`);
       if (run !== this.generation || this.phase !== 'connected') {
-        logger.error({ account: this.accountId, target, phase: this.phase }, '[WA-OUTBOUND] sendDocument aborted: session not connected');
+        logger.error({ account: this.accountId, target, phase: this.phase, kind }, `[WA-OUTBOUND] send ${kind} aborted: session not connected`);
         throw new Error(`WhatsApp account ${this.accountId} is not connected`);
       }
       try {
-        const sent = await instance.sendMessage(replyJid, { document: file.bytes, mimetype: file.mimeType, fileName: file.fileName, caption: file.caption });
+        const content = kind === 'image'
+          ? { image: file.bytes, mimetype: file.mimeType, caption: file.caption }
+          : { document: file.bytes, mimetype: file.mimeType, fileName: file.fileName, caption: file.caption };
+        const sent = await instance.sendMessage(replyJid, content);
         this.rememberSent(sent?.key?.id);
-        logger.info({ account: this.accountId, target, sentId: sent?.key?.id ?? null }, '[WA-OUTBOUND] sendDocument success');
+        logger.info({ account: this.accountId, target, kind, sentId: sent?.key?.id ?? null }, `[WA-OUTBOUND] send ${kind} success`);
         return {
           messaging_product: 'whatsapp' as const,
           contacts: [{ input: replyJid, wa_id: replyJid }],
           messages: [{ id: sent?.key?.id ?? `qr-${Date.now()}` }],
         };
       } catch (error) {
-        logger.error({ account: this.accountId, target, error }, '[WA-OUTBOUND] sendDocument failure');
+        logger.error({ account: this.accountId, target, kind, error }, `[WA-OUTBOUND] send ${kind} failure`);
         throw error;
       }
     };
+    const sendFile = (file: OutboundDocument) => sendMedia('document', file);
     return {
       text: (_to, body) => send(body),
       interactive: async (_to, menu) => {
@@ -494,6 +499,7 @@ class QrConnection {
         return send(text);
       },
       document: (_to, file) => sendFile(file),
+      image: (_to, picture) => sendMedia('image', picture),
     };
   }
 
