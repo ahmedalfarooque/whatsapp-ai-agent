@@ -698,9 +698,26 @@ describe('dashboard', () => {
   });
 
   // ---- AI (OpenRouter) simplified save+test ----------------------------------
-  it('rejects AI configure without an API key', async () => {
-    const res = await agent.post('/api/dashboard/ai/configure').send({ model: 'openrouter/free' });
-    expect(res.status).toBe(400);
+  it('rejects AI configure with neither a key nor a model, and an invalid model name', async () => {
+    expect((await agent.post('/api/dashboard/ai/configure').send({})).status).toBe(400);
+    expect((await agent.post('/api/dashboard/ai/configure').send({ apiKey: '  ', model: '  ' })).status).toBe(400);
+    const bad = await agent.post('/api/dashboard/ai/configure').send({ model: 'bad model; drop table' });
+    expect(bad.status).toBe(400);
+    expect(bad.body.fields).toEqual(['model']);
+  });
+
+  it('a model-only AI configure changes this account\'s model, never the key, and a blank model never resets it', async () => {
+    const keyOf = async () => { const c = (await agent.get('/api/dashboard/credentials')).body.OPENROUTER_API_KEY; return { source: c.source, overrideStatus: c.overrideStatus, masked: c.masked }; };
+    const keyBefore = await keyOf();
+    expect(keyBefore.source).toBeTruthy();
+    const res = await agent.post('/api/dashboard/ai/configure').send({ model: 'openai/gpt-4o-mini' });
+    expect(res.status).toBe(200);
+    expect(res.body.model).toBe('openai/gpt-4o-mini');
+    expect((await agent.get('/api/dashboard/ai')).body.model).toBe('openai/gpt-4o-mini');
+    expect(await keyOf()).toEqual(keyBefore);
+    await agent.post('/api/dashboard/ai/configure').send({ apiKey: 'sk-or-fake-test-key-2', model: '' }); // key only: the model stays
+    expect((await agent.get('/api/dashboard/ai')).body.model).toBe('openai/gpt-4o-mini');
+    await agent.post('/api/dashboard/ai/configure').send({ model: 'openrouter/free' });
   });
 
   it('AI configure persists the key/model and returns a real (non-fabricated) connection result', async () => {

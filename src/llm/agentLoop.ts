@@ -1,6 +1,7 @@
 import { env } from '../config/env';
 import { logger } from '../logger';
 import { chatCompletion } from './openRouterClient';
+import { AiResponseError } from './aiResponseError';
 import { toolRegistry, toolSchemasForAccount } from '../tools';
 import { currentAccountId } from '../accounts/accountContext';
 import type { ChatMessage } from './types';
@@ -17,9 +18,6 @@ export interface AgentLoopResult {
   finalText: string;
   generatedMessages: GeneratedMessage[];
 }
-
-const FALLBACK_REPLY =
-  "I need a moment to look into that properly — let me get back to you shortly, or feel free to contact us directly.";
 
 function historyToChatMessages(history: ChatMessageForLlm[]): ChatMessage[] {
   return history.map((h) => ({
@@ -65,13 +63,16 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
     const response = await chatCompletion({ messages, tools: tools.length ? tools : undefined });
     const choice = response.choices[0];
     if (!choice) {
-      throw new Error('OpenRouter response contained no choices');
+      throw new AiResponseError('malformed_response', null, null);
     }
     const assistantMessage = choice.message;
 
     const toolCalls = assistantMessage.tool_calls ?? [];
     if (toolCalls.length === 0) {
-      const finalText = assistantMessage.content?.trim() || FALLBACK_REPLY;
+      // An empty answer is a FAILED answer (the client already rejects it; this guards any other caller): it must never be stored or
+      // counted as a successful AI reply.
+      const finalText = assistantMessage.content?.trim();
+      if (!finalText) throw new AiResponseError('empty_response', null, null);
       generatedMessages.push({ role: 'assistant', content: finalText });
       return { finalText, generatedMessages };
     }
@@ -121,7 +122,8 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
     }
   }
 
+  // The model kept requesting tools and never answered: that is a failed answer, handled like any other AI failure (fallback template,
+  // logged as an error) rather than a made-up "success".
   logger.warn({ maxRounds }, 'agent loop exhausted max tool rounds without a final answer');
-  generatedMessages.push({ role: 'assistant', content: FALLBACK_REPLY });
-  return { finalText: FALLBACK_REPLY, generatedMessages };
+  throw new AiResponseError('tool_rounds_exhausted', null, null);
 }

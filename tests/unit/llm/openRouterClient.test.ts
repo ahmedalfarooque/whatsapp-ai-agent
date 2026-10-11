@@ -57,7 +57,7 @@ describe('OpenRouter client — HTTP behavior', () => {
     fetchSpy.mockResolvedValue(jsonResponse(200, { choices: [] }));
 
     await expect(chatCompletion({ messages: [{ role: 'user', content: 'hi' }] })).rejects.toThrow(
-      /no choices/,
+      /malformed_response/,
     );
   });
 

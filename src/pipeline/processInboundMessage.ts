@@ -30,6 +30,7 @@ import { getDeliverableCatalogue } from '../catalogues/catalogueRepo';
 import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
 import { AiCredentialError } from '../llm/aiCredentialError';
+import { AiResponseError } from '../llm/aiResponseError';
 import { MENU_IDS, detectLanguageFromScript, isHardRestart, isMenuKeyword, isSubstantiveFreeText } from '../automation/menu';
 import { MENU_STATES, DATA_DRIVEN_FALLBACKS, routeMenu, type RouteResult } from '../automation/menuRouter';
 import { renderCustomerOffers } from '../offers/offerRepo';
@@ -290,10 +291,16 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
     }
   } catch (error) {
     const credentialProblem = error instanceof AiCredentialError ? error : null;
+    const responseProblem = error instanceof AiResponseError ? error : null;
+    // Safe diagnostics only: category, HTTP status, model and the provider's short reason — never the key, the prompt or the customer's text.
     logger.error(
-      { waId: maskedId, errorName: (error as Error)?.name, errorMessage: String((error as Error)?.message ?? error).slice(0, 200), credentialReason: credentialProblem?.reason },
+      {
+        waId: maskedId, errorName: (error as Error)?.name, errorMessage: String((error as Error)?.message ?? error).slice(0, 200), credentialReason: credentialProblem?.reason,
+        aiReason: responseProblem?.reason, aiHttpStatus: responseProblem?.httpStatus, aiModel: responseProblem?.model, aiProviderMessage: responseProblem?.providerMessage,
+      },
       'agent loop failed for inbound message',
     );
+    if (responseProblem) failureDetail = `AI failed; fallback sent (${responseProblem.describe()})`;
     if (credentialProblem) {
       // The provider key is unusable: every message would fail the same way. Tell the customer once in a while, not on every message.
       if (!allowCredentialFallback(currentAccountId(), msg.waId)) {

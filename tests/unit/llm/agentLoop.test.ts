@@ -93,15 +93,14 @@ describe('runAgentLoop', () => {
     expect(result.finalText).toBe('ok');
   });
 
-  it('stops after maxToolRounds and returns a safe fallback instead of looping forever', async () => {
+  it('stops after maxToolRounds instead of looping forever, and reports a failed answer rather than inventing a reply', async () => {
     vi.mocked(chatCompletion).mockResolvedValue(
       toolCallResponse('check_availability', { date: '2025-06-10' }) as never,
     );
     vi.mocked(toolRegistry.check_availability.handler).mockResolvedValue({ slots: [] });
 
-    const result = await runAgentLoop({ systemPrompt: 'sys', history: [], conversationId: 1, maxToolRounds: 2 });
+    await expect(runAgentLoop({ systemPrompt: 'sys', history: [], conversationId: 1, maxToolRounds: 2 })).rejects.toMatchObject({ reason: 'tool_rounds_exhausted' });
 
     expect(chatCompletion).toHaveBeenCalledTimes(2);
-    expect(result.finalText).toMatch(/get back to you|contact us/i);
   });
 });

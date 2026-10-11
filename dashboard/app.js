@@ -959,7 +959,7 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
         <form id="ai-form" autocomplete="off">
           ${autofillDecoy()}
           ${pwField('apiKey', 'OpenRouter API Key', null, openRouterSaved)}
-          ${textField('model', 'Model', 'Default: openrouter/free — a free model, no payment method needed.', aiConfig.model)}
+          ${textField('model', 'Model for this business', 'Applies to the selected business only; the key above is shared by all of them. Leave the key empty to change only the model. openrouter/free costs nothing but is often rate limited, refused by your OpenRouter privacy settings, or answers empty — for dependable replies name a specific model, for example openai/gpt-4o-mini (paid). Saving tests the model with one tiny request.', aiConfig.model)}
           <div class="toolbar" style="margin-top:8px">
             <button type="submit" class="btn primary">Save &amp; Test AI</button>
           </div>

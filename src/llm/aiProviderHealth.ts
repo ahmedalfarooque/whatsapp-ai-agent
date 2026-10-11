@@ -87,15 +87,111 @@ export function refreshProviderHealth(): Promise<ProviderHealth | null> {
   return inFlight;
 }
 
-/** Makes sure a fresh verdict exists, waiting at most `waitMs` for the provider; used by the dashboard's status call. */
-export async function ensureProviderHealth(waitMs: number): Promise<void> {
-  const current = getCachedProviderHealth();
-  if (current && !current.stale) return;
-  await Promise.race([refreshProviderHealth(), new Promise<void>((resolve) => setTimeout(resolve, waitMs).unref())]);
+// ---------------------------------------------------------------- the MODEL (a valid key does not mean a usable model)
+
+/**
+ * Whether the configured MODEL can actually answer, found with one tiny real completion (8 tokens, a neutral prompt, no business or
+ * customer data). Separate from the key check: OpenRouter accepts a valid key for a model whose endpoints are blocked by the account's
+ * data-policy settings, rate limited upstream, or that returns empty answers.
+ *  usable        HTTP 200 with text
+ *  empty         HTTP 200 but no text
+ *  unavailable   HTTP 400-404: no endpoint can serve this model for this account
+ *  rate_limited  HTTP 429 / 408
+ *  error         HTTP 5xx, malformed answer or no connection
+ */
+export type ModelHealthStatus = 'usable' | 'empty' | 'unavailable' | 'rate_limited' | 'error';
+
+export interface ModelHealth {
+  status: ModelHealthStatus;
+  model: string;
+  checkedAt: number;
+  httpStatus: number | null;
+  latencyMs: number;
+}
+
+const MODEL_OK_TTL_MS = 30 * 60_000; // a working model is re-checked at most every 30 minutes
+const MODEL_FAIL_TTL_MS = 5 * 60_000; // a failing one every 5 minutes, so a fixed model turns green soon without hammering the provider
+
+const modelCache = new Map<string, ModelHealth & { fingerprint: string }>();
+const modelInFlight = new Map<string, Promise<ModelHealth | null>>();
+
+export function classifyModelResponse(httpStatus: number, text: string | null): ModelHealthStatus {
+  if (httpStatus >= 200 && httpStatus < 300) return text ? 'usable' : 'empty';
+  if (httpStatus === 429 || httpStatus === 408) return 'rate_limited';
+  if (httpStatus >= 400 && httpStatus < 500) return 'unavailable';
+  return 'error';
+}
+
+/** Last probe of this model for the CURRENT key, or null when none exists (never probed, or the key changed since). */
+export function getCachedModelHealth(model: string, now: number = Date.now()): (ModelHealth & { stale: boolean }) | null {
+  const entry = modelCache.get(model);
+  if (!entry) return null;
+  const key = getEffectiveCredential('OPENROUTER_API_KEY');
+  if (!isUsableApiKey(key) || fingerprintOf(key) !== entry.fingerprint) return null;
+  const ttl = entry.status === 'usable' ? MODEL_OK_TTL_MS : MODEL_FAIL_TTL_MS;
+  return { status: entry.status, model: entry.model, checkedAt: entry.checkedAt, httpStatus: entry.httpStatus, latencyMs: entry.latencyMs, stale: now - entry.checkedAt > ttl };
+}
+
+export function refreshModelHealth(model: string): Promise<ModelHealth | null> {
+  if (env.shouldUseMockProviders) return Promise.resolve(null);
+  const key = getEffectiveCredential('OPENROUTER_API_KEY');
+  if (!isUsableApiKey(key)) return Promise.resolve(null);
+  const existing = modelInFlight.get(model);
+  if (existing) return existing;
+  const fingerprint = fingerprintOf(key);
+  const run = (async (): Promise<ModelHealth> => {
+    const started = Date.now();
+    let result: ModelHealth;
+    try {
+      const response = await fetchWithTimeout(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, max_tokens: 8, temperature: 0, messages: [{ role: 'user', content: 'Reply with the single word: ok' }] }),
+        },
+        env.OPENROUTER_TIMEOUT_MS,
+      );
+      let text: string | null = null;
+      if (response.ok) {
+        const body = (await response.json().catch(() => null)) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+        const content = body?.choices?.[0]?.message?.content;
+        text = typeof content === 'string' && content.trim() ? content.trim() : null;
+      }
+      result = { status: classifyModelResponse(response.status, text), model, checkedAt: Date.now(), httpStatus: response.status, latencyMs: Date.now() - started };
+    } catch (error) {
+      logger.warn({ errorName: (error as Error)?.name, model }, 'ai model health: could not reach the provider');
+      result = { status: 'error', model, checkedAt: Date.now(), httpStatus: null, latencyMs: Date.now() - started };
+    }
+    if (fingerprintOf(getEffectiveCredential('OPENROUTER_API_KEY')) === fingerprint) modelCache.set(model, { ...result, fingerprint });
+    return result;
+  })().finally(() => {
+    modelInFlight.delete(model);
+  });
+  modelInFlight.set(model, run);
+  return run;
+}
+
+/**
+ * Makes sure fresh verdicts exist — for the key and, when a model is given, for that model — waiting at most `waitMs` in total.
+ * The model is probed only after the key is known to be accepted, and only when its cached probe has expired.
+ */
+export async function ensureProviderHealth(waitMs: number, model?: string): Promise<void> {
+  const work = (async () => {
+    const keyHealth = getCachedProviderHealth();
+    if (!keyHealth || keyHealth.stale) await refreshProviderHealth();
+    if (!model || getCachedProviderHealth()?.status !== 'ok') return;
+    const modelHealth = getCachedModelHealth(model);
+    if (!modelHealth || modelHealth.stale) await refreshModelHealth(model);
+  })();
+  work.catch(() => undefined);
+  await Promise.race([work, new Promise<void>((resolve) => setTimeout(resolve, waitMs).unref())]);
 }
 
 /** Test helper: forget every cached verdict. */
 export function resetProviderHealthForTests(): void {
   cached = null;
   inFlight = null;
+  modelCache.clear();
+  modelInFlight.clear();
 }

@@ -20,6 +20,8 @@ import { chatCompletion } from '../../src/llm/openRouterClient';
 import { findFreeSlots } from '../../src/calendar/availability';
 import { createEvent } from '../../src/calendar/booking';
 import { processInboundMessage } from '../../src/pipeline/processInboundMessage';
+import { AiResponseError } from '../../src/llm/aiResponseError';
+import { getDb } from '../../src/memory/db';
 import { getRecentMessages, getOrCreateActiveConversation } from '../../src/memory/conversationRepo';
 import { getOrCreateCustomer, setCustomerLanguage } from '../../src/memory/customerRepo';
 import { loadKnowledgeBase } from '../../src/knowledge/loader';
@@ -181,5 +183,51 @@ describe('end-to-end conversation flow (mocked external services)', () => {
     const lastCall = vi.mocked(sendTextMessage).mock.calls.at(-1);
     expect(lastCall?.[1]).not.toMatch(/OpenRouter is down/);
     expect(lastCall?.[1]).toMatch(/went wrong/i);
+  });
+  describe('an AI answer that gives the customer nothing usable is a FAILED answer', () => {
+    const activityFor = (waId: string) => getDb().prepare('SELECT kind, detail FROM reply_activity WHERE wa_id = ? ORDER BY id').all(waId) as Array<{ kind: string; detail: string | null }>;
+
+    it('HTTP 200 with an empty message sends the neutral fallback, stores no empty reply, and is NOT counted as an AI success', async () => {
+      const waId = '15552220006';
+      preselectLanguage(waId);
+      vi.mocked(chatCompletion).mockResolvedValue(textResponse('   ') as never);
+
+      await processInboundMessage(inbound(waId, 'wamid.empty1', 'How much is a 4 litre bucket of paint?'), { knowledge });
+
+      expect(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1]).toMatch(/went wrong/i);
+      const rows = activityFor(waId);
+      expect(rows.some((r) => r.kind === 'ai')).toBe(false);
+      expect(rows.at(-1)).toMatchObject({ kind: 'error' });
+      expect(rows.at(-1)!.detail).toMatch(/^AI failed; fallback sent \(empty response/);
+      const conversation = getOrCreateActiveConversation(getOrCreateCustomer(waId, undefined).id);
+      const assistant = getRecentMessages(conversation.id, 50).filter((m) => m.role === 'assistant').map((m) => m.content);
+      expect(assistant.every((c) => c.trim().length > 0)).toBe(true);
+      expect(chatCompletion).toHaveBeenCalledTimes(1); // the pipeline itself never re-asks: one provider round per customer message
+    });
+
+    it('a refused model is logged with its category, HTTP status and model name — and none of that reaches the customer', async () => {
+      const waId = '15552220007';
+      preselectLanguage(waId);
+      vi.mocked(chatCompletion).mockRejectedValue(new AiResponseError('model_unavailable', 404, 'openrouter/free', '0 endpoints available matching your guardrail restrictions'));
+
+      await processInboundMessage(inbound(waId, 'wamid.refused1', 'Do you have Jotun paint?'), { knowledge });
+
+      const reply = String(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1]);
+      expect(reply).toMatch(/went wrong/i);
+      expect(reply).not.toMatch(/openrouter|guardrail|404|model/i);
+      expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error', detail: 'AI failed; fallback sent (model unavailable, HTTP 404, model openrouter/free)' });
+    });
+
+    it('a model that never stops calling tools is cut off at the round cap and answered with the fallback, not a fake success', async () => {
+      const waId = '15552220008';
+      preselectLanguage(waId);
+      vi.mocked(chatCompletion).mockResolvedValue(toolCallResponse('no_such_tool', {}) as never);
+
+      await processInboundMessage(inbound(waId, 'wamid.loop1', 'Please check something'), { knowledge });
+
+      expect(chatCompletion).toHaveBeenCalledTimes(4); // MAX_TOOL_ROUNDS in the test environment: bounded provider cost
+      expect(activityFor(waId).at(-1)!.detail).toMatch(/tool rounds exhausted/);
+      expect(activityFor(waId).some((r) => r.kind === 'ai')).toBe(false);
+    });
   });
 });

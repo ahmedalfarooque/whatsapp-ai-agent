@@ -2,7 +2,8 @@ import { getDb } from '../memory/db';
 import { maskWaId } from '../logger';
 import { env } from '../config/env';
 import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
-import { credentialSavedAtMs, getCachedProviderHealth } from '../llm/aiProviderHealth';
+import { credentialSavedAtMs, getCachedModelHealth, getCachedProviderHealth } from '../llm/aiProviderHealth';
+import { getBusinessSettings } from '../config/businessSettings';
 import { getAutomationSettings } from '../automation/settingsRepo';
 import { runWithAccount } from '../accounts/accountContext';
 import { getRecentConversations } from './data';
@@ -45,45 +46,83 @@ export interface AiState {
   state: 'active' | 'off' | 'needs_key' | 'error' | 'mock';
   label: string;
   detail: string;
-  /** True only when the provider itself confirmed the saved key (a live check), not merely that a key is saved. */
+  /** True only when the provider itself confirmed the saved key (a live check or a real reply), not merely that a key is saved. */
   verified: boolean;
+  /** The model this account is configured to use (never a secret), or null when no real AI is involved. */
+  model: string | null;
+  /** True only when that model has actually answered (a live probe or a real reply): a valid key alone does not prove it. */
+  modelVerified: boolean;
 }
 
+const dbTimeMs = (value: string): number => Date.parse(`${value.replace(' ', 'T')}Z`);
+
 /**
- * The REAL state of AI replies for one account. The credential verdict comes from a live, cached provider check
- * (see llm/aiProviderHealth); reply history is only a secondary signal and failures recorded BEFORE the key was last saved are
- * ignored, so fixing the key clears the warning instead of leaving a stale "rejected" for 24 hours. This is a statement about the
- * AI provider only: the account's knowledge files are reported separately.
+ * The REAL state of AI replies for one account. Three separate pieces of evidence, newest wins:
+ *  - the KEY: a live, cached check with the provider (llm/aiProviderHealth);
+ *  - the MODEL: a tiny cached probe of the account's configured model (a valid key does not make a blocked, rate-limited or
+ *    empty-answering model usable);
+ *  - REAL replies: the latest AI reply of this account — a success (non-empty answer) or a failure.
+ * Failures recorded before the key was last saved, or under a different model, are ignored, so correcting the key or the model clears
+ * the warning. "No recent failures" never counts as proof the AI works.
  */
 export function getAiState(accountId: number, now: number = Date.now()): AiState {
   const settings = runWithAccount(accountId, () => getAutomationSettings()); // this account's switches, whatever account the request context holds
-  if (env.shouldUseMockProviders) return { state: 'mock', label: 'Test mode', detail: 'Mock providers: no real AI calls are made', verified: false };
-  if (!settings.autoRepliesEnabled || !settings.aiRepliesEnabled) return { state: 'off', label: 'AI off', detail: 'Free-text AI replies are switched off for this account', verified: false };
-  if (!isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY'))) return { state: 'needs_key', label: 'AI needs a key', detail: 'No usable AI provider key is saved', verified: false };
+  const base = { verified: false, model: null, modelVerified: false };
+  if (env.shouldUseMockProviders) return { ...base, state: 'mock', label: 'Test mode', detail: 'Mock providers: no real AI calls are made' };
+  if (!settings.autoRepliesEnabled || !settings.aiRepliesEnabled) return { ...base, state: 'off', label: 'AI off', detail: 'Free-text AI replies are switched off for this account' };
+  if (!isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY'))) return { ...base, state: 'needs_key', label: 'AI needs a key', detail: 'No usable AI provider key is saved' };
 
-  const health = getCachedProviderHealth(now);
-  if (health?.status === 'rejected') {
-    return { state: 'error', label: 'AI key rejected', detail: `OpenRouter rejected the saved key (HTTP ${health.httpStatus}). Save a valid key under Providers`, verified: false };
+  const model = runWithAccount(accountId, () => getBusinessSettings(accountId).openRouterModel);
+  const known = { ...base, model };
+  const key = getCachedProviderHealth(now);
+  if (key?.status === 'rejected') {
+    return { ...known, state: 'error', label: 'AI key rejected', detail: `OpenRouter rejected the saved key (HTTP ${key.httpStatus}). Save a valid key under Providers` };
   }
-  if (health?.status === 'rate_limited') {
-    return { state: 'error', label: 'AI provider busy', detail: 'OpenRouter is rate limiting this key; AI replies may fail until it recovers', verified: false };
+  if (key?.status === 'rate_limited') {
+    return { ...known, state: 'error', label: 'AI provider busy', detail: 'OpenRouter is rate limiting this key; AI replies may fail until it recovers' };
   }
+  const keyVerified = key?.status === 'ok';
 
-  // Replies since the later of "24 hours ago" and "the key was last saved": older failures belong to a key that no longer exists.
+  // Real replies since the later of "24 hours ago" and "the key was last saved".
   const savedAt = credentialSavedAtMs();
   const windowStart = sqlTime(Math.max(now - DAY_MS, savedAt ?? 0));
-  const latest = (sql: string): string | null => (getDb().prepare(sql).get(accountId, windowStart) as { at: string | null }).at;
-  const lastFailure = latest("SELECT MAX(created_at) AS at FROM reply_activity WHERE whatsapp_account_id = ? AND kind = 'error' AND (detail LIKE 'AI credential problem%' OR detail LIKE 'AI failed%') AND created_at >= ?");
-  const lastSuccess = latest("SELECT MAX(created_at) AS at FROM reply_activity WHERE whatsapp_account_id = ? AND kind = 'ai' AND created_at >= ?");
-  if (lastFailure && (!lastSuccess || lastFailure > lastSuccess)) {
-    return health?.status === 'ok'
-      ? { state: 'error', label: 'AI replies failing', detail: 'The key is valid but the latest AI reply failed (provider or model error); see the activity log', verified: true }
-      : { state: 'error', label: 'AI key rejected', detail: 'The AI provider rejected the saved key since it was last saved', verified: false };
+  const db = getDb();
+  const failure = db
+    .prepare(
+      `SELECT created_at AS at, detail FROM reply_activity
+       WHERE whatsapp_account_id = ? AND kind = 'error' AND created_at >= ?
+         AND (detail LIKE 'AI credential problem%' OR (detail LIKE 'AI failed%' AND instr(detail, ?) > 0))
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+    )
+    .get(accountId, windowStart, `model ${model}`) as { at: string; detail: string } | undefined;
+  const success = db
+    .prepare("SELECT MAX(created_at) AS at FROM reply_activity WHERE whatsapp_account_id = ? AND kind = 'ai' AND created_at >= ?")
+    .get(accountId, windowStart) as { at: string | null };
+  const okMs = success.at ? dbTimeMs(success.at) : null;
+
+  if (failure && (!success.at || failure.at > success.at)) {
+    if (failure.detail.startsWith('AI credential problem') && !keyVerified) {
+      return { ...known, state: 'error', label: 'AI key rejected', detail: 'The AI provider rejected the saved key since it was last saved' };
+    }
+    const why = /\(([^)]*)\)/.exec(failure.detail)?.[1];
+    return { ...known, verified: keyVerified, state: 'error', label: 'AI replies failing', detail: `The latest AI reply failed${why ? ` (${why})` : ''}; the customer received the fallback message` };
   }
-  if (health?.status === 'ok') {
-    return { state: 'active', label: 'AI active', detail: `Key verified with OpenRouter at ${new Date(health.checkedAt).toISOString().slice(11, 16)} UTC`, verified: true };
+
+  const probe = getCachedModelHealth(model, now);
+  if (probe && probe.status !== 'usable' && (okMs === null || probe.checkedAt > okMs)) {
+    const reason = { empty: 'returned an empty answer', unavailable: `was refused (HTTP ${probe.httpStatus}): check the model name and the OpenRouter data-policy settings`, rate_limited: 'is being rate limited', error: 'could not be reached' }[probe.status];
+    return { ...known, verified: keyVerified, state: 'error', label: 'AI model unavailable', detail: `The key is valid but model ${model} ${reason}` };
   }
-  return { state: 'active', label: 'AI active', detail: 'A key is saved; it could not be verified with OpenRouter just now', verified: false };
+  if (okMs !== null) {
+    return { ...known, verified: true, modelVerified: true, state: 'active', label: 'AI active', detail: `Last AI reply with ${model} succeeded at ${new Date(okMs).toISOString().slice(11, 16)} UTC` };
+  }
+  if (probe?.status === 'usable') {
+    return { ...known, verified: true, modelVerified: true, state: 'active', label: 'AI active', detail: `Key and model ${model} verified at ${new Date(probe.checkedAt).toISOString().slice(11, 16)} UTC` };
+  }
+  if (keyVerified) {
+    return { ...known, verified: true, state: 'active', label: 'AI active', detail: `Key verified; model ${model} not confirmed yet` };
+  }
+  return { ...known, state: 'active', label: 'AI active', detail: 'A key is saved; it could not be verified with OpenRouter just now' };
 }
 
 export interface ActivityWindow {

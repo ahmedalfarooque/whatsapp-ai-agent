@@ -2,9 +2,10 @@ import { env } from '../config/env';
 import { describeCredential, getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { getBusinessSettings } from '../config/businessSettings';
 import { logger } from '../logger';
-import { fetchWithTimeout, withRetry, HttpError, isRetryableHttpError } from '../utils/retry';
+import { fetchWithTimeout, withRetry } from '../utils/retry';
 import { chatCompletionMock } from './mockOpenRouterClient';
 import { AiCredentialError } from './aiCredentialError';
+import { AiResponseError, reasonForHttpStatus } from './aiResponseError';
 import type { ChatCompletionResponse, ChatMessage } from './types';
 import type { ToolDefinition } from '../tools';
 
@@ -42,34 +43,84 @@ function noteRejected(status: number): void {
   logger.error({ credential: 'OPENROUTER_API_KEY', source: diag.source, overrideStatus: diag.overrideStatus, httpStatus: status }, 'OpenRouter refused the API key; AI replies fail until a valid key is entered in the dashboard (Providers)');
 }
 
+/** Text of a message whatever shape the provider used: a string, or an array of content parts ({type:'text', text}). */
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part === 'string' ? part : typeof (part as { text?: unknown })?.text === 'string' ? (part as { text: string }).text : ''))
+      .join('')
+      .trim();
+  }
+  return '';
+}
+
+/** The provider's own short explanation of an error (never the request), flattened and truncated for logs and the activity list. */
+function providerMessageOf(body: string | undefined): string | null {
+  if (!body) return null;
+  try {
+    const message = (JSON.parse(body) as { error?: { message?: unknown } })?.error?.message;
+    return typeof message === 'string' ? message.replace(/\s+/g, ' ').slice(0, 160) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Checks that a provider answer actually contains something to send: at least one choice with a message, and either text or a tool
+ * call. An HTTP 200 with an empty message is a FAILED answer, not a successful empty reply. Returns the response with the message text
+ * normalised to a plain string.
+ */
+export function validateCompletion(parsed: unknown, model: string): ChatCompletionResponse {
+  const choices = (parsed as { choices?: unknown } | null)?.choices;
+  const choice = Array.isArray(choices) ? (choices[0] as { message?: Record<string, unknown> } | undefined) : undefined;
+  if (!choice || typeof choice.message !== 'object' || choice.message === null) {
+    throw new AiResponseError('malformed_response', 200, model);
+  }
+  const toolCalls = Array.isArray(choice.message.tool_calls) ? choice.message.tool_calls : [];
+  const text = messageText(choice.message.content);
+  if (toolCalls.length === 0 && !text) throw new AiResponseError('empty_response', 200, model);
+  choice.message = { ...choice.message, content: text || null };
+  return parsed as ChatCompletionResponse;
+}
+
 /** Calls OpenRouter's OpenAI-compatible chat completions endpoint with tool-calling support. */
 export async function chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
   if (env.shouldUseMockProviders) {
     return chatCompletionMock(request.messages);
   }
+  const model = getBusinessSettings().openRouterModel;
+  // Retries are bounded: at most 2 more attempts for a rate limit or provider failure, and ONE more for an empty answer. A bad model
+  // or policy refusal (400-404) is never retried — asking again cannot help and would only cost money.
+  let emptyRetries = 0;
   return withRetry(
     async () => {
       const apiKey = usableApiKey();
-      const response = await fetchWithTimeout(
-        OPENROUTER_URL,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            ...(env.OPENROUTER_SITE_URL ? { 'HTTP-Referer': env.OPENROUTER_SITE_URL } : {}),
-            ...(env.OPENROUTER_APP_NAME ? { 'X-Title': env.OPENROUTER_APP_NAME } : {}),
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(
+          OPENROUTER_URL,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+              ...(env.OPENROUTER_SITE_URL ? { 'HTTP-Referer': env.OPENROUTER_SITE_URL } : {}),
+              ...(env.OPENROUTER_APP_NAME ? { 'X-Title': env.OPENROUTER_APP_NAME } : {}),
+            },
+            body: JSON.stringify({
+              model,
+              messages: request.messages,
+              tools: request.tools,
+              temperature: request.temperature ?? 0.4,
+              max_tokens: request.maxTokens ?? 600,
+            }),
           },
-          body: JSON.stringify({
-            model: getBusinessSettings().openRouterModel,
-            messages: request.messages,
-            tools: request.tools,
-            temperature: request.temperature ?? 0.4,
-            max_tokens: request.maxTokens ?? 600,
-          }),
-        },
-        env.OPENROUTER_TIMEOUT_MS,
-      );
+          env.OPENROUTER_TIMEOUT_MS,
+        );
+      } catch (error) {
+        throw new AiResponseError('provider_error', null, model, `${(error as Error)?.name ?? 'network error'}`);
+      }
 
       if (response.status === 401 || response.status === 403) {
         noteRejected(response.status);
@@ -77,20 +128,30 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
       }
       if (!response.ok) {
         const errorBody = await response.text().catch(() => undefined);
-        throw new HttpError(`OpenRouter API error: ${response.status}`, response.status, errorBody);
+        throw new AiResponseError(reasonForHttpStatus(response.status), response.status, model, providerMessageOf(errorBody));
       }
 
-      const parsed = (await response.json()) as ChatCompletionResponse;
-      if (!parsed.choices || parsed.choices.length === 0) {
-        throw new Error('OpenRouter response contained no choices');
+      let parsed: unknown;
+      try {
+        parsed = await response.json();
+      } catch {
+        throw new AiResponseError('malformed_response', response.status, model);
       }
-      return parsed;
+      return validateCompletion(parsed, model);
     },
     {
       retries: 2,
-      isRetryable: (error) => !(error instanceof AiCredentialError) && isRetryableHttpError(error),
+      isRetryable: (error) => {
+        if (error instanceof AiCredentialError) return false;
+        if (error instanceof AiResponseError) {
+          if (error.reason === 'empty_response') return emptyRetries++ < 1;
+          return error.reason === 'rate_limited' || error.reason === 'provider_error';
+        }
+        return false;
+      },
       onRetry: (error, attempt) => {
-        logger.warn({ error, attempt }, 'retrying OpenRouter chat completion');
+        const e = error as AiResponseError;
+        logger.warn({ attempt, reason: e.reason, httpStatus: e.httpStatus, model: e.model }, 'retrying OpenRouter chat completion');
       },
     },
   );

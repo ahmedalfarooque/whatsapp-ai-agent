@@ -33,6 +33,6 @@ describe('knowledge page and AI pill tell the truth', () => {
 
   it('the AI pill says whether the key was verified instead of "Real-time sync"', () => {
     expect(shell).not.toContain('Real-time sync');
-    expect(shell).toContain("state.verified ? 'Key verified' : 'Key not verified'");
+    expect(shell).toContain("state.modelVerified ? 'Model verified' : state.verified ? 'Key verified' : 'Key not verified'");
   });
 });

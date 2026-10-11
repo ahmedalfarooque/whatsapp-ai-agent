@@ -53,7 +53,9 @@ describe('dashboard credential pages with stale (undecryptable) overrides', () =
 
   it('entering a valid key through the dashboard repairs it: stored under the CURRENT master key, tested, and shown as the override', async () => {
     mutableEnv.shouldUseMockProviders = false;
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{"data":{}}', { status: 200 }));
+    // The key check (/auth/key) and the one-request model check (/chat/completions) are separate calls.
+    const fetchMock = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith('/chat/completions') ? new Response('{"choices":[{"message":{"role":"assistant","content":"ok"}}]}', { status: 200 }) : new Response('{"data":{}}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const configured = await agent.post('/api/dashboard/ai/configure').send({ apiKey: NEW_KEY, model: 'openrouter/free' });

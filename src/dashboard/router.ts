@@ -72,7 +72,7 @@ import { registerHandoffRoutes } from './handoffRoutes';
 import { registerInboxRoutes } from './inboxRoutes';
 import { HandoffError, returnToAi, getHold, getOpenHandoff, takeOverCustomer, type HandoffActor } from '../handoff/handoffRepo';
 import { buildOverview, getAiState, OVERVIEW_RANGES, type OverviewRange } from './overview';
-import { ensureProviderHealth } from '../llm/aiProviderHealth';
+import { ensureProviderHealth, refreshModelHealth } from '../llm/aiProviderHealth';
 import { accountUiStatus } from '../accounts/accountStatus';
 import { canManageConfiguration, canManageConnections, featureLevel, levelAtLeast, type AuthUser } from './permissions';
 import { runWithAccount } from '../accounts/accountContext';
@@ -821,14 +821,14 @@ export function createDashboardRouter(): Router {
   // Top-bar indicator: the real state of AI replies for the selected account (no secrets).
   router.get('/api/dashboard/ai-status', async (req, res) => {
     // A live (cached 5 min) check of the provider key, waiting at most 3 s, so the pill reflects the key as it is NOW.
-    await ensureProviderHealth(3000).catch(() => undefined);
+    await ensureProviderHealth(4000, getBusinessSettings(req.accountId as number).openRouterModel).catch(() => undefined);
     res.json(getAiState(req.accountId as number));
   });
 
   // ---- Dashboard home: one real-data overview for the selected account (sections the user cannot read come back null) ----
   router.get('/api/dashboard/overview', (req, res) => {
     const range = OVERVIEW_RANGES.includes(String(req.query.range) as OverviewRange) ? (String(req.query.range) as OverviewRange) : '30';
-    void ensureProviderHealth(0).catch(() => undefined); // refresh the provider verdict in the background; the overview never waits for it
+    void ensureProviderHealth(0, getBusinessSettings(req.accountId as number).openRouterModel).catch(() => undefined); // refresh the provider verdict in the background; the overview never waits for it
     const account = getAccount(req.accountId as number);
     const visible = listAccountsForAdmin(req.adminUserId as number).map((a) => {
       const view = accountView(a);
@@ -1173,17 +1173,31 @@ export function createDashboardRouter(): Router {
 
   // ---- AI (OpenRouter) — simplified single-action save+test ------------------
   router.post('/api/dashboard/ai/configure', async (req, res) => {
-    const apiKey = req.body?.apiKey;
-    const model = typeof req.body?.model === 'string' && req.body.model.trim() ? req.body.model.trim() : 'openrouter/free';
-    if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
-      res.status(400).json({ error: 'validation_failed', fields: ['apiKey'] });
+    // The key is one credential for the whole installation; the MODEL belongs to the selected account. Either may be sent alone:
+    // a model-only save never touches the key, and a blank model never overwrites the account's current one.
+    const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : '';
+    const model = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
+    if (!apiKey && !model) {
+      res.status(400).json({ error: 'validation_failed', fields: ['apiKey', 'model'] });
       return;
     }
-    setSecret('OPENROUTER_API_KEY', apiKey.trim(), req.adminUserId as number);
-    updateBusinessSettings({ openRouterModel: model });
+    if (model && !/^[A-Za-z0-9._:/-]{1,100}$/.test(model)) {
+      res.status(400).json({ error: 'validation_failed', fields: ['model'] });
+      return;
+    }
+    if (apiKey) setSecret('OPENROUTER_API_KEY', apiKey, req.adminUserId as number);
+    if (model) updateBusinessSettings({ openRouterModel: model });
     try {
       const result = await testConnection('OPENROUTER_API_KEY');
-      res.json(result);
+      const effectiveModel = getBusinessSettings(req.accountId as number).openRouterModel;
+      // A valid key is not a usable model: ask the model itself (one tiny completion) before reporting success.
+      const probe = result.ok ? await refreshModelHealth(effectiveModel) : null;
+      const modelDetail = probe
+        ? probe.status === 'usable'
+          ? `Model ${effectiveModel} answered.`
+          : `Model ${effectiveModel} did not answer (${probe.status === 'empty' ? 'empty answer' : probe.status === 'rate_limited' ? 'rate limited' : probe.status === 'unavailable' ? `refused, HTTP ${probe.httpStatus}` : 'provider error'}).`
+        : '';
+      res.json({ ok: result.ok && (!probe || probe.status === 'usable'), detail: [result.detail, modelDetail].filter(Boolean).join(' '), model: effectiveModel, modelStatus: probe?.status ?? null });
     } catch (error) {
       logger.error({ error }, 'dashboard: AI configure/test threw unexpectedly');
       res.status(500).json({ ok: false, detail: 'internal_server_error' });
