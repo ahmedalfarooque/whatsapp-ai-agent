@@ -14,6 +14,12 @@ const canEditRequests = () => can('requests', 'edit');
 const jsonPost = (url, body) => api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 const qs = (obj) => Object.entries(obj).filter(([, v]) => v !== undefined && v !== null && v !== '' && v !== false).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v === true ? '1' : v)}`).join('&');
 const fmtSize = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+const METRIC_LABEL = {
+  totalCustomers: 'Total customers', newCustomers: 'New in period', activeCustomers: 'Active in period', customersWithInquiries: 'With requests in period', inquiries: 'Quotation requests',
+  appointmentRequests: 'Appointment requests', quotationsByStatus: 'Quotation requests by status', quotationsSent: 'Quotations delivered', awaitingSend: 'Approved, not yet sent',
+  openRequests: 'Open requests', cartsSubmitted: 'Carts submitted', openCarts: 'Open carts', staleCarts: 'Carts idle 7+ days', documentsReceived: 'Documents received',
+  documentsSent: 'Documents sent', filesNeedingReview: 'Files to review', followUpsOutstanding: 'Follow-ups outstanding', followUpsOverdue: 'Follow-ups overdue',
+};
 const money = (minor, cur) => (minor == null ? '—' : `${(minor / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${cur ? ` ${cur}` : ''}`);
 
 /** Opens/downloads a customer file through an authenticated request (the account header travels with it; a plain link would not carry it). */
@@ -46,6 +52,26 @@ async function downloadReport(url, filename) {
     a.href = blobUrl; a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  } catch { toast('Could not reach the server.', 'error'); }
+}
+
+/** Opens the print-ready report in a hidden frame and starts the print dialog (Print → Save as PDF). Nothing is stored; the data never leaves the page. */
+async function printReport(url) {
+  const headers = {};
+  if (typeof selectedAccountId !== 'undefined' && selectedAccountId) headers['X-Whatsapp-Account'] = String(selectedAccountId);
+  try {
+    const res = await fetch(url, { credentials: 'include', headers });
+    if (!res.ok) { toast('Export failed.', 'error'); return; }
+    const html = await res.text();
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true'); frame.tabIndex = -1;
+    frame.style.cssText = 'position:fixed;inset-inline-end:0;bottom:0;width:0;height:0;border:0';
+    frame.addEventListener('load', () => {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch { toast('Printing is not available here.', 'error'); }
+      setTimeout(() => frame.remove(), 60000);
+    });
+    frame.srcdoc = html;
+    document.body.appendChild(frame);
   } catch { toast('Could not reach the server.', 'error'); }
 }
 
@@ -252,6 +278,20 @@ function drawCustomerRequests(host, profile, refresh) {
   host.querySelectorAll('[data-open-request]').forEach((b) => b.addEventListener('click', () => window.openQuotationPanel(Number(b.dataset.openRequest), refresh)));
 }
 
+/** What happened to the text layer of a PDF: read (shown, labelled unverified), not read (why, with a retry), or still waiting. Customer text is never translated. */
+function extractionView(f) {
+  if (f.extension !== 'pdf' || f.status === 'failed' || f.status === 'too_large' || f.status === 'unsupported') return '';
+  if (f.processing === 'text_extracted') {
+    return `<div class="muted">${badge('text read', 'green')} ${f.extraction_pages ? ` page(s) · ` : ''}${formatDate(f.extracted_at)}</div>
+      <details><summary>Extracted text (unverified)</summary><pre class="cu-pre" dir="auto" translate="no">${esc((f.extracted_text_unverified || '').slice(0, 6000))}</pre></details>`;
+  }
+  if (f.processing === 'extraction_failed') {
+    const retry = canEditCustomers() && (f.extraction_attempts || 0) < 5 ? `<button class="btn small" data-extract="${f.id}">Try reading the text again</button>` : '';
+    return `<div>${badge('text not read', 'red')} <span class="muted">${esc(f.extraction_error || '')}</span><br><span class="muted">The file is kept; open it to read it yourself.</span> ${retry}</div>`;
+  }
+  return `<div>${badge('text not read yet', 'amber')} ${canEditCustomers() ? `<button class="btn small" data-extract="${f.id}">Read the text now</button>` : ''}</div>`;
+}
+
 async function drawCustomerDocuments(host, id) {
   const data = await api(`/api/dashboard/customers/${id}/documents`);
   if (!data.documents.length) { host.innerHTML = emptyView('No documents received or sent yet.'); return; }
@@ -260,11 +300,19 @@ async function drawCustomerDocuments(host, id) {
     <table class="data-table"><thead><tr><th>File</th><th>Direction</th><th>When</th><th>Related</th><th>Caption</th><th>Status</th><th></th></tr></thead><tbody>${data.documents.map(({ file: f, reference, delivery, needsReview }) => `<tr>
       <td><b dir="auto">${esc(f.original_name || f.kind)}</b><br><span class="muted">${esc(f.mime_type || '')} ${fmtSize(f.size_bytes)}</span></td>
       <td>${f.direction === 'inbound' ? '📥 Received' : '📤 Sent'}</td><td>${formatDate(f.created_at)}</td><td>${reference ? `<span class="chip">${esc(reference)}</span>` : '<span class="muted">—</span>'}</td>
-      <td dir="auto">${esc(f.caption || '')}${f.extracted_text_unverified ? `<details><summary>Extracted text (unverified)</summary><pre class="cu-pre" dir="auto">${esc(f.extracted_text_unverified.slice(0, 2000))}</pre></details>` : ''}</td>
+      <td dir="auto">${esc(f.caption || '')}${extractionView(f)}</td>
       <td>${f.status === 'stored' ? badge('stored', 'green') : badge(String(f.status).replace('_', ' '), f.status === 'needs_review' ? 'amber' : 'red')} ${deliveryBadge({ delivery })} ${needsReview ? badge('identity to review', 'amber') : ''}${f.error ? `<br><span class="muted">${esc(f.error)}</span>` : ''}</td>
       <td class="row-actions">${f.previewable ? `<button class="btn small" data-act="view" data-id="${f.id}" data-name="${esc(f.original_name || '')}">Open</button><button class="btn small ghost" data-act="dl" data-id="${f.id}" data-name="${esc(f.original_name || '')}">Download</button>` : ''}</td></tr>`).join('')}</tbody></table>`;
   host.querySelectorAll('[data-act="view"]').forEach((b) => b.addEventListener('click', () => openCustomerFile(`/api/dashboard/customers/${id}/files/${b.dataset.id}/download`, b.dataset.name, false)));
   host.querySelectorAll('[data-act="dl"]').forEach((b) => b.addEventListener('click', () => openCustomerFile(`/api/dashboard/customers/${id}/files/${b.dataset.id}/download`, b.dataset.name, true)));
+  host.querySelectorAll('[data-extract]').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      const r = await api(`/api/dashboard/customers/files/${b.dataset.extract}/extract`, { method: 'POST' });
+      toast(r.state === 'text_extracted' ? 'Text read from the file' : 'The text could not be read; the file is kept', r.state === 'text_extracted' ? 'success' : 'error');
+    } catch (e) { toast(e.message, 'error'); }
+    drawCustomerDocuments(host, id);
+  }));
 }
 
 async function drawNotes(host, id, profile, refresh) {
@@ -439,16 +487,24 @@ route('#/customer-reports', 'Customer Reports', 'How customers, inquiries, quota
         <div class="cu-status-list"><p class="muted">Quotation requests created in the period, by status today:</p>${statusRows}</div>
         <h4>Documents &amp; follow-ups</h4>
         <div class="stat-boxes cu-tiles">${tile('Documents received', m.documentsReceived, 'documentsReceived', { hasFiles: true })}${tile('Documents sent', m.documentsSent, 'documentsSent', { hasFiles: true })}${tile('Files to review', m.filesNeedingReview, 'filesNeedingReview', null, m.filesNeedingReview ? 'amber' : '')}${tile('Follow-ups outstanding', m.followUpsOutstanding, 'followUpsOutstanding', { followUp: 'outstanding' }, m.followUpsOutstanding ? 'amber' : '')}${tile('Follow-ups overdue', m.followUpsOverdue, 'followUpsOverdue', { followUp: 'overdue' }, m.followUpsOverdue ? 'red' : '')}</div>
-        <details class="cu-defs"><summary>How each figure is defined</summary><dl>${Object.entries(d).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></details>
+        <details class="cu-defs"><summary>How each figure is defined</summary><dl>${Object.entries(d).map(([k, v]) => `<dt>${esc(METRIC_LABEL[k] || k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></details>
       </section>
       <section class="panel" style="margin-top:16px"><div class="panel-head"><h3>Customers</h3></div><div id="r-dir"></div></section>`;
 
     const host = view.querySelector('#r-dir');
     const exportParams = () => qs({ ...f, from: range.from, to: range.to, limit: undefined, offset: undefined });
-    const extra = can('customers') ? `<button class="btn" id="exp-cu">Export customers (CSV)</button><button class="btn" id="exp-q">Export quotations (CSV)</button>` : '';
+    const lang = () => (window.I18N && window.I18N.lang) || 'en';
+    const exportGroup = (key, label, formats) => `<span class="cu-export" role="group" aria-label="${esc(label)}"><span class="muted">${esc(label)}</span>${formats.map(([fmt, text]) => `<button type="button" class="btn small" data-exp="${key}:${fmt}">${text}</button>`).join('')}</span>`;
+    const extra = can('customers')
+      ? `<span class="cu-exports">${exportGroup('customers', 'Export customers', [['csv', 'CSV'], ['xlsx', 'Excel'], ['pdf', 'PDF']])}${exportGroup('quotations', 'Export quotations', [['csv', 'CSV'], ['xlsx', 'Excel'], ['pdf', 'PDF']])}${exportGroup('summary', 'Export summary', [['xlsx', 'Excel'], ['pdf', 'PDF']])}</span>`
+      : '';
     const wire = () => {
-      host.querySelector('#exp-cu')?.addEventListener('click', () => downloadReport(`/api/dashboard/customer-reports/export?dataset=customers&${exportParams()}`, 'customers.csv'));
-      host.querySelector('#exp-q')?.addEventListener('click', () => downloadReport(`/api/dashboard/customer-reports/export?dataset=quotations&${qs(range)}`, 'quotations.csv'));
+      host.querySelectorAll('[data-exp]').forEach((b) => b.addEventListener('click', () => {
+        const [dataset, format] = b.dataset.exp.split(':');
+        // The file carries exactly what the screen shows: the customer list uses the active filters, the others the selected dates.
+        const url = `/api/dashboard/customer-reports/export?dataset=${dataset}&format=${format}&lang=${lang()}&${dataset === 'customers' ? exportParams() : qs(range)}`;
+        if (format === 'pdf') printReport(url); else downloadReport(url, `customer-report-${dataset}.${format}`);
+      }));
     };
     f.from = range.from; f.to = range.to;
     await drawDirectory(host, f, extra, wire).catch((e) => { host.innerHTML = errorView(e.message); });

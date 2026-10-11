@@ -4,6 +4,7 @@ import { getDb } from '../memory/db';
 import { getCustomerByWaId } from '../memory/customerRepo';
 import { MAX_DOCUMENT_BYTES } from '../documents/documentStore';
 import { CUSTOMER_FILE_EXTENSIONS, CustomerFileError, recordFailedCustomerFile, saveCustomerFile, type CustomerFile } from './customerFileRepo';
+import { scheduleExtraction } from './fileTextExtraction';
 
 /**
  * Keeps the files a customer sends (a photo of the car, a drawing, a purchase order) with that customer, in the business they wrote to.
@@ -92,7 +93,9 @@ export async function captureInboundFile(input: InboundCaptureInput): Promise<Cu
     }
     const originalName = media.fileName || `${kind === 'image' ? 'photo' : 'file'}-${input.whatsappMessageId.slice(-8)}.${ext}`;
     try {
-      return saveCustomerFile({ ...base, direction: 'inbound', bytes, originalName, mimeType: mime, needsReview: !input.identityCertain });
+      const saved = saveCustomerFile({ ...base, direction: 'inbound', bytes, originalName, mimeType: mime, needsReview: !input.identityCertain });
+      if (saved.processing === 'stored') scheduleExtraction(saved); // the text of a PDF is read in the background; the message never waits for it
+      return saved;
     } catch (error) {
       if (!(error instanceof CustomerFileError)) throw error;
       return recordFailedCustomerFile({ ...base, kind, status: bytes.length > MAX_DOCUMENT_BYTES ? 'too_large' : 'unsupported', error: error.message, originalName, mimeType: mime, sizeBytes: bytes.length });

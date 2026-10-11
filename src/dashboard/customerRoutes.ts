@@ -8,10 +8,12 @@ import { RequestTransitionError } from '../requests/quotationLifecycle';
 import {
   CustomerFileError, assignFileToCustomer, customerFilePath, getCustomerFile, publicFile, saveCustomerFile, type CustomerFile,
 } from '../files/customerFileRepo';
+import { extractCustomerFileText } from '../files/fileTextExtraction';
 import {
   CustomerNotFoundError, addNote, completeFollowUp, getCustomerProfile, getCustomerTimeline, listCustomerDocuments, listFileExceptions, listNotes, updateCustomerProfile,
 } from '../customers/customerProfile';
-import { exportCustomersCsv, exportQuotationsCsv, listDirectory, reportSummary, type DirectoryParams } from '../customers/customerReports';
+import { exportCustomersCsv, exportQuotationsCsv, listDirectory, reportSummary, toCsv, type DirectoryParams } from '../customers/customerReports';
+import { buildExportDataset, datasetToPrintHtml, datasetToXlsx, type ExportDatasetKind } from '../customers/reportExport';
 import {
   QuotationError, approveQuotation, finalizeVersion, markQuotationSentManually, quotationView, rejectQuotation, saveDraft, sendQuotation, type StaffActor,
 } from '../quotations/quotationService';
@@ -110,6 +112,22 @@ export function registerCustomerRoutes(router: Router): void {
     sendStoredFile(req, res, file);
   });
 
+  // Reads (or re-reads) the text of one stored PDF. The file itself is never changed; the result is unverified customer text for staff only.
+  router.post('/api/dashboard/customers/files/:fileId/extract', async (req, res) => {
+    try {
+      const fileId = idParam(req.params.fileId);
+      if (!fileId) { res.status(400).json({ error: 'invalid id' }); return; }
+      const outcome = await extractCustomerFileText(fileId, { force: true });
+      if (outcome.state === 'skipped') {
+        if (outcome.reason === 'not_found') { res.status(404).json({ error: 'File not found' }); return; }
+        const messages = { not_pdf: 'Only a PDF has a text layer to read', no_file: 'The file is not available', already_extracted: 'The text was already read', too_many_attempts: 'This file was tried too many times. Open it and read it manually', busy: 'Text extraction is busy, try again in a moment' } as const;
+        res.status(outcome.reason === 'busy' ? 503 : 409).json({ error: messages[outcome.reason], reason: outcome.reason });
+        return;
+      }
+      res.json({ state: outcome.state, file: publicFile(outcome.file) });
+    } catch (error) { fail(res, error); }
+  });
+
   // ---- One customer -----------------------------------------------------------
   router.get('/api/dashboard/customers/:id/profile', (req, res) => {
     try {
@@ -183,11 +201,30 @@ export function registerCustomerRoutes(router: Router): void {
   });
   router.get('/api/dashboard/customer-reports/export', (req, res) => {
     try {
-      const dataset = req.query.dataset === 'quotations' ? 'quotations' : 'customers';
-      const csv = dataset === 'quotations' ? exportQuotationsCsv({ from: str(req.query.from), to: str(req.query.to) }) : exportCustomersCsv(directoryParams(req));
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${dataset}-${new Date().toISOString().slice(0, 10)}.csv"`);
+      const dataset: ExportDatasetKind = req.query.dataset === 'quotations' ? 'quotations' : req.query.dataset === 'summary' ? 'summary' : 'customers';
+      const format = req.query.format === 'xlsx' ? 'xlsx' : req.query.format === 'pdf' ? 'pdf' : 'csv';
+      const lang = req.query.lang === 'ar' ? 'ar' : 'en';
+      const stamp = new Date().toISOString().slice(0, 10);
       res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      // The export is built for the business the staff member selected (the account middleware set it); no account id is read from the request.
+      if (format === 'xlsx') {
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${dataset}-${stamp}.xlsx"`);
+        res.send(datasetToXlsx(buildExportDataset(dataset, directoryParams(req), lang)));
+        return;
+      }
+      if (format === 'pdf') {
+        // A print-ready report (Print → Save as PDF): script-free HTML under a locked-down policy.
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
+        res.send(datasetToPrintHtml(buildExportDataset(dataset, directoryParams(req), lang)));
+        return;
+      }
+      const dataSet = dataset === 'summary' ? buildExportDataset('summary', directoryParams(req), 'en') : null;
+      const csv = dataSet ? toCsv(dataSet.headers, dataSet.rows) : dataset === 'quotations' ? exportQuotationsCsv({ from: str(req.query.from), to: str(req.query.to) }) : exportCustomersCsv(directoryParams(req));
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${dataset}-${stamp}.csv"`);
       res.send(csv);
     } catch (error) { fail(res, error); }
   });

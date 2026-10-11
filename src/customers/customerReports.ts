@@ -212,20 +212,36 @@ export function toCsv(headers: string[], rows: unknown[][]): string {
   return `${BOM}${[headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n')}\r\n`;
 }
 
-export function exportCustomersCsv(params: DirectoryParams, db: Database.Database = getDb(), accountId: number = currentAccountId()): string {
+export const EXPORT_ROW_LIMIT = 5000;
+
+/** Every customer the directory shows for these filters (the same query, paged), up to the export limit. 	otal is the real count. */
+export function allDirectoryRows(params: DirectoryParams, db: Database.Database = getDb(), accountId: number = currentAccountId()): { rows: DirectoryRow[]; total: number; truncated: boolean } {
   const rows: DirectoryRow[] = [];
-  for (let offset = 0; offset < 5000; offset += 100) {
-    const page = listDirectory({ ...params, limit: 100, offset }, db, accountId).items;
-    rows.push(...page);
-    if (page.length < 100) break;
+  let total = 0;
+  for (let offset = 0; offset < EXPORT_ROW_LIMIT; offset += 100) {
+    const page = listDirectory({ ...params, limit: 100, offset }, db, accountId);
+    total = page.total;
+    rows.push(...page.items);
+    if (page.items.length < 100) break;
   }
+  return { rows, total, truncated: total > rows.length };
+}
+
+export function exportCustomersCsv(params: DirectoryParams, db: Database.Database = getDb(), accountId: number = currentAccountId()): string {
+  const { rows } = allDirectoryRows(params, db, accountId);
   return toCsv(
     ['Customer ID', 'WhatsApp number', 'Name', 'Company', 'Email', 'Language', 'First contact', 'Last interaction', 'Inquiries', 'Appointments', 'Open requests', 'Quotations sent', 'Files', 'Open cart', 'Next follow-up'],
     rows.map((r) => [r.id, r.wa_id, r.display_name, r.company_name, r.email, r.language, r.created_at, r.lastInteractionAt, r.inquiries, r.appointments, r.openRequests, r.quotationsSent, r.files, r.openCart ? 'yes' : 'no', r.nextFollowUpAt]),
   );
 }
 
-export function exportQuotationsCsv(params: ReportRange, db: Database.Database = getDb(), accountId: number = currentAccountId()): string {
+export interface QuotationExportRow {
+  reference: string; status: string; source: string; created_at: string; updated_at: string; wa_id: string; display_name: string | null; company_name: string | null;
+  quote_number: string | null; total_minor: number | null; currency: string | null; sent_at: string | null;
+}
+
+/** The quotation requests created inside the dates (this business only), newest first, with the latest quotation's number and total. */
+export function quotationExportRows(params: ReportRange, db: Database.Database = getDb(), accountId: number = currentAccountId()): { rows: QuotationExportRow[]; total: number; truncated: boolean } {
   const { from, to } = range(params);
   const rows = db
     .prepare(
@@ -235,9 +251,15 @@ export function exportQuotationsCsv(params: ReportRange, db: Database.Database =
          (SELECT v.currency FROM quotation_versions v WHERE v.request_id = r.id ORDER BY v.version DESC LIMIT 1) AS currency,
          (SELECT v.sent_at FROM quotation_versions v WHERE v.request_id = r.id AND v.sent_at IS NOT NULL ORDER BY v.version DESC LIMIT 1) AS sent_at
        FROM customer_requests r JOIN customers cu ON cu.id = r.customer_id
-       WHERE r.whatsapp_account_id = @accountId AND r.kind = 'quotation' AND r.created_at BETWEEN @from AND @to ORDER BY r.created_at DESC, r.id DESC LIMIT 5000`,
+       WHERE r.whatsapp_account_id = @accountId AND r.kind = 'quotation' AND r.created_at BETWEEN @from AND @to ORDER BY r.created_at DESC, r.id DESC LIMIT ${EXPORT_ROW_LIMIT}`,
     )
-    .all({ accountId, from, to }) as { reference: string; status: string; source: string; created_at: string; updated_at: string; wa_id: string; display_name: string | null; company_name: string | null; quote_number: string | null; total_minor: number | null; currency: string | null; sent_at: string | null }[];
+    .all({ accountId, from, to }) as QuotationExportRow[];
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM customer_requests WHERE whatsapp_account_id = @accountId AND kind = 'quotation' AND created_at BETWEEN @from AND @to`).get({ accountId, from, to }) as { n: number }).n;
+  return { rows, total, truncated: total > rows.length };
+}
+
+export function exportQuotationsCsv(params: ReportRange, db: Database.Database = getDb(), accountId: number = currentAccountId()): string {
+  const { rows } = quotationExportRows(params, db, accountId);
   return toCsv(
     ['Reference', 'Status', 'Source', 'Created', 'Updated', 'WhatsApp number', 'Customer', 'Company', 'Latest quotation', 'Total', 'Currency', 'Sent at'],
     rows.map((r) => [r.reference, r.status, r.source, r.created_at, r.updated_at, r.wa_id, r.display_name, r.company_name, r.quote_number, r.total_minor === null ? '' : (r.total_minor / 100).toFixed(2), r.currency, r.sent_at]),

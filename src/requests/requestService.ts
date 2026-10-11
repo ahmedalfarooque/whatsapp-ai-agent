@@ -44,7 +44,7 @@ const QUOTATION_TEMPLATE: Partial<Record<CustomerRequestStatus, string>> = {
   ...CUSTOMER_TEMPLATE,
   approved: 'quotation_approved',
   rejected: 'quotation_rejected',
-  expired: 'request_status_update',
+  // expired has no customer wording on purpose: an expiry is bookkeeping, not news (see quotations/quotationExpiry.ts)
 };
 
 function customerTemplateFor(kind: CustomerRequest['kind'], status: CustomerRequestStatus): string | undefined {

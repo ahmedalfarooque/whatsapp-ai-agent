@@ -1,0 +1,91 @@
+/* Arabic (RTL) overrides. Loaded last. Active only when <html dir="rtl">; English/LTR is untouched.
+   Flex/grid layouts mirror by themselves once the document direction flips; this file corrects the places that use physical
+   left/right values, and keeps values that are always left-to-right (emails, phones, URLs, reference ids) readable. */
+
+/* sidebar brand logo (both directions) */
+.brand-logo{width:36px;height:36px;border-radius:10px;object-fit:cover;flex:none;display:block;box-shadow:0 4px 12px -6px rgba(14,150,171,.7)}
+.lang-slot{margin-inline-start:4px}
+
+/* Arabic type: a system stack with real Arabic shaping; slightly looser line height, no letter-spacing (breaks joins) */
+:root[dir="rtl"] body{font-family:"Segoe UI",Tahoma,"Noto Sans Arabic","Noto Naskh Arabic",Arial,sans-serif;line-height:1.65}
+:root[dir="rtl"] *{letter-spacing:0 !important}
+:root[dir="rtl"] .brand small{letter-spacing:0 !important;text-transform:none}
+:root[dir="rtl"] h1,:root[dir="rtl"] h2,:root[dir="rtl"] h3{line-height:1.4}
+
+/* sidebar sits on the right: the divider moves to its left edge */
+:root[dir="rtl"] .sidebar{border-right:0;border-left:1px solid var(--color-border)}
+:root[dir="rtl"] nav a .count{margin-left:0;margin-right:auto}
+:root[dir="rtl"] .account-item,:root[dir="rtl"] .ai-text{text-align:right}
+:root[dir="rtl"] .tab-count{margin-left:0;margin-right:6px}
+
+/* text alignment */
+:root[dir="rtl"] .data-table th,
+:root[dir="rtl"] .perm-matrix th:first-child,
+:root[dir="rtl"] .perm-matrix td:first-child,
+:root[dir="rtl"] .tpl-item,
+:root[dir="rtl"] .profile-items a,
+:root[dir="rtl"] .profile-logout,
+:root[dir="rtl"] .cu-tile{text-align:right}
+:root[dir="rtl"] .activity-meta{text-align:left}
+
+/* lists, quotes and callouts */
+:root[dir="rtl"] .planned .plan-list,
+:root[dir="rtl"] .notice ul,
+:root[dir="rtl"] .gap-list,
+:root[dir="rtl"] .delete-list,
+:root[dir="rtl"] .cu-cart ul{padding-left:0;padding-right:18px}
+:root[dir="rtl"] .evidence{border-left:0;border-right:2px solid var(--color-border-strong);padding-left:0;padding-right:10px}
+:root[dir="rtl"] .cu-cart{border-left:0;border-right:4px solid var(--color-primary)}
+:root[dir="rtl"] .menu-children{margin-left:0;margin-right:28px;padding-left:0;padding-right:var(--space-3);border-left:0;border-right:2px solid var(--color-border-strong)}
+:root[dir="rtl"] .transcript{padding-right:0;padding-left:4px}
+:root[dir="rtl"] .tpl-list{padding-right:0;padding-left:2px}
+
+/* stat strip: separators sit on the other side */
+:root[dir="rtl"] .stat{border-right:0;border-left:1px solid var(--color-border)}
+:root[dir="rtl"] .stat:last-child{border-left:0}
+
+/* floating panels and toasts */
+:root[dir="rtl"] .profile-panel{right:auto;left:0}
+:root[dir="rtl"] #toast-host{right:auto;left:16px}
+:root[dir="rtl"] .alert-nav,:root[dir="rtl"] .alert-view,:root[dir="rtl"] .opstate .chips,
+:root[dir="rtl"] .draft-section>summary::after,:root[dir="rtl"] .draft-item-head .btn{margin-left:0;margin-right:auto}
+:root[dir="rtl"] .draft-section>summary .tab-count{margin-left:var(--space-3);margin-right:auto}
+:root[dir="rtl"] .kpi::after{right:auto;left:-30px}
+:root[dir="rtl"] .skip-link{left:auto;right:12px}
+
+/* toggle switches: the knob travels the other way */
+:root[dir="rtl"] .switch .track::after,:root[dir="rtl"] .theme-toggle .tb-switch::after{left:auto;right:3px}
+:root[dir="rtl"] .switch input:checked + .track::after{transform:translateX(-18px)}
+:root[dir="rtl"] .theme-toggle[aria-checked="true"] .tb-switch::after{transform:translateX(-16px)}
+
+/* inputs and controls */
+:root[dir="rtl"] .field input[type=file]::file-selector-button{margin-right:0;margin-left:10px}
+:root[dir="rtl"] .pw-wrap input,:root[dir="rtl"] .password-wrap input{padding-right:12px !important;padding-left:72px !important}
+:root[dir="rtl"] .pw-toggle,:root[dir="rtl"] .password-wrap button{right:auto;left:6px}
+:root[dir="rtl"] select{background-position:left 10px center;padding-left:30px}
+
+/* values that are always left-to-right: kept as a unit so digits/slashes/@ do not reorder */
+:root[dir="rtl"] input[type=email],:root[dir="rtl"] input[type=tel],:root[dir="rtl"] input[type=url],:root[dir="rtl"] input[type=number],
+:root[dir="rtl"] input[name*=phone],:root[dir="rtl"] input[name*=email],:root[dir="rtl"] input[name*=url]{direction:ltr;text-align:right}
+:root[dir="rtl"] .acct-opt small,:root[dir="rtl"] .account-text small,:root[dir="rtl"] code,:root[dir="rtl"] .mono,:root[dir="rtl"] .ltr-val,
+:root[dir="rtl"] a[href^="mailto:"],:root[dir="rtl"] a[href^="tel:"]{direction:ltr;unicode-bidi:isolate;text-align:right}
+:root[dir="rtl"] .editor.ltr,:root[dir="rtl"] .wa-msg.ltr{direction:ltr;text-align:left}
+
+/* keep arrows meaningful: purely decorative chevrons mirror, icons with meaning (check, play, logo) do not */
+:root[dir="rtl"] .chev,:root[dir="rtl"] .arrow{transform:scaleX(-1)}
+
+/* mobile: the drawer opens from the right */
+@media(max-width:900px){
+  :root[dir="rtl"] .sidebar{inset:0 0 0 auto;transform:translateX(104%);border-left:0}
+  :root[dir="rtl"] body.nav-open .sidebar{transform:none}
+}
+@media(max-width:640px){
+  :root[dir="rtl"] #toast-host{left:12px;right:12px}
+  :root[dir="rtl"] .stat:nth-child(2n){border-left:0}
+  :root[dir="rtl"] .menu-children{margin-right:0}
+  :root[dir="rtl"] .draft-item-head .btn,:root[dir="rtl"] .opstate .chips{margin-right:0}
+}
+
+/* login: the submit arrow points the reading direction; the brand panel text/waves mirror with the layout */
+:root[dir="rtl"] .lg-submit svg{transform:scaleX(-1)}
+:root[dir="rtl"] .lg-brand svg.waves,:root[dir="rtl"] .lg-waves{transform:scaleX(-1)}

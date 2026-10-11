@@ -183,6 +183,15 @@ async function renderRoute() {
   }
 }
 
+// A language switch re-renders the open page so dates, numbers and generated text follow the new language — unless the page holds
+// edits that were not saved yet (those are never thrown away by a language change; the text on screen is translated in place).
+document.addEventListener('workspace:lang', () => {
+  if (document.body.classList.contains('auth-page') || !me) return;
+  const view = document.querySelector('#view');
+  if (view && /Unsaved changes|تغييرات غير محفوظة/.test(view.textContent || '')) return;
+  renderRoute();
+});
+
 window.addEventListener('hashchange', () => {
   if (location.hash === '#/login') {
     renderRoute();
@@ -356,34 +365,78 @@ async function renderLogin(view) {
   const status = await fetch('/api/dashboard/auth/status', { credentials: 'include' }).then((r) => r.json());
   const isSetup = !status.hasAdmin;
 
+  const ICON = {
+    chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h4"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    eyeoff: '<path d="M3 3l18 18M10.6 10.6A3 3 0 0 0 13.4 13.4M9.9 5.2A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4M6.1 6.1A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 4.1-.9"/>',
+    arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  };
+  const svg = (name) => `<svg class="lg-ico" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
+
   view.innerHTML = `
-    <div class="auth-layout"><section class="auth-story">
-      <p class="eyebrow light">ROWAD ALFA · AI WORKSPACE</p>
-      <h2>A better conversation.<br>A closer connection.</h2>
-      <p>One workspace for your WhatsApp conversations, customer care, and appointments.</p>
-      <div class="auth-visual" aria-hidden="true"><span class="chat-bubble">Hello. How can we help?</span><span class="chat-bubble answer" dir="rtl">أهلاً بك، كيف نقدر نخدمك؟</span><div class="auth-signal">◎ <span>People first. Powered by AI.</span></div></div>
-      <small>Your business. Your conversations. One clear view.</small>
-    </section><section class="panel detail auth-card">
-      <span class="auth-logo" aria-hidden="true">◎</span><p class="eyebrow">WELCOME TO YOUR WORKSPACE</p>
-      <h3>${isSetup ? 'Set up your workspace' : 'Welcome back'}</h3>
-      <p class="muted">${isSetup ? 'Create an administrator account to get started.' : 'Sign in to manage your AI assistant.'}</p>
-      <form id="auth-form">
-        <label class="muted" for="username">Username</label>
-        <input id="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required style="width:100%;margin:6px 0 14px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe" />
-        <label class="muted" for="password">Password${isSetup ? ' (min 12 characters)' : ''}</label>
-        <div class="password-wrap"><input id="password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" ${isSetup ? 'minlength="12"' : ''} required /><button type="button" id="show-password" aria-controls="password" aria-pressed="false">Show</button></div>
-        <div id="auth-error" class="form-error" hidden></div>
-        <button type="submit" class="btn primary" style="width:100%">${isSetup ? 'Create account & sign in' : 'Sign in'}</button>
-      </form>
-      <p class="auth-footnote">Secure administrator access</p>
-    </section></div>`;
+    <div class="lg">
+      <section class="lg-brand" aria-label="Rowad Alfa AI Workspace">
+        <svg class="lg-waves" viewBox="0 0 600 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <defs><linearGradient id="lgw1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#19b8a5" stop-opacity=".55"/><stop offset="1" stop-color="#0e96ab" stop-opacity=".05"/></linearGradient></defs>
+          <path d="M-40 560C120 470 190 640 330 560S520 380 650 460V820H-40z" fill="url(#lgw1)"/>
+          <path d="M-40 650C110 590 220 720 360 650S540 520 650 590V820H-40z" fill="#19b8a5" fill-opacity=".10"/>
+          <circle cx="470" cy="150" r="210" fill="none" stroke="#19b8a5" stroke-opacity=".18" stroke-width="2"/>
+          <circle cx="470" cy="150" r="130" fill="none" stroke="#19b8a5" stroke-opacity=".12" stroke-width="2"/>
+        </svg>
+        <div class="lg-brand-in">
+          <div class="lg-mark"><img src="/dashboard/assets/logo.webp" alt="" width="52" height="52"><div><b>Rowad Alfa</b><small>AI WORKSPACE</small></div></div>
+          <div class="lg-hero">
+            <h2>A better conversation.<br><em>A closer connection.</em></h2>
+            <p>One workspace for your WhatsApp conversations, customer care, and appointments.</p>
+            <ul class="lg-points">
+              <li><span class="lg-pt">${svg('chat')}</span><div><b>Every conversation in one place</b><small>Menu replies, the AI assistant and your team, together</small></div></li>
+              <li><span class="lg-pt">${svg('users')}</span><div><b>Customers and quotations</b><small>History, inquiry carts, documents and status tracking</small></div></li>
+              <li><span class="lg-pt">${svg('doc')}</span><div><b>Reports you can trust</b><small>Clear figures that open the records behind them</small></div></li>
+              <li><span class="lg-pt">${svg('shield')}</span><div><b>Secure access</b><small>Role-based permissions on every action</small></div></li>
+            </ul>
+          </div>
+          <small class="lg-copy">Your business. Your conversations. One clear view.</small>
+        </div>
+      </section>
+      <section class="lg-form">
+        <div class="lg-top" data-lang-switch></div>
+        <div class="auth-card lg-card">
+          <img class="lg-logo" src="/dashboard/assets/logo.webp" alt="" width="64" height="64">
+          <p class="lg-brandname"><b>Rowad Alfa</b><span>AI WORKSPACE</span></p>
+          <h3>${isSetup ? 'Set up your workspace' : 'Welcome back'}</h3>
+          <p class="muted lg-sub">${isSetup ? 'Create an administrator account to get started.' : 'Sign in to manage your AI assistant.'}</p>
+          <form id="auth-form" novalidate>
+            <div class="lg-field">
+              <label for="username">${isSetup ? 'Username' : 'Username or email'}</label>
+              <div class="lg-input">${svg('user')}<input id="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required dir="ltr" /></div>
+            </div>
+            <div class="lg-field">
+              <label for="password">Password${isSetup ? ' (min 12 characters)' : ''}</label>
+              <div class="lg-input">${svg('lock')}<input id="password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" ${isSetup ? 'minlength="12"' : ''} required dir="ltr" /><button type="button" id="show-password" class="lg-eye" aria-controls="password" aria-pressed="false" aria-label="Show password" title="Show password">${svg('eye')}</button></div>
+            </div>
+            <div id="auth-error" class="form-error" role="alert" hidden></div>
+            <button type="submit" class="lg-submit"><span class="lg-spin" aria-hidden="true"></span><span class="lg-submit-text">${isSetup ? 'Create account & sign in' : 'Sign in'}</span>${svg('arrow')}</button>
+          </form>
+          <p class="auth-footnote">Secure administrator access</p>
+        </div>
+      </section>
+    </div>`;
+  if (window.I18N) window.I18N.mountSwitches();
 
   view.querySelector('#show-password').addEventListener('click', (event) => {
     const input = view.querySelector('#password');
     const reveal = input.type === 'password';
     input.type = reveal ? 'text' : 'password';
-    event.currentTarget.textContent = reveal ? 'Hide' : 'Show';
-    event.currentTarget.setAttribute('aria-pressed', String(reveal));
+    const button = event.currentTarget;
+    button.setAttribute('aria-pressed', String(reveal));
+    button.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+    button.setAttribute('title', reveal ? 'Hide password' : 'Show password');
+    button.innerHTML = svg(reveal ? 'eyeoff' : 'eye');
   });
 
   // Second sign-in step: the password was accepted, the session exists only after the emailed code is verified.
@@ -393,14 +446,14 @@ async function renderLogin(view) {
     const card = view.querySelector('.auth-card');
     let timer = null;
     card.innerHTML = `
-      <span class="auth-logo" aria-hidden="true">◎</span><p class="eyebrow">CHECK YOUR EMAIL</p>
+      <img class="lg-logo" src="/dashboard/assets/logo.webp" alt="" width="64" height="64"><p class="eyebrow">CHECK YOUR EMAIL</p>
       <h3>Enter your verification code</h3>
       <p class="muted">We sent a 6-digit code to <span class="otp-sent">${esc(info.email || 'your email address')}</span>. It expires in 10 minutes and can be used once.</p>
       <form id="otp-form" autocomplete="off">
         <label class="muted" for="otp-code">Verification code</label>
         <input id="otp-code" class="otp-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" spellcheck="false" required />
         <div id="otp-error" class="form-error" hidden></div>
-        <button type="submit" class="btn primary" style="width:100%">Verify &amp; sign in</button>
+        <button type="submit" class="lg-submit"><span class="lg-spin" aria-hidden="true"></span><span class="lg-submit-text">Verify &amp; sign in</span></button>
       </form>
       <div class="otp-actions"><button type="button" id="otp-resend" class="btn">Resend code</button><button type="button" id="otp-back" class="btn ghost">Back</button></div>
       <p class="auth-footnote">Did not get it? Check your spam folder, or resend once the timer ends.</p>`;
@@ -479,7 +532,10 @@ async function renderLogin(view) {
     e.preventDefault();
     errorBox.hidden = true;
     const submit = view.querySelector('[type=submit]');
+    if (submit.disabled) return;
     submit.disabled = true;
+    submit.classList.add('loading');
+    submit.setAttribute('aria-busy', 'true');
     const username = view.querySelector('#username').value.trim();
     const password = view.querySelector('#password').value;
     try {
@@ -507,6 +563,8 @@ async function renderLogin(view) {
       errorBox.textContent = 'Could not reach the server.';
     } finally {
       submit.disabled = false;
+      submit.classList.remove('loading');
+      submit.removeAttribute('aria-busy');
     }
   });
 }
@@ -807,7 +865,7 @@ function textField(name, label, help, value, opts = {}) {
 // Excluded by name from the real payload (see readFormFields).
 function autofillDecoy() {
   return `
-    <div aria-hidden="true" style="position:absolute;width:1px;height:1px;overflow:hidden;left:-9999px">
+    <div aria-hidden="true" style="position:absolute;width:1px;height:1px;overflow:hidden;inset-inline-start:-9999px;top:0">
       <input type="text" name="username" autocomplete="username" tabindex="-1" />
       <input type="password" name="password" autocomplete="current-password" tabindex="-1" />
     </div>`;

@@ -5,6 +5,7 @@ import { getDb, closeDb } from './memory/db';
 import { resumeQrConnection, closeQrConnection } from './whatsapp/qrConnection';
 import { seedBusinessProfileDefaults } from './config/businessSettings';
 import { flushOutbox } from './notifications/outbox';
+import { expireDueQuotations } from './quotations/quotationExpiry';
 
 // Ensure the database is initialized (and migrations applied) at boot,
 // before the server starts accepting traffic.
@@ -44,6 +45,11 @@ const server = app.listen(env.PORT, () => {
 // Pending WhatsApp notifications (staff alerts, customer confirmations) are retried every 30 s
 // and immediately after the session reconnects; the dashboard never waits on delivery.
 setInterval(() => { void flushOutbox().catch((error) => logger.warn({ error }, '[OUTBOX] periodic flush failed')); }, 30_000).unref();
+
+// Sent quotations whose validity date has passed (in each business's own timezone) are expired quietly: at start-up and then hourly.
+const runQuotationExpiry = (): void => { try { expireDueQuotations(); } catch (error) { logger.warn({ error }, '[QUOTATION] expiry run failed'); } };
+setTimeout(runQuotationExpiry, 20_000).unref();
+setInterval(runQuotationExpiry, 60 * 60_000).unref();
 
 // A second instance must die immediately: two processes sharing one Baileys
 // auth store desync the Signal sessions and every inbound message becomes

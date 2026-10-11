@@ -42,6 +42,11 @@ export interface CustomerFile {
   error: string | null;
   processing: 'stored' | 'text_extracted' | 'extraction_failed' | 'unsupported';
   extracted_text: string | null;
+  /** When the last extraction attempt finished, why it failed (short, path-free), the pages read and how many attempts were made. */
+  extracted_at: string | null;
+  extraction_error: string | null;
+  extraction_pages: number | null;
+  extraction_attempts: number;
   uploaded_by_admin_id: number | null;
   created_at: string;
 }

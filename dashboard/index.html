@@ -9,11 +9,14 @@
   <link rel="stylesheet" href="/dashboard/styles.css">
   <link rel="stylesheet" href="/dashboard/theme.css">
   <link rel="stylesheet" href="/dashboard/ui.css">
+  <link rel="stylesheet" href="/dashboard/login.css">
+  <link rel="stylesheet" href="/dashboard/rtl.css">
+  <link rel="icon" type="image/png" href="/dashboard/assets/favicon.png">
 </head>
 <body>
   <a class="skip-link" href="#view">Skip to content</a>
   <aside class="sidebar" id="sidebar">
-    <div class="brand"><span class="brand-mark">◎</span><span id="brand-name">Rowad Alfa<br><small>AI WORKSPACE</small></span></div>
+    <div class="brand"><img class="brand-logo" src="/dashboard/assets/logo-192.png" alt="" width="36" height="36"><span id="brand-name">Rowad Alfa<br><small>AI WORKSPACE</small></span></div>
     <nav id="nav" aria-label="Main">
       <div class="nav-group">WHATSAPP ACCOUNTS</div>
       <div id="account-list" class="account-list" aria-label="WhatsApp accounts"><span class="muted">Loading…</span></div>
@@ -59,6 +62,7 @@
       <span class="topbar-mark" aria-hidden="true"><svg class="ico lg" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg></span>
       <div class="page-heading"><p class="crumb" id="page-eyebrow"></p><h1 id="page-title">Dashboard</h1><p class="muted" id="page-subtitle"></p></div>
       <div class="topbar-controls">
+        <div class="lang-slot" data-lang-switch></div>
         <a class="ai-pill" id="ai-pill" href="#/automation" hidden data-state="active"><span class="dot"></span><span class="ai-text"><b class="ai-label">AI</b><small class="ai-detail"></small></span></a>
         <button type="button" class="tb-ctl theme-toggle" id="theme-toggle" role="switch" aria-checked="false" aria-label="Dark appearance"><span>Dark</span><span class="tb-switch" aria-hidden="true"></span></button>
         <label class="tb-ctl tb-select" id="range-ctl" hidden><span class="sr-only">Date range</span><select id="range-select"></select></label>
@@ -87,6 +91,13 @@
     <div id="view" tabindex="-1">Loading…</div>
     <footer>Rowad Alfa AI Workspace · Live application database · <a href="/health">Health</a> · <a href="/readiness">Readiness</a></footer>
   </main>
+  <script src="/dashboard/i18n-ar.js"></script>
+  <script src="/dashboard/i18n-ar-2.js"></script>
+  <script src="/dashboard/i18n-ar-3.js"></script>
+  <script src="/dashboard/i18n-ar-4.js"></script>
+  <script src="/dashboard/i18n-ar-5.js"></script>
+  <script src="/dashboard/i18n-ar-6.js"></script>
+  <script src="/dashboard/i18n.js"></script>
   <script src="/dashboard/shell.js"></script>
   <script src="/dashboard/app.js"></script>
   <script src="/dashboard/pages-automation.js"></script>
