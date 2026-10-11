@@ -431,6 +431,34 @@ describe('human advisor and staff alerts', () => {
     }
   });
 
+  it('the internal staff number is for authorised staff of this business only, and never reaches a customer or the AI', async () => {
+    updateBusinessSettings({ staffWhatsappNumber: '966500077123' }, Q);
+    const mk = async (email: string, role: string, accountIds: number[]) => {
+      const res = await request(app).post('/api/dashboard/users').set('Cookie', cookieOf(ownerId)).send({ password: PASSWORD, email, role, accountIds });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      return res.body.id as number;
+    };
+    const viewer = await mk('re-viewer@example.com', 'user', [Q]); // no Business Profile permission
+    const stranger = await mk('re-stranger@example.com', 'manager', [OTHER]); // a manager of ANOTHER business
+    for (const who of [viewer, stranger]) {
+      const get = await api(who, Q).get('/api/dashboard/business-profile');
+      expect(get.status).toBe(403);
+      expect(JSON.stringify(get.body)).not.toContain('966500077123');
+      expect((await api(who, Q).put('/api/dashboard/business-profile', { staffWhatsappNumber: '966500000999' })).status).toBe(403);
+    }
+    expect((await request(app).get('/api/dashboard/business-profile').set('X-Whatsapp-Account', String(Q))).status).toBe(401); // anonymous
+    // the authorised manager of THIS business can read it; nothing leaked into another business
+    const own = await api(managerId, Q).get('/api/dashboard/business-profile');
+    expect(own.status).toBe(200);
+    expect(own.body.settings.staffWhatsappNumber).toBe('966500077123');
+    expect(JSON.stringify((await api(stranger, OTHER).get('/api/dashboard/business-profile')).body)).not.toContain('966500077123');
+    // a customer conversation and the assistant's instructions never contain it
+    const waId = await inGuidedChat('1');
+    script.push(() => reply('Thank you.'));
+    const answers = await say(waId, 'what is your staff number?');
+    expect(answers.join('\n') + observed[0]!.all).not.toContain('966500077123');
+  });
+
   it('other businesses keep their own alert rule: the linked number is still their fallback, and their own staff number wins', () => {
     runWithAccount(OTHER, () => {
       expect(staffAlertDestination()).toEqual({ configured: false, source: 'none' }); // nothing linked yet
