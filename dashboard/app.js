@@ -404,7 +404,7 @@ async function renderLogin(view) {
         </div>
       </section>
       <section class="lg-form">
-        <div class="lg-top" data-lang-switch></div>
+        <div class="lg-top"><div class="theme-slot" data-theme-switch></div><div class="lang-slot" data-lang-switch></div></div>
         <div class="auth-card lg-card">
           <img class="lg-logo" src="/dashboard/assets/logo.webp" alt="" width="64" height="64">
           <p class="lg-brandname"><b>Rowad Alfa</b><span>AI WORKSPACE</span></p>
@@ -424,9 +424,11 @@ async function renderLogin(view) {
           </form>
           <p class="auth-footnote">Secure administrator access</p>
         </div>
+        <p class="lg-dev dev-credit"><span class="dev-label">Developed by</span> <img class="dev-light" src="/dashboard/assets/developer/synrtech-studio-wordmark-black.svg" alt="SynrTech Studio" width="83" height="20"><img class="dev-dark" src="/dashboard/assets/developer/synrtech-studio-wordmark-white.svg" alt="SynrTech Studio" width="83" height="20"></p>
       </section>
     </div>`;
   if (window.I18N) window.I18N.mountSwitches();
+  mountThemeSwitches();
 
   view.querySelector('#show-password').addEventListener('click', (event) => {
     const input = view.querySelector('#password');
@@ -1116,6 +1118,7 @@ route('#/system', 'System', 'Live process and dependency status.', async (view) 
         <dt>Environment</dt><dd>${esc(data.environment)}</dd>
         <dt>Provider mode</dt><dd>${data.providerMode === 'mock' ? badge('Mock', 'green') : badge('Production', 'blue')}</dd>
         <dt>Process uptime</dt><dd>${data.uptimeSeconds}s</dd>
+        <dt>Developed by</dt><dd translate="no">SynrTech Studio</dd>
         <dt>Node.js version</dt><dd class="file">${esc(data.nodeVersion)}</dd>
         <dt>Database file</dt><dd class="file">${esc(data.databasePath)}</dd>
         <dt>Database reachable</dt><dd>${data.databaseReachable ? badge('Yes', 'green') : badge('No', 'red')}</dd>

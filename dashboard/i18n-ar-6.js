@@ -112,6 +112,9 @@ Object.assign(window.I18N_AR, {
   'Document deleted.': 'تم حذف المستند.', 'Link removed.': 'تمت إزالة الرابط.', 'Link updated. Read it again to refresh its content.': 'تم تحديث الرابط. اقرأه مجدداً لتحديث محتواه.',
   'Type saved.': 'تم حفظ النوع.', 'File deleted.': 'تم حذف الملف.', 'Only PDF files can be used.': 'يمكن استخدام ملفات PDF فقط.', 'Title saved.': 'تم حفظ العنوان.',
   'Catalogue deleted.': 'تم حذف الكتالوج.', 'Draft discarded.': 'تم تجاهل المسودة.', 'Menu reset.': 'تمت إعادة ضبط القائمة.',
+  // developer credit and appearance
+  'Developed by': 'تطوير',
+  'Light appearance': 'المظهر الفاتح',
 });
 window.I18N_AR_PATTERNS.push(
   [/^(\d+)m ago$/, function (n) { return 'منذ ' + n + ' د'; }],

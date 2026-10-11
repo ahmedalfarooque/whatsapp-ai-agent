@@ -18,10 +18,27 @@ function currentTheme() {
 function setTheme(theme) {
   document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
   try { localStorage.setItem(THEME_KEY, currentTheme()); } catch { /* storage unavailable: the choice just is not remembered */ }
-  const toggle = document.querySelector('#theme-toggle');
-  if (toggle) toggle.setAttribute('aria-checked', String(currentTheme() === 'dark'));
+  syncThemeSwitches();
   document.dispatchEvent(new CustomEvent('workspace:theme', { detail: { theme: currentTheme() } }));
 }
+
+/** Every light/dark switch (top bar and sign-in page) shows the current state. */
+function syncThemeSwitches() {
+  document.querySelectorAll('#theme-toggle, .theme-switch').forEach((el) => el.setAttribute('aria-checked', String(currentTheme() === 'dark')));
+}
+
+/** The sign-in page has no top bar: it mounts the same switch into [data-theme-switch] slots (before anyone is signed in). */
+function mountThemeSwitches() {
+  const moon = '<svg class="ico sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg>';
+  document.querySelectorAll('[data-theme-switch]').forEach((slot) => {
+    if (slot.querySelector('.theme-switch')) return;
+    slot.insertAdjacentHTML('beforeend', `<button type="button" class="theme-toggle theme-switch" role="switch" aria-checked="${currentTheme() === 'dark'}" aria-label="Dark appearance">${moon}<span>Dark</span><span class="tb-switch" aria-hidden="true"></span></button>`);
+  });
+}
+document.addEventListener('click', (e) => {
+  const button = e.target.closest && e.target.closest('.theme-switch');
+  if (button) setTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+});
 
 // ---------------------------------------------------------------------
 // The signed-in user (GET /api/dashboard/me) and what they may open

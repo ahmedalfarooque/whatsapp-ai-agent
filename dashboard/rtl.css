@@ -89,3 +89,6 @@
 /* login: the submit arrow points the reading direction; the brand panel text/waves mirror with the layout */
 :root[dir="rtl"] .lg-submit svg{transform:scaleX(-1)}
 :root[dir="rtl"] .lg-brand svg.waves,:root[dir="rtl"] .lg-waves{transform:scaleX(-1)}
+
+/* light / dark switch slot on the sign-in page: sits beside the language switch, mirrored automatically */
+:root[dir="rtl"] .theme-switch{padding:0 12px}

@@ -84,3 +84,18 @@
   .lg-card h3{font-size:23px}
 }
 @media (prefers-reduced-motion:reduce){.lg-card{animation:none}.lg-submit{transition:none}.lg-spin{animation-duration:1.6s}}
+
+/* ---- light / dark switch on the sign-in page (the top bar has its own) and the developer credit ---- */
+.lg-top{align-items:center;gap:10px}
+.theme-slot{display:flex}
+.theme-switch{display:inline-flex;align-items:center;gap:9px;height:38px;padding:0 12px;border-radius:999px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-2);font:inherit;font-size:13px;font-weight:600;line-height:1;cursor:pointer;white-space:nowrap}
+.theme-switch:hover{background:var(--color-surface-hover)}
+.theme-switch:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.theme-switch .tb-switch{background:var(--color-border-strong)}
+.theme-switch[aria-checked="true"] .tb-switch{background:var(--color-primary)}
+.dev-credit{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dev-credit img{height:16px;width:auto;display:inline-block;vertical-align:middle}
+.dev-credit .dev-dark{display:none}
+.lg-dev{margin:18px auto 0;justify-content:center;font-size:12.5px;color:var(--color-text-muted)}
+.lg-dev img{height:18px}
+footer .dev-credit{gap:6px}

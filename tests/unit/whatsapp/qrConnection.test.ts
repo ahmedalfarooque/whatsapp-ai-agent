@@ -236,6 +236,36 @@ describe('Baileys QR connection lifecycle', () => {
     expect(kept.every((k) => k.customerWaId === '966500000001@s.whatsapp.net' || k.customerWaId === '966500000001')).toBe(true);
   });
 
+  it('spreadsheets, Word files, ZIP archives, stickers, locations, contacts and message edits are media/other too: nothing is sent back and none becomes customer text', async () => {
+    const qr = await import('../../../src/whatsapp/qrConnection');
+    await qr.startQrConnection();
+    const socket = fixtures.sockets[0]!;
+    socket.user = { id: '966558190545@s.whatsapp.net' };
+    emit(socket, 'connection.update', { connection: 'open' });
+    const wrap = (id: string, message: Record<string, unknown>) => ({ key: { remoteJid: '966500000003@s.whatsapp.net', fromMe: false, id }, message, messageTimestamp: Math.floor(Date.now() / 1000) });
+    emit(socket, 'messages.upsert', { type: 'notify', messages: [
+      wrap('x1', { documentMessage: { fileName: 'prices.xlsx', mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', caption: 'please quote these' } }),
+      wrap('w1', { documentMessage: { fileName: 'brief.docx', mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } }),
+      wrap('z1', { documentMessage: { fileName: 'photos.zip', mimetype: 'application/zip' } }),
+      wrap('s1', { stickerMessage: {} }),
+      wrap('l1', { locationMessage: { degreesLatitude: 21.5, degreesLongitude: 39.2 } }),
+      wrap('c1', { contactMessage: { displayName: 'Someone' } }),
+      wrap('ed1', { editedMessage: { message: { protocolMessage: { editedMessage: { conversation: 'edited text that must not be answered' } } } } }),
+    ] });
+    await tick(); await tick();
+    const seen = fixtures.inbound.mock.calls.map((c) => c[0] as { messageId: string; type: string; text?: string });
+    const by = (id: string) => seen.find((x) => x.messageId === `qr:${id}`);
+    expect(by('x1')).toMatchObject({ type: 'document', text: 'please quote these' }); // the caption travels as a caption for staff, with the media type
+    expect(by('w1')).toMatchObject({ type: 'document' });
+    expect(by('z1')).toMatchObject({ type: 'document' });
+    expect(by('s1')).toMatchObject({ type: 'sticker' });
+    expect(by('l1')).toMatchObject({ type: 'location' });
+    expect(by('c1')).toMatchObject({ type: 'contact' });
+    expect(seen.filter((x) => x.type === 'text')).toEqual([]); // not one of them was handed over as customer text
+    expect(JSON.stringify(seen)).not.toContain('edited text that must not be answered');
+    expect(socket.sendMessage).not.toHaveBeenCalled();
+  });
+
   it('sends replies through the same socket and flattens interactive menus to numbered text', async () => {
     const qr = await import('../../../src/whatsapp/qrConnection');
     const { replyTransport } = await import('../../../src/whatsapp/replyTransport');
