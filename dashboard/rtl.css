@@ -12,6 +12,10 @@
 :root[dir="rtl"] .brand small{letter-spacing:0 !important;text-transform:none}
 :root[dir="rtl"] h1,:root[dir="rtl"] h2,:root[dir="rtl"] h3{line-height:1.4}
 
+/* the selected item's rail sits on the reading-start edge */
+:root[dir="rtl"] nav a.active{box-shadow:inset -3px 0 0 var(--color-accent)}
+:root[dir="rtl"] .nav-group{font-family:var(--font-sans)}
+
 /* sidebar sits on the right: the divider moves to its left edge */
 :root[dir="rtl"] .sidebar{border-right:0;border-left:1px solid var(--color-border)}
 :root[dir="rtl"] nav a .count{margin-left:0;margin-right:auto}

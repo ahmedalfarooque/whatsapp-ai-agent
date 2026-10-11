@@ -92,10 +92,11 @@ describe('dashboard shell', () => {
   });
 
   it('the stylesheet provides both appearances and the responsive breakpoints', () => {
+    const tokens = read('tokens.css');
+    expect(tokens).toContain(':root,:root[data-theme="light"]');
+    expect(tokens).toContain(':root[data-theme="dark"]');
     const css = read('ui.css');
-    expect(css).toContain(':root[data-theme="light"]');
-    expect(css).toContain(':root[data-theme="dark"]');
     for (const bp of ['1240px', '900px', '700px', '480px']) expect(css).toContain(`(max-width:${bp})`);
-    expect(css).toContain('prefers-reduced-motion');
+    expect(tokens).toContain('prefers-reduced-motion');
   });
 });

@@ -24,7 +24,7 @@
   };
   const icon = (key) => SVG(I[key]);
 
-  const AVATAR_COLORS = ['#0e9aa7', '#12a37f', '#2f6fe0', '#7a5ce0', '#d97706', '#c2417a', '#0f8a80'];
+  const AVATAR_COLORS = ['#0b6b66', '#5a33d0', '#1f4fa8', '#7a3f9a', '#8a5a00', '#a23b5c', '#2b4a7a']; // deep tones, white initials read at 4.5:1 or better in both appearances
   const colorFor = (text) => { let h = 0; for (const ch of String(text || '?')) h = (h * 31 + ch.codePointAt(0)) >>> 0; return AVATAR_COLORS[h % AVATAR_COLORS.length]; };
   const avatar = (name) => `<span class="avatar-c" style="background:${colorFor(name)}" aria-hidden="true">${esc(initialsOf(name))}</span>`;
 
@@ -156,12 +156,8 @@
   const kpiHtml = (c) => `<a class="kpi ${c.k}" href="${c.href}"><div class="kpi-top"><span class="kpi-label">${esc(c.label)}</span><span class="kpi-icon">${icon(c.icon)}</span></div><div class="kpi-value">${esc(c.value)}</div><div class="kpi-foot">${c.foot}</div></a>`;
 
   // ---------------------------------------------------------------- content panels
-  const ROBOT = `<svg viewBox="0 0 120 140" aria-hidden="true"><defs><linearGradient id="bot-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8ff0e2"/><stop offset="1" stop-color="#1aa7b6"/></linearGradient></defs>
-    <line x1="60" y1="12" x2="60" y2="26" stroke="#1aa7b6" stroke-width="4" stroke-linecap="round"/><circle cx="60" cy="9" r="6" fill="#4fe08a"/>
-    <rect x="20" y="26" width="80" height="58" rx="24" fill="url(#bot-g)"/><rect x="29" y="38" width="62" height="34" rx="15" fill="#12323b"/>
-    <circle cx="46" cy="55" r="6.5" fill="#7dffa8"/><circle cx="74" cy="55" r="6.5" fill="#7dffa8"/>
-    <rect x="30" y="90" width="60" height="42" rx="19" fill="url(#bot-g)"/><circle cx="60" cy="111" r="7.5" fill="#fff" opacity=".85"/>
-    <rect x="10" y="94" width="17" height="32" rx="8.5" fill="url(#bot-g)"/><rect x="93" y="94" width="17" height="32" rx="8.5" fill="url(#bot-g)"/></svg>`;
+  // A calm automation mark (rings and a speech bubble in the accent colour), not a mascot.
+  const ROBOT = `<svg viewBox="0 0 96 96" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="48" cy="48" r="40" opacity=".22"/><circle cx="48" cy="48" r="29" opacity=".4"/><path d="M33 36h30a6 6 0 0 1 6 6v14a6 6 0 0 1-6 6H48l-9 8v-8h-6a6 6 0 0 1-6-6V42a6 6 0 0 1 6-6z"/><path d="M40 49h.01M48 49h.01M56 49h.01" stroke-width="4.2"/></svg>`;
 
   function activityPanel(d, state) {
     const a = d.activity;

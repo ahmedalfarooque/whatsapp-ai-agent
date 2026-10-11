@@ -120,7 +120,6 @@ describe('the browser never chooses the company', () => {
 
 describe('company-branded workspace: styling and identity rules', () => {
   const css = read('company.css');
-  const dark = read('theme-dark.css');
   const selectorsOf = (text: string): string[] => [...text.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(?:^|\})\s*([^{}@][^{}]*)\{/g)].map((m) => m[1]!.trim());
 
   it('a single-account user sees no account switcher, add-account link or other business', () => {
@@ -129,20 +128,20 @@ describe('company-branded workspace: styling and identity rules', () => {
 
   it('every company rule is scoped to the company experience or to the new brand elements, so the default look cannot change', () => {
     // body:not([data-brand="company"]) = the developer-mode brand block (SYNRTECHS lockup above the "AI WORKSPACE" line), nothing else
-    const allowed = /^(\.brand\[data-pending\]|\.brand-wm|\.brand-initial|\.topbar-mark|body\[data-brand="company"\]|body:not\(\[data-brand="company"\]\) (\.brand|#brand-name small)|:root\[dir="rtl"\] body:not\(\[data-brand="company"\]\) #brand-name small|@media \(max-width:640px\)|\.acct-(av|line)|\.account-item \.list-av|\.topbar \.crumb\.acct-line|\[data-theme="light"\] body\[data-brand="company"\])/;
+    const allowed = /^(\.brand\[data-pending\]|\.brand-wm|\.brand-initial|\.topbar-mark|body\[data-brand="company"\]|body:not\(\[data-brand="company"\]\) (\.brand|#brand-name small)|:root\[dir="rtl"\] body:not\(\[data-brand="company"\]\) #brand-name small|@media \(max-width:640px\)|\.acct-(av|line)|\.account-item \.list-av|\.topbar \.crumb\.acct-line|\[data-theme="light"\] body\[data-brand="company"\]|:root\[data-theme="dark"\] (\.brand-initial|\.acct-av|body\[data-brand="company"\]))/;
     const offenders = selectorsOf(css).filter((s) => s.split(',').some((p) => !allowed.test(p.trim())));
     expect(offenders).toEqual([]);
   });
 
-  it('light company sidebar reuses the sign-in brand panel gradient and the dark theme has its own counterpart', () => {
+  it('light company sidebar reuses the sign-in brand panel gradient and the dark appearance has its own counterpart (in the same file, on the dark tokens)', () => {
     expect(css).toMatch(/\[data-theme="light"\] body\[data-brand="company"\] \.sidebar\{\s*background:radial-gradient\([^;]*linear-gradient\(168deg,#071740/);
-    expect(dark).toContain('[data-theme="dark"] body[data-brand="company"] .brand');
-    expect(dark).toContain('[data-theme="dark"] .brand-initial');
+    expect(css).toContain(':root[data-theme="dark"] body[data-brand="company"] .brand');
+    expect(css).toContain(':root[data-theme="dark"] .brand-initial');
   });
 
   it('the company logo sits on a white tile so any logo stays legible in both themes', () => {
     expect(css).toMatch(/body\[data-brand="company"\] \.brand-logo\{[^}]*background:#fff/);
-    expect(dark).toMatch(/body\[data-brand="company"\] \.brand-logo\{[^}]*background:#fff/);
+    expect(css).not.toMatch(/data-theme="dark"\] body\[data-brand="company"\] \.brand-logo\{[^}]*background:/); // the dark appearance keeps the white tile
   });
 
   it('SYNRTECHS stays the identity of the sign-in page, the default shell and developer mode: only the official logo artwork is used', () => {

@@ -1,73 +1,90 @@
-/* Sign-in screen (split layout) and the English / العربية switch. Uses the workspace tokens; the brand panel is always dark. */
+/* Sign-in screen (split layout), the English / العربية switch and the light / dark switch.
+   Uses the workspace tokens (tokens.css). The brand panel is the SYNRTECHS navy in both appearances; the form side follows the appearance:
+   a soft wash of teal and violet light behind a single glass card. */
 
 .auth-page .main{padding:0;max-width:none;min-height:100vh;min-height:100dvh;display:block}
+.auth-page body::before,body.auth-page::before{display:none}
 .lg{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);min-height:100vh;min-height:100dvh}
 
 /* ---- brand panel ---- */
-/* SYNRTECHS brand panel: the guide's navy #071740 with a violet light from the top corner and a teal one from the bottom, identical in both appearances.
-   Text contrast on it: white 17:1, #c3cdee 10:1, #aab6dc 8.6:1, teal #27e6c5 11:1. */
-.lg-brand{position:relative;overflow:hidden;color:#e9eefc;background:
-  radial-gradient(110% 75% at 100% 0%,rgba(105,65,226,.42) 0%,rgba(105,65,226,0) 58%),
-  radial-gradient(90% 60% at 0% 100%,rgba(39,230,197,.15) 0%,rgba(39,230,197,0) 62%),
+/* The guide's navy #071740 with a violet light from the top corner and a teal one from the bottom, a fine grid that fades out, identical in both
+   appearances. Contrast on it: white 17:1, #c3cdee 10:1, #aab6dc 8.6:1, teal #27e6c5 11:1. */
+.lg-brand{position:relative;overflow:hidden;isolation:isolate;color:#e9eefc;background:
+  radial-gradient(110% 75% at 100% 0%,rgba(105,65,226,.46) 0%,rgba(105,65,226,0) 58%),
+  radial-gradient(90% 60% at 0% 100%,rgba(39,230,197,.17) 0%,rgba(39,230,197,0) 62%),
   linear-gradient(162deg,#071740 0%,#071740 58%,#050e2d 100%);padding:48px clamp(28px,5vw,76px);display:flex}
-.lg-geo{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.lg-brand::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);background-size:44px 44px;-webkit-mask-image:radial-gradient(120% 90% at 10% 0%,#000 0%,transparent 70%);mask-image:radial-gradient(120% 90% at 10% 0%,#000 0%,transparent 70%)}
+.lg-geo{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:-1}
 .lg-brand-in{position:relative;display:flex;flex-direction:column;justify-content:space-between;gap:36px;width:100%;max-width:560px;margin-inline:auto}
-.lg-mark{display:flex;align-items:flex-start;flex-direction:column;gap:12px}
-.lg-mark small{display:block;font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:11.5px;letter-spacing:.24em;color:#27e6c5}
-.lg-hero h2{margin:0 0 16px;font-size:clamp(30px,3.6vw,46px);line-height:1.1;font-weight:700;letter-spacing:-.025em;color:#fff}
+.lg-mark{display:flex;align-items:flex-start;flex-direction:column;gap:14px}
+.lg-mark small{display:block;font-family:var(--font-mono);font-size:11px;letter-spacing:.26em;color:#27e6c5}
+.lg-hero h2{margin:0 0 16px;font-size:clamp(32px,3.5vw,46px);line-height:1.08;font-weight:680;letter-spacing:-.032em;color:#fff;text-wrap:balance}
 .lg-hero h2 em{font-style:normal;color:#27e6c5}
-.lg-hero>p{margin:0 0 30px;max-width:46ch;font-size:16px;line-height:1.55;color:#c3cdee}
-.lg-points{list-style:none;margin:0;padding:0;display:grid;gap:18px}
-.lg-points li{display:flex;gap:14px;align-items:flex-start}
-.lg-pt{flex:none;width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);color:#27e6c5}
+.lg-hero>p{margin:0 0 28px;max-width:44ch;font-size:16px;line-height:1.6;color:#c3cdee}
+/* the four promises: calm glass tiles (the one place on this panel where translucency earns its keep) */
+.lg-points{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.lg-points li{display:flex;gap:14px;align-items:center;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+@supports ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){.lg-points li{-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}}
+.lg-pt{flex:none;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:rgba(39,230,197,.1);border:1px solid rgba(39,230,197,.28);color:#27e6c5}
 .lg-ico{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .lg-points b{display:block;font-size:15px;font-weight:650;color:#fff}
 .lg-points small{display:block;margin-top:2px;font-size:13px;line-height:1.45;color:#aab6dc}
-.lg-copy{font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:12px;color:#aab6dc}
+.lg-copy{font-family:var(--font-mono);font-size:12px;color:#aab6dc}
 
 /* ---- form panel ---- */
-.lg-form{display:flex;flex-direction:column;background:var(--color-canvas);padding:22px clamp(18px,4vw,56px) 34px;min-width:0}
-.lg-top{display:flex;justify-content:flex-end;min-height:44px}
-.lg-card{margin:auto;width:100%;max-width:468px;padding:34px 36px 28px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:26px;box-shadow:var(--elev-2);display:flex;flex-direction:column;justify-content:flex-start;animation:lg-rise .35s ease both}
-@keyframes lg-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.lg-form{display:flex;flex-direction:column;background:var(--color-canvas);background-image:var(--wash);padding:22px clamp(18px,4vw,56px) 34px;min-width:0;position:relative}
+.lg-top{display:flex;justify-content:flex-end;align-items:center;gap:10px;min-height:44px}
+.lg-card{margin:auto;width:100%;max-width:468px;padding:38px 38px 30px;background:var(--glass-bg-strong);border:1px solid var(--glass-border);border-radius:28px;box-shadow:var(--elev-2),inset 0 1px 0 var(--glass-edge);display:flex;flex-direction:column;justify-content:flex-start;animation:lg-rise .4s var(--ease) both}
+@supports ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){
+  .lg-card{background:var(--glass-bg);-webkit-backdrop-filter:blur(var(--blur-strong)) saturate(150%);backdrop-filter:blur(var(--blur-strong)) saturate(150%)}
+}
+@media (prefers-reduced-transparency:reduce){.lg-card{background:var(--color-surface);-webkit-backdrop-filter:none;backdrop-filter:none}}
+@keyframes lg-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 .lg-brandname{margin:0 0 22px;text-align:center;line-height:1.25}
-.lg-brandname span{display:block;font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.24em;color:var(--color-text-muted)}
-.lg-card h3{margin:0;font-size:26px;font-weight:700;letter-spacing:-.02em;color:var(--color-text)}
-.lg-sub{margin:6px 0 0;font-size:14.5px}
-.lg-card form{margin-top:22px}
-.lg-field{margin-bottom:16px}
-.lg-field label{display:block;margin-bottom:7px;font-size:13.5px;font-weight:650;color:var(--color-text)}
+.lg-brandname span{display:block;font-family:var(--font-mono);font-size:10.5px;letter-spacing:.26em;color:var(--color-text-muted)}
+.lg-card h3{margin:0;font-size:28px;font-weight:680;letter-spacing:-.025em;color:var(--color-text)}
+.lg-sub{margin:8px 0 0;font-size:14.5px;line-height:1.5}
+.lg-card form{margin-top:26px}
+.lg-field{margin-bottom:18px}
+.lg-field label{display:block;margin-bottom:8px;font-size:13px;font-weight:650;color:var(--color-text)}
 .lg-input{position:relative;display:flex;align-items:center}
-.lg-input .lg-ico{position:absolute;inset-inline-start:15px;color:var(--color-text-muted);pointer-events:none}
-.auth-card .lg-input input{margin:0;min-height:52px;width:100%;padding:12px 14px;padding-inline:44px 50px;border-radius:14px;font-size:15px}
+.lg-input .lg-ico{position:absolute;inset-inline-start:16px;color:var(--color-text-subtle);pointer-events:none;transition:color var(--dur-fast)}
+.lg-input:focus-within .lg-ico{color:var(--color-accent)}
+.auth-card .lg-input input{margin:0;min-height:54px;width:100%;padding:12px 14px;padding-inline:46px 52px;border-radius:15px;font-size:15px;background:var(--color-field);border:1px solid var(--color-border-strong);color:var(--color-text);transition:border-color var(--dur-fast),box-shadow var(--dur-fast)}
+.auth-card .lg-input input:hover{border-color:var(--color-text-subtle)}
 .lg-input input:focus-visible{outline:none}
-.lg-eye{position:absolute;inset-inline-end:6px;top:50%;transform:translateY(-50%);width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:11px;background:transparent;color:var(--color-text-muted);cursor:pointer}
+.lg-eye{position:absolute;inset-inline-end:7px;top:50%;transform:translateY(-50%);width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:11px;background:transparent;color:var(--color-text-muted);cursor:pointer}
 .lg-eye:hover{background:var(--color-surface-hover);color:var(--color-text)}
 .lg-eye:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
 .lg-eye .lg-ico{position:static;color:inherit}
-.lg-card .form-error{margin:0 0 14px;padding:10px 12px;border-radius:12px;background:var(--color-danger-soft);color:var(--color-danger);font-size:13.5px}
-.lg-submit{width:100%;min-height:54px;display:flex;align-items:center;justify-content:center;gap:10px;border:0;border-radius:15px;font:inherit;font-size:16px;font-weight:650;color:#fff;cursor:pointer;background:#071740;box-shadow:0 10px 22px -12px rgba(7,23,64,.75);transition:transform .15s ease,box-shadow .15s ease,background-color .15s ease}
-.lg-submit:hover:not(:disabled){background:#6941e2;transform:translateY(-1px)}
-.lg-submit:focus-visible{outline:3px solid #6941e2;outline-offset:2px}
+.lg-card .form-error{margin:0 0 16px;padding:11px 13px;border-radius:12px;background:var(--color-danger-soft);border:1px solid var(--color-danger-line);color:var(--color-danger);font-size:13.5px}
+
+/* the primary action: brand navy on light (violet on hover, as before), teal with a navy label on dark */
+.lg-submit{width:100%;min-height:56px;display:flex;align-items:center;justify-content:center;gap:10px;border:0;border-radius:16px;font:inherit;font-size:16px;font-weight:650;color:#fff;cursor:pointer;background:linear-gradient(180deg,#0d2368,#071740);box-shadow:0 14px 26px -14px rgba(7,23,64,.8),inset 0 1px 0 rgba(255,255,255,.14);transition:transform var(--dur-fast),box-shadow var(--dur-fast),background-color var(--dur-fast)}
+.lg-submit:hover:not(:disabled){background:linear-gradient(180deg,#7752ee,#6941e2);transform:translateY(-1px);box-shadow:0 16px 28px -14px rgba(105,65,226,.85),inset 0 1px 0 rgba(255,255,255,.2)}
+.lg-submit:focus-visible{outline:3px solid var(--focus-ring);outline-offset:3px}
 .lg-submit:disabled{cursor:progress;opacity:.85}
-.lg-submit .lg-ico{stroke:#fff}
-.lg-spin{display:none;width:18px;height:18px;border-radius:50%;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;animation:lg-turn .7s linear infinite}
+.lg-submit .lg-ico{stroke:currentColor}
+:root[data-theme="dark"] .lg-submit{background:var(--color-primary);color:var(--color-on-primary);box-shadow:0 14px 28px -16px rgba(39,230,197,.55)}
+:root[data-theme="dark"] .lg-submit:hover:not(:disabled){background:var(--color-primary-hover);box-shadow:0 16px 30px -14px rgba(39,230,197,.7)}
+.lg-spin{display:none;width:18px;height:18px;border-radius:50%;border:2.5px solid color-mix(in srgb,currentColor 35%,transparent);border-top-color:currentColor;animation:lg-turn .7s linear infinite}
 .lg-submit.loading .lg-spin{display:block}
 .lg-submit.loading .lg-ico{display:none}
 @keyframes lg-turn{to{transform:rotate(360deg)}}
 .lg-card .otp-input{min-height:56px}
 .lg-card .otp-actions{margin-top:14px}
-.lg-card .auth-footnote{margin-top:22px}
+.lg-card .auth-footnote{margin-top:22px;text-align:center;color:var(--color-text-muted);font-size:12.5px}
 
 /* ---- English / العربية switch (login screen and top bar) ---- */
 .lang-switch{display:inline-flex;padding:3px;gap:2px;border-radius:999px;background:var(--color-surface);border:1px solid var(--color-border);box-shadow:var(--elev-1)}
-.lang-switch button{border:0;background:transparent;color:var(--color-text-2);font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:999px;cursor:pointer;line-height:1.2;min-height:30px}
+.lang-switch button{border:0;background:transparent;color:var(--color-text-2);font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:999px;cursor:pointer;line-height:1.2;min-height:30px;transition:background var(--dur-fast)}
 .lang-switch button:hover{background:var(--color-surface-hover)}
-.lang-switch button[aria-pressed="true"]{background:var(--color-primary);color:#fff}
+.lang-switch button[aria-pressed="true"]{background:var(--color-primary);color:var(--color-on-primary)}
 .lang-switch button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
-.lang-switch button[data-lang="ar"]{font-family:"Segoe UI",Tahoma,"Noto Sans Arabic","Arial",sans-serif;font-size:14px}
+.lang-switch button[data-lang="ar"]{font-family:"Cairo","Segoe UI",Tahoma,"Noto Sans Arabic",Arial,sans-serif;font-size:14px}
 .lang-slot{display:flex;align-items:center}
 .lang-slot .lang-switch{box-shadow:none}
+.lg-top .lang-switch{box-shadow:var(--elev-1)}
 
 @media (max-width:960px){
   .lg{grid-template-columns:1fr}
@@ -79,22 +96,20 @@
 @media (max-width:560px){
   .lg-brand{display:none}
   .lg-form{padding:14px 14px 24px}
-  .lg-card{padding:24px 20px 22px;border-radius:22px}
-  .lg-card h3{font-size:23px}
+  .lg-card{padding:26px 20px 22px;border-radius:24px}
+  .lg-card h3{font-size:24px}
 }
 @media (prefers-reduced-motion:reduce){.lg-card{animation:none}.lg-submit{transition:none}.lg-spin{animation-duration:1.6s}}
 
 /* ---- light / dark switch on the sign-in page (the top bar has its own) and the developer credit ---- */
-.lg-top{align-items:center;gap:10px}
 .theme-slot{display:flex}
-.theme-switch{display:inline-flex;align-items:center;gap:9px;height:38px;padding:0 12px;border-radius:999px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-2);font:inherit;font-size:13px;font-weight:600;line-height:1;cursor:pointer;white-space:nowrap}
+.theme-switch{display:inline-flex;align-items:center;gap:9px;height:38px;padding:0 12px;border-radius:999px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-2);font:inherit;font-size:13px;font-weight:600;line-height:1;cursor:pointer;white-space:nowrap;box-shadow:var(--elev-1)}
 .theme-switch:hover{background:var(--color-surface-hover)}
 .theme-switch:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
 .theme-switch .tb-switch{background:var(--color-border-strong)}
 .theme-switch[aria-checked="true"] .tb-switch{background:var(--color-primary)}
 .dev-credit{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dev-credit img{height:16px;width:auto;display:inline-block;vertical-align:middle}
-.dev-credit .dev-dark{display:none}
 .lg-dev{margin:18px auto 0;justify-content:center;font-size:12.5px;color:var(--color-text-muted)}
 .lg-dev img{height:18px}
 footer .dev-credit{gap:6px}
@@ -102,8 +117,7 @@ footer .dev-credit{gap:6px}
 /* ---- SYNRTECHS logo (official artwork from the brand guide: colour lockup on light, white lockup on dark; never retyped, recoloured or stretched) ---- */
 .wm{display:inline-flex;align-items:center;line-height:0}
 .wm img{display:block;height:auto}
-.wm .wm-dark{display:none}
-.lg-mark img.lg-wordmark{display:block;width:260px;height:auto;max-width:100%}
+.lg-mark img.lg-wordmark{display:block;width:250px;height:auto;max-width:100%}
 @media (max-width:960px){.lg-mark img.lg-wordmark{width:200px}}
 /* the form card carries its own logo only where the brand panel is not shown (phones) */
 .lg-wm,.lg-brandname{display:none}

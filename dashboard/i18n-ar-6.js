@@ -30,6 +30,9 @@ Object.assign(window.I18N_AR, {
   'WhatsApp: Not connected': 'واتساب: غير متصل', 'WhatsApp: Preparing session': 'واتساب: تجهيز الجلسة', 'WhatsApp: Pairing / connecting': 'واتساب: اقتران / اتصال',
   'WhatsApp: Reconnecting': 'واتساب: إعادة الاتصال', 'WhatsApp: Disconnected': 'واتساب: غير متصل', 'WhatsApp: Logged out — authentication required': 'واتساب: تم تسجيل الخروج — المصادقة مطلوبة',
   'WhatsApp: Connection error': 'واتساب: خطأ في الاتصال', 'WhatsApp Live': 'واتساب متصل',
+  // dashboard home cards that were still English in the Arabic interface
+  'No pending requests': 'لا توجد طلبات معلّقة', 'Quotation and appointment requests from WhatsApp appear here.': 'تظهر هنا طلبات عروض الأسعار والمواعيد الواردة من واتساب.',
+  'No automatic replies in this period yet': 'لا توجد ردود تلقائية في هذه الفترة بعد',
   'Suppressed — document message — not answered automatically': 'مُنع — رسالة مستند — لا يُجاب عنها تلقائياً',
   'Right-click the spot in Google Maps → copy the coordinates. Map selection by click needs a Maps API key, which this app does not use.': 'انقر بزر الفأرة الأيمن على الموضع في خرائط Google ← انسخ الإحداثيات. اختيار الموقع بالنقر على الخريطة يحتاج إلى مفتاح Maps API الذي لا يستخدمه هذا التطبيق.',
   'The public HTTPS URL you register with Meta as the Callback URL. This application always answers at': 'رابط HTTPS العام الذي تسجّله لدى Meta كرابط الاستدعاء. يجيب هذا التطبيق دائماً على',
@@ -214,6 +217,7 @@ Object.assign(window.I18N_AR, {
   'created': 'إنشاء', 'updated': 'تحديث', 'status': 'الحالة', 'assigned': 'إسناد', 'documents': 'المستندات', 'note': 'ملاحظة',
 });
 window.I18N_AR_PATTERNS.push(
+  [/^connected · (\d+) needs? attention$/, function (n) { return 'متصل · ' + n + ' تحتاج إلى انتباه'; }],
   [/^(\d+) open enquir(?:y was|ies were) saved without an alert\.$/, function (n) { return 'حُفظ ' + n + ' استفسار مفتوح دون إرسال تنبيه.'; }],
   [/^Delivery queue: (\d+) waiting, (\d+) delivered, (\d+) failed\.$/, function (p, s, f) { return 'قائمة الإرسال: ' + p + ' بالانتظار، ' + s + ' تم تسليمها، ' + f + ' فشلت.'; }],
   [/^(\d+) enquir(?:y|ies)$/, function (n) { return n + ' استفسار'; }],

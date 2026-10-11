@@ -2,37 +2,53 @@
 
 ## Two appearances, one set of tokens
 
-* **Light** is the default and is unchanged. `<html data-theme="light">` ships in `dashboard/index.html`; nothing in the dark layer applies to it.
-* **Dark** is a complete SYNRTECHS-branded appearance in one file, `dashboard/theme-dark.css`, loaded after `ui.css` and `login.css`. Every rule
-  in it starts with `[data-theme="dark"]` (a test enforces this), so the light appearance cannot be affected. Components keep reading the shared tokens
-  (`--color-surface`, `--color-text`, `--color-primary`, …); the dark layer re-points those tokens and re-skins the few components that used fixed colours
-  (the gradient top bar, the coloured KPI and alert cards).
-* The choice is remembered in this browser (`localStorage["workspace.theme"]`) and applied by `dashboard/theme-init.js`, which runs in `<head>` before any
-  stylesheet, so there is no flash of the other appearance. With no saved choice the page is light (the operating system's dark mode is not followed).
-* **Switches:** the top bar has one (`#theme-toggle`); the sign-in page has the same switch, mounted before anyone is signed in
-  (`mountThemeSwitches()` in `shell.js`, slot `[data-theme-switch]`). Both are `role="switch"` buttons with `aria-checked`, an accessible name, keyboard
-  support (Tab, Space/Enter) and a visible focus ring, and both work in English and Arabic (RTL mirrors the knob and the layout). Switching the
-  appearance is a display change only: it makes no API call and touches no credential, session or setting. Changing language keeps the theme.
+The whole interface is drawn from **one token file, `dashboard/tokens.css`**. It holds the brand reference colours, the type, radius and motion scales, both appearances
+(`:root,:root[data-theme="light"]` and `:root[data-theme="dark"]`), the legacy aliases the older scripts still name, the base type and focus rules, and the glass rules. Nothing
+else defines a colour per theme: `ui.css`, `login.css` and `company.css` only read tokens (a test fails if a component stylesheet branches on the appearance, except a short
+documented list of swaps such as the logo lockup), and the former parallel `theme-dark.css` no longer exists.
+
+* **Light** is the default (`<html data-theme="light">`): a cool off-white canvas with a faint teal and violet wash, white cards, navy ink, fine borders, one soft shadow. Teal fills the
+  primary action (navy label), purple marks the secondary emphasis (selected navigation, the sign-in hover) and the focus ring, coral is danger.
+* **Dark** is a real hierarchy, not one flat navy: canvas `#050B1F` < sidebar `#081029` < card `#0C1737` < raised row `#121F47` < hover/selected `#182858`. Cards are separated by that
+  step and a hairline, never by a glowing outline. Text is an off-white (`#EEF2FF`) with two quieter steps, teal is the accent, the semantic colours are tuned for the dark surfaces.
+* **Semantic tokens** per appearance: surfaces, borders, text (4 steps), primary/accent/secondary, success/warning/danger/info each as text colour, soft tint and hairline, depth
+  (`--elev-1/2`, `--shadow-overlay`), the scrim, glass, the canvas wash and the chart series. Contrast of every text, tone-on-tint, button label, control edge and focus ring pair is tested
+  for both appearances (`tests/unit/dashboard/theme.test.ts`: 4.5:1 for text, 3:1 for control edges and the focus ring).
+* **Glass is selective.** Translucency (a bounded blur of 14 / 22 px) is used only for the header, the profile menu, toasts, dialog scrims and the sign-in card, and the four promise tiles
+  of the sign-in brand panel. Each has a near-opaque base colour, every `backdrop-filter` sits inside `@supports`, and `prefers-reduced-transparency` switches it off. The sidebar and
+  ordinary cards are solid.
+* **Motion** is short and only where it helps (hover lift, switch, the sign-in card rising); `prefers-reduced-motion` removes it.
+* The choice is remembered in this browser (`localStorage["workspace.theme"]`) and applied by `dashboard/theme-init.js`, which runs in `<head>` before any stylesheet, so there is no
+  flash of the other appearance. With no saved choice the page is light (the operating system's dark mode is not followed).
+* **Switches:** the top bar has one (`#theme-toggle`); the sign-in page has the same switch, mounted before anyone is signed in (`mountThemeSwitches()` in `shell.js`, slot
+  `[data-theme-switch]`). Both are `role="switch"` buttons with `aria-checked`, an accessible name, keyboard support (Tab, Space/Enter) and a visible focus ring, and both work in
+  English and Arabic (RTL mirrors the knob and the layout). Switching the appearance is a display change only: it makes no API call and touches no credential, session or setting.
+
+### Shell and components
+
+* **Header** (`.topbar`): a glass panel with the account logo, the account line (name, masked number, status), the page title and description, and the controls (language, AI state,
+  theme, date range, user menu, settings). The controls are neutral raised pills; teal marks only the state that is on. The old full-width saturated gradient is gone.
+* **Sidebar**: one surface step above the canvas, small-caps mono group labels, line icons (never emoji), a purple-tinted selected item with a teal rail, and account cards with their own
+  logo, masked number and status dot. Long business names wrap to two lines instead of ending in an ellipsis.
+* **Home**: alert cards are neutral surfaces with a tone rail and a tone-tinted icon; KPI cards are neutral with a small teal or purple icon chip and the figure in the text colour. The
+  former cartoon mascot is a calm ring-and-bubble mark; avatars use a restrained deep palette.
+* **Shared**: panels, tables (sticky header, hairline rows), buttons (primary teal, tonal success/danger, ghost), fields, switches, tabs, badges and chips (tone tint + hairline), toasts
+  (tone rail), dialogs (surface + scrim with a small blur), scrollbars — all token-driven, in both appearances and in RTL.
 
 ## The SYNRTECHS palette
 
-Source: the supplied brand guide `Synrtechs_DESIGN 1.pdf`; nothing was invented.
+Source: the supplied brand guide `Synrtechs_DESIGN 1.pdf`; nothing was invented. These are **reference** colours, not a paint box.
 
 | Item | Guide value | Use |
 | --- | --- | --- |
-| Navy | `#071740` | sign-in brand panel, company sidebar, sign-in button, deep surfaces |
-| Teal | `#27E6C5` | the signal in the dark appearance: primary buttons (navy label, 11:1), focus ring, active/selected state, key figures |
-| Purple | `#6941E2` | decorative shapes, the sign-in button's hover fill (white on it 6:1). It is 2.6:1 on navy, so it never carries text (`#B4A0F5` is its text tint) |
+| Navy | `#071740` | sign-in brand panel, company sidebar, the light sign-in button, the logo tile, deep surfaces |
+| Teal | `#27E6C5` | primary action fill (navy label, 11:1), focus ring and accent in dark, selected-state rail, live indicators |
+| Purple | `#6941E2` | secondary emphasis: selected navigation tint, focus ring in light, the sign-in button's hover fill (white on it 6:1). Its text tint is `#B8A6F7` in dark and `#5A33D0` in light |
 | Coral | `#FF6B6B` | danger and errors |
-| Type | Space Mono, Cairo | Space Mono for the small spaced labels, Cairo for Arabic (both SIL Open Font Licence, shipped in `assets/fonts` with `Cairo-SpaceMono-OFL.txt`); Geist stays the Latin body face; Arial is the last fallback |
+| Type | Geist, Space Mono, Cairo | Geist for Latin body text in both appearances, Space Mono for the small spaced labels, Cairo for Arabic (open licences, shipped in `assets/fonts` with `Geist-OFL.txt` and `Cairo-SpaceMono-OFL.txt`) |
 
-Not in the guide, so **derived from the navy, not invented** (and marked in the CSS header): canvas `#050E2D` (navy darkened), panel `#0B1C4A` and raised/hover
-`#122760` (steps between canvas and line), hairline `#26396F`, input border `#6F83C0` (4.4:1+ on every panel), muted text `#AAB6DC` (7:1+), and the status
-colours the guide does not define (success green `#6FD0A7`, warning amber `#F5B94A`).
-
-Contrast is tested (`tests/unit/dashboard/theme.test.ts`): white, muted, teal and the violet text tint reach 4.5:1 on canvas, panel and the raised rows; the navy
-label on teal reaches 4.5:1; input borders reach 3:1; status colours reach 4.5:1; every text colour on the sign-in navy panel reaches 4.5:1.
-
+Everything else (canvas, panels, hairlines, muted text, the text-safe teal `#08796E` for light, the semantic status colours) is **derived from the navy** and checked for contrast; the values are in
+`tokens.css`.
 ## Arabic
 
 Arabic uses `"Cairo", "Segoe UI", Tahoma, …` in both appearances (`rtl.css`, and `--font-sans` in the dark layer). Cairo is self-hosted (arabic and latin subsets of the
@@ -41,9 +57,9 @@ image is never mirrored while the decorative shapes beside it are.
 
 ## The sign-in page
 
-The brand panel is the guide's navy with a violet light from one corner and a teal one from the other, three sheared slabs on the 30° angle of the S mark
-(a quiet echo of the logo, drawn in `app.js`, never a copy), the white SYNRTECHS lockup, and the product line. It is the same in both appearances; the form side is
-the light canvas or the deep navy canvas. On tablets the panel becomes a banner; on phones it is hidden and the card carries the colour/white lockup.
+The brand panel is the guide's navy with a violet light from one corner and a teal one from the other, a fine grid that fades out, three sheared slabs on the 30° angle of the S mark
+(a quiet echo of the logo, drawn in `app.js`, never a copy), the white SYNRTECHS lockup, the product line and four glass promise tiles. It is the same in both appearances; the form side is
+the soft light canvas or the deep navy canvas with a single glass card (larger inputs, a navy primary button that turns violet on hover in light and a teal one in dark, clear focus and error states, password reveal, loading state). On tablets the panel becomes a banner; on phones it is hidden and the card carries the colour/white lockup.
 **No customer logo appears on the sign-in page, the tab icon or the app icon**: the favicon and `logo-192.png` are the guide's navy S tile.
 
 ## Whose interface is it? (SYNRTECHS vs company branding)

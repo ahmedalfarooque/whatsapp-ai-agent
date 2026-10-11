@@ -1,7 +1,7 @@
 /* Company-branded workspace: a user with exactly ONE assigned WhatsApp account gets that company's name and logo, in the design language of the
-   sign-in page (deep brand panel for the sidebar, gradient header, white logo tile, spaced caps sub-line). The server decides who gets it
+   sign-in page (deep brand panel for the sidebar, glass header, white logo tile, spaced caps sub-line). The server decides who gets it
    (me.branding); this file only styles body[data-brand="company"]. Everyone else keeps the SYNRTECHS look.
-   Dark-theme counterparts live in theme-dark.css. */
+   In the dark appearance the sidebar simply uses the dark tokens (tokens.css). */
 
 /* the brand block (both modes) */
 .brand[data-pending]{visibility:hidden}
@@ -9,20 +9,19 @@
 body:not([data-brand="company"]) .brand{flex-direction:column;align-items:flex-start;gap:7px}  /* logo above the "AI WORKSPACE" line */
 body:not([data-brand="company"]) #brand-name small{font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.22em}
 :root[dir="rtl"] body:not([data-brand="company"]) #brand-name small{font-family:inherit;letter-spacing:0;font-size:12px}
-.brand-initial{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;flex:none;background:#071740;color:#fff;font-weight:700;font-size:20px;line-height:1}
+.brand-initial{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;flex:none;background:var(--brand-navy);color:#fff;font-weight:700;font-size:20px;line-height:1}
 .brand-initial.sm{width:36px;height:36px;border-radius:50%;font-size:16px}
 /* selected-account identity: the logo tile in the top bar, the small tiles in the account list, the name / masked number / status line above the title */
-.topbar-mark.acct-mark{border-radius:14px;background:#fff;border:1px solid rgba(255,255,255,.55);overflow:hidden;display:block;padding:0}
+.topbar-mark.acct-mark{border-radius:14px;background:#fff;border:1px solid var(--color-border);overflow:hidden;display:block;padding:0}
 .acct-av{display:block;width:100%;height:100%;object-fit:contain;padding:5px;background:#fff;border-radius:inherit}
-.acct-av.acct-av-initial{display:grid;place-items:center;padding:0;background:#071740;color:#fff;font-weight:700;font-size:20px;line-height:1}
+.acct-av.acct-av-initial{display:grid;place-items:center;padding:0;background:var(--brand-navy);color:#fff;font-weight:700;font-size:20px;line-height:1}
 .account-item .list-av{width:30px;height:30px;flex:none;border-radius:9px;padding:3px;border:1px solid var(--color-border)}
 .account-item .list-av.acct-av-initial{font-size:14px;padding:0}
-.topbar .crumb.acct-line{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;opacity:1;font-size:13px;font-weight:600;margin-bottom:3px}
-.acct-line .acct-name{font-size:14.5px;font-weight:700;letter-spacing:-.005em}
-.acct-line .acct-num{font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:12px;opacity:.92}
-.acct-line .acct-st{display:inline-flex;align-items:center;gap:6px;font-weight:600}
-.acct-line .acct-st .dot{box-shadow:0 0 0 2px rgba(255,255,255,.55)}
-.acct-line .acct-sep{opacity:.6}
+.topbar .crumb.acct-line{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;font-size:13px;font-weight:600;margin-bottom:3px;color:var(--color-text-muted)}
+.acct-line .acct-name{font-size:14.5px;font-weight:700;letter-spacing:-.005em;color:var(--color-text)}
+.acct-line .acct-num{font-family:var(--font-mono);font-size:12px;color:var(--color-text-muted)}
+.acct-line .acct-st{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--color-text-2)}
+.acct-line .acct-sep{color:var(--color-text-subtle)}
 /* Narrow screens: nothing of the identity is hidden or cut. The name may wrap onto a second line, and the masked number and the connection status
    follow it (on their own line when they do not fit beside it). Separators are dropped because the wrapped items carry their own gap. */
 @media (max-width:640px){
@@ -31,7 +30,7 @@ body:not([data-brand="company"]) #brand-name small{font-family:"Space Mono","Gei
   .acct-line .acct-name{max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.25}
   .acct-line .acct-num,.acct-line .acct-st{flex:none}
 }
-.topbar-mark img.mk{height:24px;width:auto;display:block}  /* the official S mark (white variant: the top bar is a coloured / navy surface in both appearances) */
+.topbar-mark img.mk{height:24px;width:auto;display:block}  /* the official S mark (white variant: its tile is navy in both appearances) */
 
 /* a single-account user needs no account switcher, and sees no other business */
 body[data-brand="company"] #account-list,
@@ -50,7 +49,11 @@ body[data-brand="company"] #brand-name small{display:block;margin-top:3px;font-s
   background:radial-gradient(120% 55% at 100% 0%,rgba(105,65,226,.38) 0%,rgba(105,65,226,0) 60%),linear-gradient(168deg,#071740 0%,#071740 60%,#050e2d 100%);border-inline-end:0;color:#e9eefc;
   --color-text:#e9eefc;--color-text-2:#c3cdee;--color-text-muted:#aab6dc;--color-text-subtle:#aab6dc;
   --color-surface-hover:rgba(255,255,255,.09);--color-surface-raised:rgba(255,255,255,.08);--color-border:rgba(255,255,255,.15);--color-border-strong:rgba(255,255,255,.28);
-  --color-primary:#27e6c5;--color-primary-soft:rgba(39,230,197,.15);--focus-ring:#27e6c5;--blue-400:#27e6c5}
+  --color-primary:#27e6c5;--color-primary-soft:rgba(39,230,197,.15);--color-accent:#27e6c5;--color-secondary-soft:rgba(105,65,226,.38);--focus-ring:#27e6c5;--blue-400:#27e6c5}
+/* dark appearance: the company sidebar is the dark sidebar; the logo tile stays white, the initial tile is a raised navy chip */
+:root[data-theme="dark"] .brand-initial,:root[data-theme="dark"] .acct-av.acct-av-initial{background:var(--color-surface-raised);color:var(--color-accent);border:1px solid var(--color-border)}
+:root[data-theme="dark"] body[data-brand="company"] .brand{padding-bottom:16px;border-bottom:1px solid var(--color-border)}
+:root[data-theme="dark"] body[data-brand="company"] .brand-logo{box-shadow:none}
 [data-theme="light"] body[data-brand="company"] .sidebar .brand{color:#fff}
 [data-theme="light"] body[data-brand="company"] .sidebar nav a.active{color:#fff}
 [data-theme="light"] body[data-brand="company"] .sidebar .sidebar-note{border-color:rgba(255,255,255,.15);color:#aab6dc}
