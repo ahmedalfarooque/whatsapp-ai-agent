@@ -2,7 +2,9 @@ import { getDb } from '../memory/db';
 import { maskWaId } from '../logger';
 import { env } from '../config/env';
 import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
+import { credentialSavedAtMs, getCachedProviderHealth } from '../llm/aiProviderHealth';
 import { getAutomationSettings } from '../automation/settingsRepo';
+import { runWithAccount } from '../accounts/accountContext';
 import { getRecentConversations } from './data';
 import { listCustomerVisibleOffers } from '../offers/offerRepo';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
@@ -43,22 +45,45 @@ export interface AiState {
   state: 'active' | 'off' | 'needs_key' | 'error' | 'mock';
   label: string;
   detail: string;
+  /** True only when the provider itself confirmed the saved key (a live check), not merely that a key is saved. */
+  verified: boolean;
 }
 
-/** The REAL state of AI replies for one account: never "active" while the key is unusable, rejected, or the AI switch is off. */
-export function getAiState(accountId: number): AiState {
-  const settings = getAutomationSettings();
-  if (env.shouldUseMockProviders) return { state: 'mock', label: 'Test mode', detail: 'Mock providers: no real AI calls are made' };
-  if (!settings.autoRepliesEnabled || !settings.aiRepliesEnabled) return { state: 'off', label: 'AI off', detail: 'Free-text AI replies are switched off for this account' };
-  if (!isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY'))) return { state: 'needs_key', label: 'AI needs a key', detail: 'No usable AI provider key is saved' };
-  const failures = one(
-    "SELECT COUNT(*) AS n FROM reply_activity WHERE whatsapp_account_id = ? AND kind = 'error' AND detail LIKE 'AI credential problem%' AND created_at >= ?",
-    accountId,
-    sqlTime(Date.now() - DAY_MS),
-  );
-  const lastOk = one("SELECT COUNT(*) AS n FROM reply_activity WHERE whatsapp_account_id = ? AND kind = 'ai' AND created_at >= ?", accountId, sqlTime(Date.now() - DAY_MS));
-  if (failures > 0 && lastOk === 0) return { state: 'error', label: 'AI key rejected', detail: 'The AI provider rejected the saved key in the last 24 hours' };
-  return { state: 'active', label: 'AI active', detail: 'Free-text questions are answered by the AI' };
+/**
+ * The REAL state of AI replies for one account. The credential verdict comes from a live, cached provider check
+ * (see llm/aiProviderHealth); reply history is only a secondary signal and failures recorded BEFORE the key was last saved are
+ * ignored, so fixing the key clears the warning instead of leaving a stale "rejected" for 24 hours. This is a statement about the
+ * AI provider only: the account's knowledge files are reported separately.
+ */
+export function getAiState(accountId: number, now: number = Date.now()): AiState {
+  const settings = runWithAccount(accountId, () => getAutomationSettings()); // this account's switches, whatever account the request context holds
+  if (env.shouldUseMockProviders) return { state: 'mock', label: 'Test mode', detail: 'Mock providers: no real AI calls are made', verified: false };
+  if (!settings.autoRepliesEnabled || !settings.aiRepliesEnabled) return { state: 'off', label: 'AI off', detail: 'Free-text AI replies are switched off for this account', verified: false };
+  if (!isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY'))) return { state: 'needs_key', label: 'AI needs a key', detail: 'No usable AI provider key is saved', verified: false };
+
+  const health = getCachedProviderHealth(now);
+  if (health?.status === 'rejected') {
+    return { state: 'error', label: 'AI key rejected', detail: `OpenRouter rejected the saved key (HTTP ${health.httpStatus}). Save a valid key under Providers`, verified: false };
+  }
+  if (health?.status === 'rate_limited') {
+    return { state: 'error', label: 'AI provider busy', detail: 'OpenRouter is rate limiting this key; AI replies may fail until it recovers', verified: false };
+  }
+
+  // Replies since the later of "24 hours ago" and "the key was last saved": older failures belong to a key that no longer exists.
+  const savedAt = credentialSavedAtMs();
+  const windowStart = sqlTime(Math.max(now - DAY_MS, savedAt ?? 0));
+  const latest = (sql: string): string | null => (getDb().prepare(sql).get(accountId, windowStart) as { at: string | null }).at;
+  const lastFailure = latest("SELECT MAX(created_at) AS at FROM reply_activity WHERE whatsapp_account_id = ? AND kind = 'error' AND (detail LIKE 'AI credential problem%' OR detail LIKE 'AI failed%') AND created_at >= ?");
+  const lastSuccess = latest("SELECT MAX(created_at) AS at FROM reply_activity WHERE whatsapp_account_id = ? AND kind = 'ai' AND created_at >= ?");
+  if (lastFailure && (!lastSuccess || lastFailure > lastSuccess)) {
+    return health?.status === 'ok'
+      ? { state: 'error', label: 'AI replies failing', detail: 'The key is valid but the latest AI reply failed (provider or model error); see the activity log', verified: true }
+      : { state: 'error', label: 'AI key rejected', detail: 'The AI provider rejected the saved key since it was last saved', verified: false };
+  }
+  if (health?.status === 'ok') {
+    return { state: 'active', label: 'AI active', detail: `Key verified with OpenRouter at ${new Date(health.checkedAt).toISOString().slice(11, 16)} UTC`, verified: true };
+  }
+  return { state: 'active', label: 'AI active', detail: 'A key is saved; it could not be verified with OpenRouter just now', verified: false };
 }
 
 export interface ActivityWindow {

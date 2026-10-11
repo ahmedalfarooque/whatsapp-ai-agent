@@ -41,23 +41,63 @@ function backupDir(accountId: number): string {
   return path.join(knowledgeDirForAccount(accountId), '.backups');
 }
 
+/**
+ * What is actually on disk for one knowledge file:
+ *  available  the file exists and is usable (Markdown with text, or JSON that parses)
+ *  missing    the file does not exist
+ *  empty      the file exists but holds nothing (the assistant gets no facts from it)
+ *  invalid    a JSON file that does not parse — the assistant skips it, so it is reported instead of silently ignored
+ */
+export type KnowledgeFileState = 'available' | 'missing' | 'empty' | 'invalid';
+
+/** Files a business may legitimately go without. The four core files describe the business itself; these two only add to them. */
+const OPTIONAL_KNOWLEDGE_FILES: Record<string, string> = {
+  'ai-knowledge.md': 'Optional: extra facts taken from the business documents and pages. Created by Analyze & Generate or by hand.',
+  'booking.json': 'Optional reference text for the assistant. Appointment behaviour is configured in Business Information and Automation, not in this file.',
+};
+
 export interface KnowledgeFileInfo {
   name: string;
   exists: boolean;
   sizeBytes: number | null;
   modifiedAt: string | null;
+  state: KnowledgeFileState;
+  /** Why an existing file is not usable (empty / invalid JSON / unreadable), else null. */
+  problem: string | null;
+  /** True for files a business can go without; "missing" is then informational rather than a defect. */
+  optional: boolean;
+  note: string | null;
 }
 
 export function listKnowledgeFiles(accountId: number = currentAccountId()): KnowledgeFileInfo[] {
   const dir = knowledgeDirForAccount(accountId);
   return EDITABLE_KNOWLEDGE_FILES.map((name) => {
     const filePath = path.join(dir, name);
+    const optional = name in OPTIONAL_KNOWLEDGE_FILES;
+    const note = OPTIONAL_KNOWLEDGE_FILES[name] ?? null;
+    let stat: fs.Stats;
     try {
-      const stat = fs.statSync(filePath);
-      return { name, exists: true, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() };
+      stat = fs.statSync(filePath);
+      if (!stat.isFile()) throw new Error('not a file');
     } catch {
-      return { name, exists: false, sizeBytes: null, modifiedAt: null };
+      return { name, exists: false, sizeBytes: null, modifiedAt: null, state: 'missing' as const, problem: null, optional, note };
     }
+    const base = { name, exists: true, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString(), optional, note };
+    let text: string;
+    try {
+      text = fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      return { ...base, state: 'invalid' as const, problem: 'The file exists but cannot be read by the server.' };
+    }
+    if (!text.trim()) return { ...base, state: 'empty' as const, problem: 'The file is empty, so the assistant learns nothing from it.' };
+    if (name.endsWith('.json')) {
+      try {
+        JSON.parse(text);
+      } catch {
+        return { ...base, state: 'invalid' as const, problem: 'The file is not valid JSON, so the assistant ignores it. Open it and fix the syntax.' };
+      }
+    }
+    return { ...base, state: 'available' as const, problem: null };
   });
 }
 

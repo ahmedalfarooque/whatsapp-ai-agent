@@ -7,8 +7,10 @@ import { getOrCreateCustomer } from '../../src/memory/customerRepo';
 import { getOrCreateActiveConversation, appendMessage, resetConversation } from '../../src/memory/conversationRepo';
 import { acquireLock, confirmLock, markUncertain, buildIdempotencyKey, buildSlotKey } from '../../src/memory/bookingLockRepo';
 import { getDb } from '../../src/memory/db';
+import { knowledgeDirForAccount } from '../../src/knowledge/paths';
 
-const KNOWLEDGE_DIR = path.join(__dirname, '..', '..', 'knowledge');
+// The legacy business's knowledge folder as configured for tests (a throw-away copy, see tests/setup.ts) — never the real files.
+const KNOWLEDGE_DIR = knowledgeDirForAccount(1);
 const BACKUP_DIR = path.join(KNOWLEDGE_DIR, '.backups');
 
 describe('dashboard', () => {

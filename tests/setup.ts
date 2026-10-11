@@ -1,9 +1,10 @@
 // Loaded before every test file (see vitest.config.ts setupFiles). Provides
 // safe fake values for every required env var so env.ts validation passes
 // without any real third-party credentials.
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { vi } from 'vitest';
+import { afterAll, vi } from 'vitest';
 
 // Tests supply their own environment. Never reload production secrets from .env.
 vi.mock('dotenv', () => ({ config: vi.fn() }));
@@ -12,7 +13,21 @@ process.env.PORT = process.env.PORT ?? '3999';
 process.env.LOG_LEVEL = process.env.LOG_LEVEL ?? 'silent';
 process.env.DATABASE_PATH = ':memory:';
 // Per-business knowledge/uploads of a test run live in a throw-away folder, never next to the real data.
-process.env.KNOWLEDGE_ACCOUNTS_DIR = path.join(os.tmpdir(), `whatsapp-ai-agent-test-knowledge-${process.pid}`);
+// One folder per test file (the database is per test file too), so a file never meets another file's leftovers.
+const accountsKnowledgeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'whatsapp-ai-agent-test-knowledge-'));
+process.env.KNOWLEDGE_ACCOUNTS_DIR = accountsKnowledgeDir;
+// The legacy business's knowledge/ is likewise a throw-away copy of the repository files: tests that edit and restore faq.md or
+// booking.json must never touch the real files (on the production server `npm test` runs next to the live knowledge folder).
+const legacyKnowledgeCopy = fs.mkdtempSync(path.join(os.tmpdir(), 'whatsapp-ai-agent-test-legacy-knowledge-'));
+const repoKnowledge = path.join(__dirname, '..', 'knowledge');
+for (const entry of fs.readdirSync(repoKnowledge, { withFileTypes: true })) {
+  if (entry.isFile() && /\.(md|json)$/.test(entry.name)) fs.copyFileSync(path.join(repoKnowledge, entry.name), path.join(legacyKnowledgeCopy, entry.name));
+}
+process.env.KNOWLEDGE_LEGACY_DIR = legacyKnowledgeCopy;
+afterAll(() => {
+  fs.rmSync(legacyKnowledgeCopy, { recursive: true, force: true });
+  fs.rmSync(accountsKnowledgeDir, { recursive: true, force: true });
+});
 
 process.env.WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN ?? 'test-whatsapp-token';
 process.env.WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID ?? '1234567890';

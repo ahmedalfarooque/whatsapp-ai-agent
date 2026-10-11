@@ -51,7 +51,7 @@ function hashOf(text: string): string {
   return createHash('sha1').update(text.trim()).digest('hex').slice(0, 10);
 }
 
-function wrapBlock(inner: string): string {
+export function wrapBlock(inner: string): string {
   const body = inner.trim();
   return `<!-- setup:begin v1 hash=${hashOf(body)} -->\n${body}\n<!-- setup:end -->`;
 }

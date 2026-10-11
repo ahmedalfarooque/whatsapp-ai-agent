@@ -70,6 +70,7 @@ async function api(url, options) {
   if (!response.ok) {
     const message = (body && body.error) || `Request failed (${response.status})`;
     const error = new Error(message);
+    error.status = response.status;
     if (body && body.fields) error.fields = body.fields;
     throw error;
   }
@@ -703,12 +704,25 @@ route('#/knowledge', 'Knowledge', 'The exact files the AI reads business facts f
         ${data.files
           .map(
             (f) =>
-              `<tr><td class="file">${esc(f.name)}</td><td>${f.exists ? badge('Available', 'green') : badge('Missing', 'red')}</td><td>${f.sizeBytes != null ? `${f.sizeBytes} B` : '—'}</td><td>${formatDate(f.modifiedAt)}</td><td><a class="btn small" href="#/knowledge/${encodeURIComponent(f.name)}">${f.exists ? 'View / Edit' : 'Create'}</a></td></tr>`,
+              `<tr><td class="file">${esc(f.name)}${knowledgeHint(f)}</td><td>${knowledgeBadge(f)}</td><td>${f.sizeBytes != null ? `${f.sizeBytes} B` : '—'}</td><td>${formatDate(f.modifiedAt)}</td><td><a class="btn small" href="#/knowledge/${encodeURIComponent(f.name)}">${f.exists ? 'View / Edit' : 'Create'}</a></td></tr>`,
           )
           .join('')}
       </tbody></table>
     </section>`;
 });
+
+// The status shown here is the file's real state on the server: a file that exists but is empty or malformed is NOT "Available".
+function knowledgeBadge(f) {
+  if (f.state === 'available') return badge('Available', 'green');
+  if (f.state === 'missing') return f.optional ? badge('Not created', 'muted') : badge('Missing', 'red');
+  if (f.state === 'empty') return badge('Empty', 'amber');
+  return badge('Invalid', 'red');
+}
+
+function knowledgeHint(f) {
+  const text = f.problem || (f.state === 'missing' ? f.note : null);
+  return text ? `<div class="muted small">${esc(text)}</div>` : '';
+}
 
 route(/^#\/knowledge\/(?<name>[\w.-]+)$/, 'Knowledge file', '', async (view, params) => {
   const name = decodeURIComponent(params.name);
@@ -716,8 +730,13 @@ route(/^#\/knowledge\/(?<name>[\w.-]+)$/, 'Knowledge file', '', async (view, par
   try {
     const data = await api(`/api/dashboard/knowledge/${encodeURIComponent(name)}`);
     original = data.content;
-  } catch {
-    original = '';
+  } catch (error) {
+    // Only "does not exist yet" opens an empty editor to create the file. Any other failure must NOT show an empty editor:
+    // saving it would overwrite a real file the page merely failed to read.
+    if (error.status !== 404) {
+      view.innerHTML = `<a class="back-link" href="#/knowledge">← Back to knowledge files</a>${errorView(error.message)}`;
+      return;
+    }
   }
 
   view.innerHTML = `

@@ -255,7 +255,7 @@ async function pollAiStatus() {
     pill.hidden = false;
     pill.dataset.state = state.state;
     pill.querySelector('.ai-label').textContent = state.label;
-    pill.querySelector('.ai-detail').textContent = state.state === 'active' ? 'Real-time sync' : state.detail;
+    pill.querySelector('.ai-detail').textContent = state.state === 'active' ? (state.verified ? 'Key verified' : 'Key not verified') : state.detail;
     pill.title = state.detail;
   } catch {
     pill.hidden = true;

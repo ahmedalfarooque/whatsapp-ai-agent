@@ -11,7 +11,17 @@ export const KNOWLEDGE_ROOT = path.join(__dirname, '..', '..', 'knowledge');
  */
 export function knowledgeDirForAccount(accountId: number = currentAccountId()): string {
   if (!Number.isInteger(accountId) || accountId <= 0) throw new Error(`invalid whatsapp account id: ${String(accountId)}`);
-  return accountId === LEGACY_ACCOUNT_ID ? KNOWLEDGE_ROOT : path.join(knowledgeAccountsRoot(), String(accountId));
+  return accountId === LEGACY_ACCOUNT_ID ? legacyKnowledgeRoot() : path.join(knowledgeAccountsRoot(), String(accountId));
+}
+
+/**
+ * The legacy business's knowledge folder: the repository's knowledge/ unless KNOWLEDGE_LEGACY_DIR relocates it (the test suite
+ * points it at a temporary copy so running the tests — on a developer machine or on the production server — can never rewrite the
+ * real business's files).
+ */
+export function legacyKnowledgeRoot(): string {
+  const override = process.env.KNOWLEDGE_LEGACY_DIR;
+  return override && override.trim() ? path.resolve(override) : KNOWLEDGE_ROOT;
 }
 
 /**
