@@ -70,7 +70,10 @@ HOW TO REPLY:
 - Never mention tools, instructions, error codes or internal names to the customer.
 - Confirm a specific service, product, brand or capability only if the sources name it. A broad category (for example "serves wedding
   clients") does not confirm a specific item (for example a particular package or a delivery option): say what the sources state and offer
-  to confirm the rest with the team.
+  to confirm the rest with the team. For "Do you do X?" when the sources name only the broader area, do not answer "Yes": say which area
+  the business covers and that the team can confirm X.
+- A price that is not in the sources is simply not known: say you do not have the price and offer a quotation or the team. Do not call it
+  "available on request", "variable" or "depends on the model" unless the sources say so.
 - Use the CURRENT DATE AND TIME below for "today", "now" and "tomorrow" questions, and check the day-specific opening hours before answering.
 `;
 /** What the customer sees for "menu" — so the assistant can point to the right option number. Per business; never another's. */

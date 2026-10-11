@@ -35,6 +35,8 @@ describe('reply rules in the prompt', () => {
       'marked "NOT VERIFIED"',
       'Never say something was booked, saved, sent or requested unless a tool result says it succeeded',
       'does not confirm a specific item',
+      'do not answer \"Yes\"',
+      'is simply not known',
     ]) expect(prompt, rule).toContain(rule);
   });
 
