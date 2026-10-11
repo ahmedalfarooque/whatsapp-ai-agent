@@ -2,6 +2,7 @@ import { listKnowledgeFiles, writeKnowledgeFile } from '../dashboard/knowledgeAd
 import { generateDraftContent } from './generator';
 import { knowledgeBlocks, wrapBlock } from './applyDraft';
 import type { SetupSources } from './sources';
+import { PLACEHOLDER_MARKER } from '../knowledge/quality';
 
 /**
  * Creates the knowledge files an account is MISSING (or that exist but are empty) from the business information that account has
@@ -23,7 +24,7 @@ import type { SetupSources } from './sources';
 export const REPAIRABLE_KNOWLEDGE_FILES = ['business.md', 'services.md', 'faq.md', 'policies.md', 'ai-knowledge.md'] as const;
 
 /** Marks a file that only states that nothing was provided yet; the dashboard shows it as a placeholder. */
-export const KNOWLEDGE_PLACEHOLDER_MARKER = '<!-- knowledge:placeholder -->';
+export const KNOWLEDGE_PLACEHOLDER_MARKER = PLACEHOLDER_MARKER;
 
 export interface KnowledgeRepairReport {
   accountId: number;

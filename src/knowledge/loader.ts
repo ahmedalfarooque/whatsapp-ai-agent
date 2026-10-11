@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { logger } from '../logger';
+import { classifyKnowledgeText, renderKnowledgeForPrompt } from './quality';
 
 export interface KnowledgeBase {
   /** Raw markdown/JSON text keyed by file name, concatenated into the system prompt. */
@@ -20,13 +21,15 @@ function renderFile(fileName: string, raw: string): string {
   if (fileName.endsWith('.json')) {
     try {
       const parsed = JSON.parse(raw);
-      return `### ${fileName}\n\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
+      const verdict = classifyKnowledgeText(fileName, raw);
+      const warning = verdict.quality === 'verified' ? '' : `[NOT VERIFIED — ${verdict.reason}. Nothing in this section is a confirmed fact about this business: never state it to a customer.]\n`;
+      return `### ${fileName}\n${warning}\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
     } catch (error) {
       logger.error({ fileName, error }, 'failed to parse JSON knowledge file, skipping');
       return '';
     }
   }
-  return `### ${fileName}\n${raw.trim()}`;
+  return `### ${fileName}\n${renderKnowledgeForPrompt(fileName, raw)}`;
 }
 
 /**

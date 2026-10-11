@@ -9,7 +9,8 @@ export type AiResponseReason =
   | 'rate_limited' // HTTP 429 / 408
   | 'model_unavailable' // HTTP 400-404: this model/endpoint cannot serve the request (e.g. privacy or data-policy restrictions)
   | 'provider_error' // HTTP 5xx or another failure
-  | 'tool_rounds_exhausted'; // the model kept calling tools and never answered
+  | 'tool_rounds_exhausted' // the model kept calling tools and never answered
+  | 'time_budget_exceeded'; // the whole AI loop for one message ran out of time
 
 export class AiResponseError extends Error {
   constructor(

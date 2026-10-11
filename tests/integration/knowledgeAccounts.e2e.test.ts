@@ -52,10 +52,10 @@ describe('account knowledge: storage, status, retrieval and repair', () => {
     expect(createAccount({ name: 'Charlie Realty' }).id).toBe(3);
     // Account 1 and 3 have full hand-written knowledge; account 2 starts with none (the JOTUN situation).
     for (const id of [1, 3] as const) {
-      write(id, 'business.md', `# ${MARK[id]}\nBusiness ${id}\n`);
-      write(id, 'services.md', `# Services\n- ${MARK[id]} service\n`);
-      write(id, 'policies.md', `# Policies\n${MARK[id]} policy\n`);
-      write(id, 'faq.md', `# FAQ\n${MARK[id]} faq\n`);
+      write(id, 'business.md', `# ${MARK[id]}\nBusiness ${id} is a company that serves customers across the city every day.\n`);
+      write(id, 'services.md', `# Services\n- ${MARK[id]} service offered to all customers by appointment\n`);
+      write(id, 'policies.md', `# Policies\n${MARK[id]} policy applies to every customer without any exception\n`);
+      write(id, 'faq.md', `# FAQ\n${MARK[id]} faq answers the most common customer questions here\n`);
     }
   });
 

@@ -49,19 +49,19 @@ describe('agent loop tool permissions', () => {
   });
 
   it('being offered the search tool does NOT unlock the calendar tools (they are refused and never run)', async () => {
-    const result = await toolResultFor(JOTUN, 'book_appointment', { service: 'x', startISO: '2030-01-01T10:00:00Z' });
-    expect(result).toEqual({ error: 'unknown tool: book_appointment' });
+    const result = await toolResultFor(JOTUN, 'book_appointment', { startISO: '2030-01-01T10:00:00Z', durationMinutes: 30, serviceType: 'x', customerName: 'N' });
+    expect(result).toMatchObject({ error: 'unknown_tool' });
     expect(bookAppointmentHandler).not.toHaveBeenCalled();
-    expect(await toolResultFor(JOTUN, 'check_availability', { date: '2030-01-01' })).toEqual({ error: 'unknown tool: check_availability' });
+    expect(await toolResultFor(JOTUN, 'check_availability', { date: '2030-01-01' })).toMatchObject({ error: 'unknown_tool' });
   });
 
   it('a business without the library cannot call the catalogue search either', async () => {
-    expect(await toolResultFor(PLAIN, 'search_catalogues', { query: 'Soul' })).toEqual({ error: 'unknown tool: search_catalogues' });
+    expect(await toolResultFor(PLAIN, 'search_catalogues', { query: 'Soul' })).toMatchObject({ error: 'unknown_tool' });
   });
 
   it('the original business keeps its calendar tools and cannot call the catalogue search', async () => {
-    expect(await toolResultFor(1, 'search_catalogues', { query: 'Soul' })).toEqual({ error: 'unknown tool: search_catalogues' });
-    const booked = await toolResultFor(1, 'book_appointment', { service: 'x' });
+    expect(await toolResultFor(1, 'search_catalogues', { query: 'Soul' })).toMatchObject({ error: 'unknown_tool' });
+    const booked = await toolResultFor(1, 'book_appointment', { startISO: '2030-01-01T10:00:00Z', durationMinutes: 30, serviceType: 'x', customerName: 'N' });
     expect(booked).toEqual({ success: true });
     expect(bookAppointmentHandler).toHaveBeenCalledTimes(1);
   });
@@ -92,8 +92,8 @@ describe('agent loop tool permissions', () => {
         expect(result.results[0]!.url).toBe('https://www.jotun.com/sa-en/decorative');
       }
       // The plain business is offered web search only: the catalogue search and the calendar stay refused.
-      expect(await toolResultFor(PLAIN, 'search_catalogues', { query: 'x' })).toEqual({ error: 'unknown tool: search_catalogues' });
-      expect(await toolResultFor(PLAIN, 'book_appointment', { service: 'x' })).toEqual({ error: 'unknown tool: book_appointment' });
+      expect(await toolResultFor(PLAIN, 'search_catalogues', { query: 'x' })).toMatchObject({ error: 'unknown_tool' });
+      expect(await toolResultFor(PLAIN, 'book_appointment', { service: 'x' })).toMatchObject({ error: 'unknown_tool' });
     } finally {
       setWebSearchProvider(null);
       setLinkFetcher(null);
@@ -104,7 +104,7 @@ describe('agent loop tool permissions', () => {
     const { env } = await import('../../../src/config/env');
     (env as { WEB_SEARCH_ENABLED: boolean }).WEB_SEARCH_ENABLED = false;
     try {
-      expect(await toolResultFor(PLAIN, 'web_search', { query: 'x' })).toEqual({ error: 'unknown tool: web_search' });
+      expect(await toolResultFor(PLAIN, 'web_search', { query: 'x' })).toMatchObject({ error: 'unknown_tool' });
     } finally {
       (env as { WEB_SEARCH_ENABLED: boolean }).WEB_SEARCH_ENABLED = true;
     }

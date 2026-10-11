@@ -94,6 +94,8 @@ const envSchema = z
     CONVERSATION_HISTORY_LIMIT: z.coerce.number().int().positive().default(20),
     MAX_TOOL_ROUNDS: z.coerce.number().int().positive().default(4),
     OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    /** Total time one customer message may spend in the AI loop (all provider calls, retries and tool rounds included). */
+    AI_LOOP_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
     WHATSAPP_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     GOOGLE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
 

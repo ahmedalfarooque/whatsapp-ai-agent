@@ -3,6 +3,7 @@ import path from 'node:path';
 import { logger } from '../logger';
 import { currentAccountId } from '../accounts/accountContext';
 import { knowledgeDirForAccount as resolveKnowledgeDir } from '../knowledge/paths';
+import { classifyKnowledgeText } from '../knowledge/quality';
 
 export { KNOWLEDGE_ROOT } from '../knowledge/paths';
 
@@ -50,8 +51,6 @@ function backupDir(accountId: number): string {
  */
 export type KnowledgeFileState = 'available' | 'missing' | 'empty' | 'invalid';
 
-/** A file that only says "nothing was provided yet" carries this marker (see setup/repairKnowledge); it is reported as a placeholder. */
-const PLACEHOLDER_MARKER = '<!-- knowledge:placeholder -->';
 
 /** Files a business may legitimately go without. The four core files describe the business itself; these two only add to them. */
 const OPTIONAL_KNOWLEDGE_FILES: Record<string, string> = {
@@ -70,8 +69,10 @@ export interface KnowledgeFileInfo {
   /** True for files a business can go without; "missing" is then informational rather than a defect. */
   optional: boolean;
   note: string | null;
-  /** True when the file exists but only states that no information was provided yet; it still needs real content. */
+  /** True when the file exists but holds only a placeholder, example text or almost nothing: it is not verified business knowledge. */
   placeholder: boolean;
+  /** Why the file counts as a placeholder (shown on the Knowledge page), else null. */
+  placeholderReason: string | null;
 }
 
 export function listKnowledgeFiles(accountId: number = currentAccountId()): KnowledgeFileInfo[] {
@@ -85,9 +86,9 @@ export function listKnowledgeFiles(accountId: number = currentAccountId()): Know
       stat = fs.statSync(filePath);
       if (!stat.isFile()) throw new Error('not a file');
     } catch {
-      return { name, exists: false, sizeBytes: null, modifiedAt: null, state: 'missing' as const, problem: null, optional, note, placeholder: false };
+      return { name, exists: false, sizeBytes: null, modifiedAt: null, state: 'missing' as const, problem: null, optional, note, placeholder: false, placeholderReason: null };
     }
-    const base = { name, exists: true, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString(), optional, note, placeholder: false };
+    const base = { name, exists: true, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString(), optional, note, placeholder: false, placeholderReason: null as string | null };
     let text: string;
     try {
       text = fs.readFileSync(filePath, 'utf-8');
@@ -102,7 +103,8 @@ export function listKnowledgeFiles(accountId: number = currentAccountId()): Know
         return { ...base, state: 'invalid' as const, problem: 'The file is not valid JSON, so the assistant ignores it. Open it and fix the syntax.' };
       }
     }
-    return { ...base, state: 'available' as const, problem: null, placeholder: text.includes(PLACEHOLDER_MARKER) };
+    const verdict = classifyKnowledgeText(name, text);
+    return { ...base, state: 'available' as const, problem: null, placeholder: verdict.quality !== 'verified', placeholderReason: verdict.reason };
   });
 }
 

@@ -720,7 +720,7 @@ function knowledgeBadge(f) {
 }
 
 function knowledgeHint(f) {
-  const text = f.problem || (f.placeholder ? 'Says that nothing was provided yet. Edit it to add the real information.' : null) || (f.state === 'missing' ? f.note : null);
+  const text = f.problem || (f.placeholder ? ('Not verified: ' + (f.placeholderReason || 'placeholder content') + '. Edit it to add the real information; the assistant treats it as unknown.') : null) || (f.state === 'missing' ? f.note : null);
   return text ? `<div class="muted small">${esc(text)}</div>` : '';
 }
 
