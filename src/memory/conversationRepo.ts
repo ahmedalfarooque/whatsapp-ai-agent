@@ -99,22 +99,28 @@ export function appendMessage(
     .get(result.lastInsertRowid) as ConversationMessage;
 }
 
+/**
+ * The latest messages of a conversation, oldest first. limit bounds the size; sinceHours (optional) bounds the age, so an old
+ * exchange is not replayed to the model as if it had just happened. Nothing is deleted: only what is returned is limited.
+ */
 export function getRecentMessages(
   conversationId: number,
   limit: number,
   db: Database.Database = getDb(),
+  sinceHours?: number,
 ): ChatMessageForLlm[] {
+  const recent = sinceHours !== undefined;
   const rows = db
     .prepare(
       `SELECT * FROM (
          SELECT * FROM conversation_messages
-         WHERE conversation_id = ?
+         WHERE conversation_id = ?${recent ? " AND created_at >= datetime('now', ?)" : ''}
          ORDER BY id DESC
          LIMIT ?
        ) sub
        ORDER BY sub.id ASC`,
     )
-    .all(conversationId, limit) as ConversationMessage[];
+    .all(...(recent ? [conversationId, `-${Math.max(1, Math.floor(sinceHours))} hours`, limit] : [conversationId, limit])) as ConversationMessage[];
 
   return rows.map((row) => ({
     role: row.role,

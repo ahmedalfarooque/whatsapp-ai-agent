@@ -12,6 +12,7 @@ import { processInboundMessage, resetCredentialFallbackThrottle } from '../../sr
 import { getOrCreateCustomer, setCustomerLanguage } from '../../src/memory/customerRepo';
 import { loadKnowledgeBase } from '../../src/knowledge/loader';
 import { getDb } from '../../src/memory/db';
+import { appendMessage, getOrCreateActiveConversation } from '../../src/memory/conversationRepo';
 import { env } from '../../src/config/env';
 import { logger } from '../../src/logger';
 
@@ -163,5 +164,26 @@ describe('what reaches the logs', () => {
     expect(everything).not.toMatch(/sk-or-/);
     expect(everything).not.toContain('ZZ-PRIVATE-QUESTION-7781');
     expect(everything).not.toMatch(/BUSINESS KNOWLEDGE|SCOPE AND HONESTY RULES/); // no prompt text
+  });
+});
+
+describe('a conversation that already contained a tool round', () => {
+  it('still gets an answer: the stored tool rows are not replayed to the provider (they made every later message fail with HTTP 400)', async () => {
+    const waId = '15553339999';
+    const customer = getOrCreateCustomer(waId, 'Alice');
+    setCustomerLanguage(customer.id, 'en');
+    const conversation = getOrCreateActiveConversation(customer.id);
+    appendMessage(conversation.id, { role: 'user', content: 'Do you have a warm neutral colour?' });
+    appendMessage(conversation.id, { role: 'assistant', content: '[requested tools: search_catalogues]' });
+    appendMessage(conversation.id, { role: 'tool', content: '{"results":[]}', toolCallId: 'call_abc', toolName: 'search_catalogues' });
+    appendMessage(conversation.id, { role: 'assistant', content: 'Soft Dunes (12313) is a warm neutral.' });
+    const fetchMock = provider((): Response => answer('A darker one is Cocoa Haze.'));
+    vi.mocked(sendTextMessage).mockClear();
+    await processInboundMessage({ waId, messageId: 'wamid.history1', timestamp: Date.now(), type: 'text', text: 'and is there a darker one?', contactName: 'Alice' } as never, { knowledge });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as { messages: Array<{ role: string; content: string; tool_call_id?: string }> };
+    expect(body.messages.map((m) => m.role)).not.toContain('tool');
+    expect(body.messages.some((m) => String(m.content).startsWith('[requested tools'))).toBe(false);
+    expect(body.messages.some((m) => m.content === 'Soft Dunes (12313) is a warm neutral.')).toBe(true);
+    expect(vi.mocked(sendTextMessage).mock.calls.map((c) => c[1])).toEqual(['A darker one is Cocoa Haze.']);
   });
 });

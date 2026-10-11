@@ -92,6 +92,8 @@ const envSchema = z
 
     RESTART_KEYWORDS: z.string().default('restart,reset,start over'),
     CONVERSATION_HISTORY_LIMIT: z.coerce.number().int().positive().default(20),
+    /** Only messages newer than this many hours are sent to the model as context (the stored conversation itself is kept). */
+    CONVERSATION_MEMORY_HOURS: z.coerce.number().int().positive().default(72),
     MAX_TOOL_ROUNDS: z.coerce.number().int().positive().default(4),
     OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
     /** Total time one customer message may spend in the AI loop (all provider calls, retries and tool rounds included). */

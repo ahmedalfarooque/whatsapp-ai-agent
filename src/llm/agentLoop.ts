@@ -20,13 +20,16 @@ export interface AgentLoopResult {
   generatedMessages: GeneratedMessage[];
 }
 
-function historyToChatMessages(history: ChatMessageForLlm[]): ChatMessage[] {
-  return history.map((h) => ({
-    role: h.role,
-    content: h.content,
-    tool_call_id: h.tool_call_id,
-    name: h.tool_name,
-  }));
+/**
+ * Stored history becomes plain user / assistant turns. A past tool round is bookkeeping, not conversation: it is stored as an assistant
+ * marker ("[requested tools: …]") plus role "tool" rows, but the structured tool_calls that those rows must answer are not stored, and the
+ * provider rejects a "tool" message without them (HTTP 400 on every later message of that conversation). The assistant's own final
+ * answer after the tool round is kept, so the context the customer saw is preserved.
+ */
+export function historyToChatMessages(history: ChatMessageForLlm[]): ChatMessage[] {
+  return history
+    .filter((h) => h.role !== 'tool' && !(h.role === 'assistant' && h.content.startsWith('[requested tools:')))
+    .map((h) => ({ role: h.role, content: h.content }));
 }
 
 /** Parses the model's argument string. `null` means it was not valid JSON: that is reported to the model, never silently turned into {}. */

@@ -31,6 +31,7 @@ import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
 import { AiCredentialError } from '../llm/aiCredentialError';
 import { AiResponseError } from '../llm/aiResponseError';
+import { env } from '../config/env';
 import { MENU_IDS, detectLanguageFromScript, isHardRestart, isMenuKeyword, isSubstantiveFreeText } from '../automation/menu';
 import { MENU_STATES, DATA_DRIVEN_FALLBACKS, routeMenu, type RouteResult } from '../automation/menuRouter';
 import { renderCustomerOffers } from '../offers/offerRepo';
@@ -256,7 +257,9 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
     return;
   }
 
-  const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit);
+  // The model's memory of this customer in this business: this conversation only, the latest N messages, and nothing older than
+  // CONVERSATION_MEMORY_HOURS (docs/AI_ASSISTANT.md). The stored conversation is untouched.
+  const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS);
   const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined);
 
   let finalText = '';

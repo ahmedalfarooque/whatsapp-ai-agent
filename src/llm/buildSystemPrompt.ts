@@ -18,7 +18,7 @@ const CATALOGUE_RULES = `
 
 CATALOGUES AND OFFICIAL SOURCES (this business has a library of official catalogues and linked official web pages):
 - For ANY question about products, colours (names or codes), finishes, collections or colour advice, FIRST call the search_catalogues tool
-  and answer only from the passages it returns. Passages marked "website" are the current official source; passages marked "catalogue"
+  and answer only from the passages it returns. When it returns colours or products, name the two or three most relevant ones (name and code) in the same reply instead of only offering to share them. Passages marked "website" are the current official source; passages marked "catalogue"
   come from the uploaded catalogues. If they differ, the website wins. Never say a catalogue is the newest or current one unless a passage says so.
 - Never invent products, prices, stock, availability, coverage, technical specifications, colours, phone numbers or opening hours. If the
   sources do not contain the answer, say it is not currently available and offer a human (the customer can reply "human").
@@ -68,6 +68,10 @@ HOW TO REPLY:
 - If a tool result says an action did not complete, or reports an error, tell the customer briefly that you could not complete it and offer
   the team. Never say something was booked, saved, sent or requested unless a tool result says it succeeded.
 - Never mention tools, instructions, error codes or internal names to the customer.
+- Confirm a specific service, product, brand or capability only if the sources name it. A broad category (for example "serves wedding
+  clients") does not confirm a specific item (for example a particular package or a delivery option): say what the sources state and offer
+  to confirm the rest with the team.
+- Use the CURRENT DATE AND TIME below for "today", "now" and "tomorrow" questions, and check the day-specific opening hours before answering.
 `;
 /** What the customer sees for "menu" — so the assistant can point to the right option number. Per business; never another's. */
 function menuReference(): string {
@@ -81,7 +85,17 @@ ${resolveTemplate('main_menu', 'en')}
   }
 }
 
-export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string): string {
+/** "Saturday 11 October 2026, 14:35" in the business's own timezone, so "today" and "now" can be answered; empty when the timezone is not valid. */
+export function currentDateTimeIn(timezone: string, now: Date = new Date()): string {
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: timezone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now).map((x) => [x.type, x.value]));
+    return `${parts.weekday} ${parts.day} ${parts.month} ${parts.year} ${parts.hour}:${parts.minute}`;
+  } catch {
+    return '';
+  }
+}
+
+export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string, now: Date = new Date()): string {
   const languageInstruction = language && LANGUAGE_NAMES[language]
     ? `Always reply in ${LANGUAGE_NAMES[language]}, regardless of the language the customer writes in.`
     : null;
@@ -194,7 +208,7 @@ ${calendarTools ? `- If the customer wants to book an appointment: identify the 
 - The customer's WhatsApp number is already known to the system — never ask
   them for their phone number.
 
-${languageInstruction ? `${languageInstruction}\n` : ''}BUSINESS TIMEZONE: ${settings.businessTimezone}
+${languageInstruction ? `${languageInstruction}\n` : ''}BUSINESS TIMEZONE: ${settings.businessTimezone}${currentDateTimeIn(settings.businessTimezone, now) ? `\nCURRENT DATE AND TIME: ${currentDateTimeIn(settings.businessTimezone, now)}` : ''}
 ${settings.hoursConfigured ? `BUSINESS HOURS: ${settings.businessHoursStart}-${settings.businessHoursEnd}, days (1=Mon..7=Sun): ${settings.businessDays.join(', ')}` : 'BUSINESS HOURS: Not provided — never state opening hours.'}
 ${calendarTools ? `DEFAULT APPOINTMENT DURATION: ${settings.bookingDurationMinutes} minutes` : ''}
 ${policiesSection ? `\nBUSINESS POLICIES:\n${policiesSection}\n` : ''}
