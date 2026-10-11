@@ -713,14 +713,14 @@ route('#/knowledge', 'Knowledge', 'The exact files the AI reads business facts f
 
 // The status shown here is the file's real state on the server: a file that exists but is empty or malformed is NOT "Available".
 function knowledgeBadge(f) {
-  if (f.state === 'available') return badge('Available', 'green');
+  if (f.state === 'available') return f.placeholder ? badge('Placeholder', 'amber') : badge('Available', 'green');
   if (f.state === 'missing') return f.optional ? badge('Not created', 'muted') : badge('Missing', 'red');
   if (f.state === 'empty') return badge('Empty', 'amber');
   return badge('Invalid', 'red');
 }
 
 function knowledgeHint(f) {
-  const text = f.problem || (f.state === 'missing' ? f.note : null);
+  const text = f.problem || (f.placeholder ? 'Says that nothing was provided yet. Edit it to add the real information.' : null) || (f.state === 'missing' ? f.note : null);
   return text ? `<div class="muted small">${esc(text)}</div>` : '';
 }
 

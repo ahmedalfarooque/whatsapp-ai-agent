@@ -30,7 +30,7 @@ async function main(): Promise<void> {
     }
     const report = await repairMissingKnowledge(id, { dryRun: !apply });
     out(`account ${id} (${account.name}) — ${apply ? 'APPLIED' : 'dry run'}`);
-    out(`  ${apply ? 'created' : 'would create'}: ${report.created.map((c) => `${c.file} (${c.bytes} B)`).join(', ') || 'nothing'}`);
+    out(`  ${apply ? 'created' : 'would create'}: ${report.created.map((c) => `${c.file} (${c.bytes} B${c.placeholder ? ', placeholder: nothing provided yet' : ''})`).join(', ') || 'nothing'}`);
     out(`  kept (already has content): ${report.keptExisting.join(', ') || 'none'}`);
     out(`  not derivable from stored data: ${report.notDerivable.join(', ') || 'none'}`);
     if (!apply) for (const [file, text] of Object.entries(report.preview)) out(`\n----- ${file} -----\n${text}`);

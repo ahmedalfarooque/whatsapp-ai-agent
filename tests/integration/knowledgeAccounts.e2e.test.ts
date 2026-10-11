@@ -214,7 +214,19 @@ describe('account knowledge: storage, status, retrieval and repair', () => {
 
     it('creates the missing files from this account\'s own profile, documents and links, with unknown facts marked Not provided', async () => {
       const report = await repairMissingKnowledge(bravo);
-      expect(report.created.map((c) => c.file)).toEqual(expect.arrayContaining(['business.md', 'services.md', 'faq.md', 'policies.md']));
+      expect(report.created.map((c) => c.file)).toEqual(['business.md', 'services.md', 'faq.md', 'policies.md', 'ai-knowledge.md']);
+      expect(Object.fromEntries(report.created.map((c) => [c.file, c.placeholder]))).toEqual({ 'business.md': false, 'services.md': false, 'faq.md': false, 'policies.md': true, 'ai-knowledge.md': false });
+      // policies: no policy is stored, so the file says so — it never carries the platform's own process wording as if it were a policy
+      const policies = fs.readFileSync(path.join(dirOf(bravo), 'policies.md'), 'utf-8');
+      expect(policies).toContain('No policies');
+      expect(policies).not.toMatch(/Appointment requests are sent|Talk to our team|currently closed/);
+      expect(listKnowledgeFiles(bravo).find((f) => f.name === 'policies.md')).toMatchObject({ state: 'available', placeholder: true });
+      expect(listKnowledgeFiles(bravo).find((f) => f.name === 'business.md')).toMatchObject({ state: 'available', placeholder: false });
+      expect(Object.fromEntries(getKnowledgeStatus(bravo).map((s) => [s.name, s.status]))).toMatchObject({ 'policies.md': 'Placeholder', 'business.md': 'Available' });
+      // the sources inventory names this account's own documents and pages only
+      const sourcesFile = fs.readFileSync(path.join(dirOf(bravo), 'ai-knowledge.md'), 'utf-8');
+      expect(sourcesFile).toContain('bravo-prices.txt');
+      expect(sourcesFile).not.toContain('charlie.txt');
       const business = fs.readFileSync(path.join(dirOf(bravo), 'business.md'), 'utf-8');
       expect(business).toContain('12 Colour Street, Jeddah');
       expect(business).toContain('https://maps.app.goo.gl/bravo123');
@@ -230,7 +242,23 @@ describe('account knowledge: storage, status, retrieval and repair', () => {
         expect(text, file).not.toContain('SECRET');
       }
       // the generated files are valid and now reported as available
-      expect(listKnowledgeFiles(bravo).filter((f) => f.state === 'available').map((f) => f.name)).toEqual(expect.arrayContaining(['business.md', 'services.md', 'faq.md', 'policies.md']));
+      expect(listKnowledgeFiles(bravo).filter((f) => f.state === 'available').map((f) => f.name)).toEqual(['business.md', 'services.md', 'policies.md', 'faq.md', 'ai-knowledge.md']);
+    });
+
+    it('a business with only a profile gets its facts plus explicit "nothing provided" placeholders — no invented content', async () => {
+      const profileOnly = createAccount({ name: 'Profile Only Co' }).id;
+      updateBusinessSettings({ addressEn: '9 Quiet Road, Riyadh', contactPhone: '+966 55 000 0000' }, profileOnly);
+      const report = await repairMissingKnowledge(profileOnly);
+      expect(Object.fromEntries(report.created.map((c) => [c.file, c.placeholder]))).toEqual({ 'business.md': false, 'services.md': true, 'faq.md': true, 'policies.md': true });
+      expect(report.notDerivable).toEqual(['ai-knowledge.md']);
+      expect(fs.readFileSync(path.join(dirOf(profileOnly), 'business.md'), 'utf-8')).toContain('9 Quiet Road, Riyadh');
+      for (const file of ['services.md', 'faq.md', 'policies.md']) {
+        const text = fs.readFileSync(path.join(dirOf(profileOnly), file), 'utf-8');
+        expect(text).toContain('knowledge:placeholder');
+        expect(text).not.toMatch(/\d+\s?(SAR|ريال)/); // no prices
+      }
+      // a later "Analyze & Generate" (merge) may replace an untouched placeholder, because it is a generated block
+      expect(fs.readFileSync(path.join(dirOf(profileOnly), 'services.md'), 'utf-8')).toMatch(/<!-- setup:begin v1 hash=[0-9a-f]{10} -->/);
     });
 
     it('is idempotent and never overwrites a file that already holds text', async () => {
@@ -254,10 +282,12 @@ describe('account knowledge: storage, status, retrieval and repair', () => {
       expect(report.created).toEqual([]);
       expect(report.notDerivable).toEqual(expect.arrayContaining(['business.md']));
       expect(fs.existsSync(dirOf(blank)) ? fs.readdirSync(dirOf(blank)).filter((f) => !f.startsWith('.')) : []).toEqual([]);
-      // fully written businesses are untouched by repairing another account
+      // repairing a business never edits a file it already has (it may only add a missing one) and never touches another account
       await repairMissingKnowledge(3);
       await repairMissingKnowledge(1);
-      expect({ 1: snapshot(1), 3: snapshot(3) }).toEqual(before);
+      const after = { 1: snapshot(1), 3: snapshot(3) };
+      for (const id of [1, 3] as const) before[id].forEach((text, i) => { if (text !== null) expect(after[id][i], `account ${id} ${FILES[i]}`).toBe(text); });
+      expect(after[1]).toEqual(before[1]); // account 1 has nothing stored that could fill its missing files
     });
   });
 

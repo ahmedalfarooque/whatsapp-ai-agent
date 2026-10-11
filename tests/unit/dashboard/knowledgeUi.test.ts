@@ -15,7 +15,7 @@ describe('knowledge page and AI pill tell the truth', () => {
 
   it('the file status comes from the server state, never from mere existence', () => {
     expect(app).toContain('function knowledgeBadge(f)');
-    for (const label of ["'Available'", "'Missing'", "'Not created'", "'Empty'", "'Invalid'"]) expect(app).toContain(label);
+    for (const label of ["'Available'", "'Missing'", "'Not created'", "'Empty'", "'Invalid'", "'Placeholder'"]) expect(app).toContain(label);
     expect(app).not.toMatch(/f\.exists \? badge\('Available'/);
   });
 

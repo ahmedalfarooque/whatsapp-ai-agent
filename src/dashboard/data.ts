@@ -70,7 +70,7 @@ export function getServiceStatuses(): ServiceStatus[] {
 export function getKnowledgeStatus(accountId: number = currentAccountId()): Array<{ name: string; status: string }> {
   return listKnowledgeFiles(accountId).map((f) => ({
     name: f.name,
-    status: f.state === 'available' ? 'Available' : f.state === 'missing' ? (f.optional ? 'Not created' : 'Missing') : f.state === 'empty' ? 'Empty' : 'Invalid',
+    status: f.state === 'available' ? (f.placeholder ? 'Placeholder' : 'Available') : f.state === 'missing' ? (f.optional ? 'Not created' : 'Missing') : f.state === 'empty' ? 'Empty' : 'Invalid',
   }));
 }
 
