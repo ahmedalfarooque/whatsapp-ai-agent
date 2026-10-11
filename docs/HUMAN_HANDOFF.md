@@ -1,4 +1,4 @@
-# Human handoff and staff takeover
+# Human handoff, staff takeover and the unified inbox
 
 A customer can ask for a real person, and an authorised staff member can take the conversation over from the dashboard. While a
 person owns the conversation the assistant stays silent for that customer. This is enforced on the server in the message pipeline,
@@ -75,6 +75,31 @@ It sends through the existing connection of that account (the linked-device QR s
 `clientMessageId` twice is one message. A message is stored in the conversation, and reported `sent`, only after the connection accepted
 it. A failure is `failed` (502/503) and may be retried with the same id; a send whose outcome is unknown is never sent a second time.
 
+## Unified inbox (Conversations)
+
+**Dashboard → Conversations** is the one place for every conversation of the selected WhatsApp account, whoever is handling it (the
+assistant, waiting for staff, a staff member, resolved). It reads the existing `customers`, `conversations`, `conversation_messages` and
+`human_handoffs` tables (no new table, no migration); every action is the existing handoff action above.
+
+- **List** (`GET /api/dashboard/inbox`): one row per customer with name, masked number, latest message preview (who sent it: customer,
+  AI, automatic reply or staff), time, handling state, handler, and "Awaiting reply". Newest activity first; "Waiting for staff first"
+  and the Waiting chip (with a count) make customers waiting for a person easy to find. Search (name or number, Arabic digits
+  accepted), filters (all / waiting / with staff / AI active / resolved / awaiting reply), assignee (me / unassigned) and paging
+  (25 per page, 100 maximum) are all done by the server in two queries, scoped to the selected account.
+- **Conversation** (`GET /api/dashboard/inbox/customers/:id`): the customer's messages across their conversations, newest 50 with
+  "Load earlier messages", each labelled Customer / AI assistant / Automatic reply / Staff — name; media shown as its kind plus
+  caption. Staff reply, accept, resolve, return to AI and take over are the handoff buttons, with the same ownership and permission
+  rules. A staff reply shows **Sent** (accepted by the WhatsApp connection) — WhatsApp delivered/read receipts are not stored, so none
+  is shown, and the page says so. The model has no per-user read marker, so there is no unread counter: "Awaiting reply" means the
+  customer's message is the latest in the thread.
+- **Refresh**: the page asks `GET /api/dashboard/inbox/pulse` (one tiny query) every 6 seconds and reloads the list and the open
+  conversation (only messages newer than the last one it has, merged without duplicates) only when something changed. Hidden tabs make
+  no requests; after a failure it backs off (12 s, 24 s … 60 s), shows "Connection problem — retrying" with a Retry button, and a
+  "Reconnected" note when it recovers. This is polling, not a push channel: updates arrive within a few seconds, not instantly.
+- **Permissions**: needs `conversations` (view). The full customer number is added only for `customers` (view), staff names and the
+  assignee filter only for `support` (view); actions need what the handoff section lists. Another account's customer is "not found",
+  indistinguishable from one that does not exist.
+- Old links keep working: `#/conversations/<conversation id>` and `#/handoffs/<id>` open the customer's conversation.
 ## Compatibility
 
 QR sessions are not touched: no rescan, no re-pairing, no change to Baileys or to the Meta webhook path. Existing accounts keep

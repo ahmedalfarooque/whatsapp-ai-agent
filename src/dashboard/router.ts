@@ -69,6 +69,7 @@ import { resolveDashboardAccount, assertAccountAccess } from './accountMiddlewar
 import { authorizeDashboardRequest } from './authorize';
 import { registerUserRoutes } from './userRoutes';
 import { registerHandoffRoutes } from './handoffRoutes';
+import { registerInboxRoutes } from './inboxRoutes';
 import { HandoffError, returnToAi, getHold, getOpenHandoff, takeOverCustomer, type HandoffActor } from '../handoff/handoffRepo';
 import { buildOverview, getAiState, OVERVIEW_RANGES, type OverviewRange } from './overview';
 import { accountUiStatus } from '../accounts/accountStatus';
@@ -334,6 +335,7 @@ export function createDashboardRouter(): Router {
   });
   registerUserRoutes(router);
   registerHandoffRoutes(router);
+  registerInboxRoutes(router);
 
   // ---- WhatsApp accounts (businesses) ----------------------------------------
   function accountView(account: WhatsappAccount) {

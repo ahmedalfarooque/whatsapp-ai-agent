@@ -68,7 +68,7 @@ function messagesOfLatestConversation(customerId: number) {
   return row ? getConversationMessages(row.id) : [];
 }
 
-function view(handoffId: number, req: Request) {
+export function handoffView(handoffId: number, req: Request) {
   const accountId = currentAccountId();
   const handoff = getHandoff(handoffId, accountId);
   const user = req.authUser as AuthUser;
@@ -106,7 +106,7 @@ export function registerHandoffRoutes(router: Router): void {
   router.get('/api/dashboard/handoffs/:id', (req, res) => {
     try {
       const id = idParam(req);
-      const body = view(id, req);
+      const body = handoffView(id, req);
       // The message history needs the "conversations" permission as well: support access alone does not open a customer's chat.
       const messages = body.you.canSeeConversation
         ? messagesOfLatestConversation(body.handoff.customerId)
@@ -127,7 +127,7 @@ export function registerHandoffRoutes(router: Router): void {
   router.post('/api/dashboard/handoffs/:id/accept', (req, res) => {
     try {
       const { changed } = acceptHandoff(idParam(req), staffActor(req));
-      res.json({ ok: true, changed, ...view(idParam(req), req) });
+      res.json({ ok: true, changed, ...handoffView(idParam(req), req) });
     } catch (error) {
       fail(res, error);
     }
@@ -136,7 +136,7 @@ export function registerHandoffRoutes(router: Router): void {
   router.post('/api/dashboard/handoffs/:id/resolve', (req, res) => {
     try {
       const { changed } = resolveHandoff(idParam(req), staffActor(req));
-      res.json({ ok: true, changed, ...view(idParam(req), req) });
+      res.json({ ok: true, changed, ...handoffView(idParam(req), req) });
     } catch (error) {
       fail(res, error);
     }
@@ -145,7 +145,7 @@ export function registerHandoffRoutes(router: Router): void {
   router.post('/api/dashboard/handoffs/:id/return-to-ai', (req, res) => {
     try {
       const { changed } = returnToAi(idParam(req), staffActor(req));
-      res.json({ ok: true, changed, ...view(idParam(req), req) });
+      res.json({ ok: true, changed, ...handoffView(idParam(req), req) });
     } catch (error) {
       fail(res, error);
     }

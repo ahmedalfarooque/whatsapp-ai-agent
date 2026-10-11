@@ -581,96 +581,10 @@ route(/^#\/customers\/(?<id>\d+)$/, 'Customer', '', async (view, params) => {
 });
 
 // ---------------------------------------------------------------------
-// Conversations (list + status filter + pagination + detail with messages)
+// Conversations (the unified inbox: see pages-inbox.js)
 // ---------------------------------------------------------------------
 
-route('#/conversations', 'Conversations', 'Every stored conversation thread, oldest to newest message.', async (view) => {
-  let state = { status: '', offset: 0, limit: 20 };
-
-  async function draw() {
-    const data = await api(`/api/dashboard/conversations?status=${state.status}&limit=${state.limit}&offset=${state.offset}`);
-    view.innerHTML = `
-      <section class="panel">
-        <div class="toolbar">
-          <select id="status-filter">
-            <option value="">All statuses</option>
-            <option value="active" ${state.status === 'active' ? 'selected' : ''}>Active</option>
-            <option value="ended" ${state.status === 'ended' ? 'selected' : ''}>Ended</option>
-          </select>
-        </div>
-        ${
-          data.items.length
-            ? `<table class="data-table"><thead><tr><th>Customer</th><th>Status</th><th>Messages</th><th>Last activity</th></tr></thead><tbody>${data.items
-                .map(
-                  (c) =>
-                    `<tr class="row-link" data-id="${c.id}"><td>${esc(c.customerLabel || c.waId)}</td><td>${badge(c.status, stateTone(c.status))}</td><td>${c.messageCount}</td><td>${formatDate(c.lastMessageAt || c.started_at)}</td></tr>`,
-                )
-                .join('')}</tbody></table>`
-            : emptyView('No conversations recorded yet.')
-        }
-        <div class="pager"><span class="muted">${data.total} total</span><div><button id="prev" class="btn" ${state.offset === 0 ? 'disabled' : ''}>← Prev</button><button id="next" class="btn" ${state.offset + state.limit >= data.total ? 'disabled' : ''}>Next →</button></div></div>
-      </section>`;
-
-    view.querySelector('#status-filter').addEventListener('change', (e) => {
-      state.status = e.target.value;
-      state.offset = 0;
-      draw();
-    });
-    view.querySelector('#prev')?.addEventListener('click', () => {
-      state.offset = Math.max(0, state.offset - state.limit);
-      draw();
-    });
-    view.querySelector('#next')?.addEventListener('click', () => {
-      state.offset += state.limit;
-      draw();
-    });
-    view.querySelectorAll('.row-link').forEach((row) => {
-      row.addEventListener('click', () => {
-        location.hash = `#/conversations/${row.dataset.id}`;
-      });
-    });
-  }
-
-  await draw();
-});
-
-route(/^#\/conversations\/(?<id>\d+)$/, 'Conversation', '', async (view, params) => {
-  const data = await api(`/api/dashboard/conversations/${params.id}`);
-  const { conversation, messages } = data;
-  view.innerHTML = `
-    <a class="back-link" href="#/conversations">← Back to conversations</a>
-    <section class="panel detail">
-      <h3>${esc(conversation.customerLabel || conversation.waId)} ${badge(conversation.status, stateTone(conversation.status))}</h3>
-      <p class="muted">Started ${formatDate(conversation.started_at)}${conversation.ended_at ? ` · Ended ${formatDate(conversation.ended_at)}` : ''}</p>
-      <div class="handoff-strip">
-        ${data.handoff
-          ? `${handoffBadge(data.handoff.state)} <a class="btn small" href="#/handoffs/${data.handoff.id}">Open handoff</a>`
-          : (can('support', 'edit') ? '<span class="muted">The assistant is answering this customer.</span> <button class="btn small" id="take-over">Take over this conversation</button>' : '')}
-      </div>
-      <div class="transcript">
-        ${
-          messages.length
-            ? messages
-                .map(
-                  (m) =>
-                    `<div class="bubble ${m.role === 'user' ? 'in' : m.role === 'assistant' ? 'out' : 'sys'}"><div class="bubble-role">${esc(m.staff ? 'staff' : m.role)}${m.toolName ? ` · ${esc(m.toolName)}` : ''}</div><div class="bubble-text">${esc(m.content)}</div><div class="bubble-time">${formatDate(m.createdAt)}</div></div>`,
-                )
-                .join('')
-            : emptyView('No messages recorded for this conversation.')
-        }
-      </div>
-    </section>`;
-  view.querySelector('#take-over')?.addEventListener('click', async (event) => {
-    event.currentTarget.disabled = true;
-    try {
-      const result = await api(`/api/dashboard/customers/${conversation.customerId}/take-over`, { method: 'POST' });
-      location.hash = `#/handoffs/${result.handoffId}`;
-    } catch (error) {
-      toast(error.message, 'error');
-      event.currentTarget.disabled = false;
-    }
-  });
-});
+// Conversations: the unified inbox (list, search, filters, workspace) lives in pages-inbox.js; the pure logic in inbox-core.js.
 
 // ---------------------------------------------------------------------
 // Bookings

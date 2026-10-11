@@ -367,7 +367,7 @@ Details, the database audit and the **production rollback strategy** are in
 
 **Human handoff.** A customer who asks for a person (English or Arabic, menu option or free text) is held for staff: the assistant
 stops answering them, staff accept, reply from the dashboard, resolve and return the conversation to the AI. State is stored in the
-database and enforced in the message pipeline; see `docs/HUMAN_HANDOFF.md`. Notification delivery is not part of it.
+database and enforced in the message pipeline. **Conversations** is the unified inbox: one searchable, filterable list of every conversation of the selected account (AI, waiting, with staff, resolved) with the reply workspace; see `docs/HUMAN_HANDOFF.md`. Notification delivery is not part of it.
 
 ## 11b. Rotating DASHBOARD_MASTER_KEY
 

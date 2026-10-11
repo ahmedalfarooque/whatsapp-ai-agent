@@ -78,6 +78,7 @@ const RULES: readonly Rule[] = [
   { test: /^\/(conversations|conversations-recent)(\/|$)/, spec: F('conversations') },
   { test: /^\/customers\/\d+\/(pause|resume|take-over)$/, spec: F('support', 'edit') },
   { test: /^\/handoffs(\/|$)/, spec: F('support') },
+  { test: /^\/inbox(\/|$)/, spec: F('conversations') },
   { test: /^\/customers(\/|$)/, spec: F('customers') },
   { test: /^\/support-queue$/, spec: F('support') },
   { test: /^\/(requests|bookings)(\/|$)/, spec: F('requests') },

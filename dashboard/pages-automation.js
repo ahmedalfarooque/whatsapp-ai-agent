@@ -442,19 +442,19 @@ route('#/support', 'Human Support Queue', 'Customers who asked for a person. Whi
             <td style="max-width:300px">${esc(h.lastMessage || '—')}</td>
             <td>${formatDate(h.requestedAt)}</td>
             <td>
-              ${h.state === 'HUMAN_REQUESTED' && canAct ? `<button class="btn small primary" data-accept="${h.id}">Accept</button> ` : ''}
-              <a class="btn small" href="#/handoffs/${h.id}">Open</a>
+              ${h.state === 'HUMAN_REQUESTED' && canAct ? `<button class="btn small primary" data-accept="${h.id}" data-customer="${h.customerId}">Accept</button> ` : ''}
+              <a class="btn small" href="#/conversations/customer/${h.customerId}">Open</a>
               ${h.state === 'RESOLVED' && canAct ? `<button class="btn small success" data-return="${h.id}">Return to AI</button>` : ''}
             </td></tr>`).join('')}
         </tbody></table>` : emptyView('No one is waiting. When a customer asks for a person (for example “I want to talk to someone” or “موظف”), they appear here and the assistant stops answering them until staff hand the conversation back.')}
-        <p class="muted" style="margin-top:14px">Accept a request to become the person handling it, answer from the conversation page, mark it resolved and then return it to the assistant. Notifications are not part of this screen: check it regularly.</p>
+        <p class="muted" style="margin-top:14px">Accept a request to become the person handling it, reply from the conversation workspace, mark it resolved and then return it to the assistant. Notifications are not part of this screen: check it regularly.</p>
       </section>`;
     view.querySelectorAll('[data-filter]').forEach((btn) => btn.addEventListener('click', () => { state.filter = btn.dataset.filter; draw(); }));
     view.querySelectorAll('[data-accept]').forEach((btn) => btn.addEventListener('click', async () => {
       btn.disabled = true;
       try {
         await api(`/api/dashboard/handoffs/${btn.dataset.accept}/accept`, { method: 'POST' });
-        location.hash = `#/handoffs/${btn.dataset.accept}`;
+        location.hash = `#/conversations/customer/${btn.dataset.customer}`;
       } catch (error) {
         toast(error.message, 'error');
         await draw();
@@ -465,91 +465,6 @@ route('#/support', 'Human Support Queue', 'Customers who asked for a person. Whi
     if (!disposed) timer = setTimeout(() => draw().catch(() => {}), 15000);
   }
   await draw();
-});
-
-route(/^#\/handoffs\/(?<id>\d+)$/, 'Handoff', '', async (view, params) => {
-  let timer = null;
-  let disposed = false;
-  let draftText = '';
-  let sending = false;
-  let pendingId = null; // the id of a send that has not been confirmed yet: pressing Send again retries it, never duplicates it
-  disposeView = () => { disposed = true; clearTimeout(timer); };
-
-  async function load(keepDraft) {
-    const data = await api(`/api/dashboard/handoffs/${params.id}`);
-    if (disposed) return;
-    if (keepDraft) { const box = view.querySelector('#hf-text'); if (box) draftText = box.value; }
-    const h = data.handoff;
-    const you = data.you;
-    const mine = h.state === 'HUMAN_ACTIVE' && (you.owns || you.canOverride);
-    const messages = data.messages;
-    view.innerHTML = `
-      <a class="back-link" href="#/support">← Back to the support queue</a>
-      <section class="panel detail">
-        <div class="panel-head"><div>
-          <h3>${esc((data.customer && data.customer.name) || 'Customer')} ${handoffBadge(h.state)}</h3>
-          <p class="muted">${data.customer ? esc(maskNumber(data.customer.waId)) : ''} · asked ${formatDate(h.requestedAt)}${h.requestCount > 1 ? ` (${h.requestCount} times)` : ''} · ${data.assignedTo ? `handled by ${esc(data.assignedTo.name)}` : 'nobody has taken it yet'}</p>
-        </div>
-        <div class="actions">
-          ${h.state === 'HUMAN_REQUESTED' && you.canAct ? '<button class="btn primary" id="hf-accept">Accept and take over</button>' : ''}
-          ${h.state === 'HUMAN_ACTIVE' && you.canAct && (you.owns || you.canOverride) ? '<button class="btn success" id="hf-resolve">Mark resolved</button>' : ''}
-          ${(h.state === 'RESOLVED' || h.state === 'HUMAN_REQUESTED' || (h.state === 'HUMAN_ACTIVE' && (you.owns || you.canOverride))) && you.canAct ? '<button class="btn" id="hf-return">Return to AI</button>' : ''}
-        </div></div>
-        ${h.state === 'HUMAN_REQUESTED' ? '<p class="muted">The assistant is not answering this customer. Accept the request to reply.</p>' : ''}
-        ${h.state === 'HUMAN_ACTIVE' && !mine ? `<p class="muted">${esc(data.assignedTo ? data.assignedTo.name : 'Another staff member')} is handling this conversation; only they (or a manager) can reply or resolve it.</p>` : ''}
-        ${h.state === 'RESOLVED' ? '<p class="muted">Resolved. The assistant stays silent for this customer until you press “Return to AI”.</p>' : ''}
-        <div class="transcript" id="hf-transcript">
-          ${messages === null ? emptyView('You do not have access to the conversation history.') : messages.length
-            ? messages.map((m) => `<div class="bubble ${m.role === 'user' ? 'in' : 'out'}"><div class="bubble-role">${m.role === 'user' ? 'customer' : m.staff ? 'staff' : 'assistant'}</div><div class="bubble-text">${esc(m.content)}</div><div class="bubble-time">${formatDate(m.createdAt)}</div></div>`).join('')
-            : emptyView('No messages yet.')}
-        </div>
-        ${mine && you.canSeeConversation ? `
-        <form id="hf-form" class="reply-form" autocomplete="off">
-          <textarea id="hf-text" rows="3" maxlength="4000" placeholder="Write your reply to the customer…" aria-label="Reply to the customer">${esc(draftText)}</textarea>
-          <div class="actions"><span class="muted" id="hf-note">Sent through this business's WhatsApp number.</span><button class="btn primary" id="hf-send" type="submit">Send</button></div>
-        </form>` : ''}
-        <h4 style="margin-top:18px">History</h4>
-        <ul class="muted" style="list-style:none;padding:0;margin:6px 0 0">${data.events.map((e) => `<li>${formatDate(e.at)} — ${esc(e.event.replace(/_/g, ' '))} (${esc(e.actor)})${e.detail ? ` · ${esc(e.detail)}` : ''}</li>`).join('')}</ul>
-      </section>`;
-    const box = view.querySelector('#hf-transcript');
-    if (box) box.scrollTop = box.scrollHeight;
-
-    const run = async (path, ok, button) => {
-      button.disabled = true;
-      try { await api(path, { method: 'POST' }); toast(ok, 'success'); } catch (error) { toast(error.message, 'error'); }
-      await load(false);
-    };
-    view.querySelector('#hf-accept')?.addEventListener('click', (e) => run(`/api/dashboard/handoffs/${params.id}/accept`, 'You are now handling this conversation', e.currentTarget));
-    view.querySelector('#hf-resolve')?.addEventListener('click', (e) => run(`/api/dashboard/handoffs/${params.id}/resolve`, 'Marked as resolved', e.currentTarget));
-    view.querySelector('#hf-return')?.addEventListener('click', (e) => run(`/api/dashboard/handoffs/${params.id}/return-to-ai`, 'The conversation is back with the assistant', e.currentTarget));
-    view.querySelector('#hf-form')?.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      if (sending) return;
-      const text = view.querySelector('#hf-text').value.trim();
-      if (!text) { toast('Write a message first', 'error'); return; }
-      sending = true;
-      const sendButton = view.querySelector('#hf-send');
-      sendButton.disabled = true;
-      // The same id is reused until the server confirms, so a double click or a retry after an error can never deliver the message twice.
-      if (!pendingId) pendingId = newClientMessageId();
-      try {
-        await api(`/api/dashboard/handoffs/${params.id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, clientMessageId: pendingId }) });
-        pendingId = null;
-        draftText = '';
-        toast('Message sent', 'success');
-        await load(false);
-      } catch (error) {
-        toast(error.message, 'error'); // the draft stays in the box; pressing Send again retries the same message
-        sending = false;
-        sendButton.disabled = false;
-        return;
-      }
-      sending = false;
-    });
-    clearTimeout(timer);
-    if (!disposed) timer = setTimeout(() => { if (!sending && !(document.activeElement && document.activeElement.id === 'hf-text')) load(true).catch(() => {}); }, 8000);
-  }
-  await load(false);
 });
 
 // ---------------------------------------------------------------------

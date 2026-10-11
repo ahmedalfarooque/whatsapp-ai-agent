@@ -11,7 +11,7 @@ import { specFor } from '../../../src/dashboard/authorize';
  */
 const DIR = path.join(__dirname, '..', '..', '..', 'dashboard');
 const read = (name: string) => fs.readFileSync(path.join(DIR, name), 'utf-8');
-const SCRIPTS = ['theme-init.js', 'shell.js', 'app.js', 'pages-automation.js', 'pages-accounts.js', 'pages-setup.js', 'pages-users.js', 'pages-home.js'];
+const SCRIPTS = ['theme-init.js', 'shell.js', 'app.js', 'pages-automation.js', 'inbox-core.js', 'pages-inbox.js', 'pages-accounts.js', 'pages-setup.js', 'pages-users.js', 'pages-home.js'];
 
 /** The sidebar exactly as it was before the redesign: [group, [route, label]...]. */
 const ORIGINAL_SIDEBAR: Array<[string, Array<[string, string]>]> = [
