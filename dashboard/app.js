@@ -385,16 +385,17 @@ async function renderLogin(view) {
 
   view.innerHTML = `
     <div class="lg">
-      <section class="lg-brand" aria-label="SynrTech Studio AI Workspace">
-        <svg class="lg-waves" viewBox="0 0 600 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-          <defs><linearGradient id="lgw1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#19b8a5" stop-opacity=".55"/><stop offset="1" stop-color="#0e96ab" stop-opacity=".05"/></linearGradient></defs>
-          <path d="M-40 560C120 470 190 640 330 560S520 380 650 460V820H-40z" fill="url(#lgw1)"/>
-          <path d="M-40 650C110 590 220 720 360 650S540 520 650 590V820H-40z" fill="#19b8a5" fill-opacity=".10"/>
-          <circle cx="470" cy="150" r="210" fill="none" stroke="#19b8a5" stroke-opacity=".18" stroke-width="2"/>
-          <circle cx="470" cy="150" r="130" fill="none" stroke="#19b8a5" stroke-opacity=".12" stroke-width="2"/>
+      <section class="lg-brand" aria-label="SYNRTECHS AI Workspace">
+        <svg class="lg-geo" viewBox="0 0 600 800" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
+          <!-- three sheared slabs on the 30° angle of the S mark: a quiet echo of the logo, never a copy of it -->
+          <polygon points="150,470 640,188 640,338 330,520" fill="#ffffff" fill-opacity=".045"/>
+          <polygon points="290,560 480,452 640,562 450,672" fill="#6941e2" fill-opacity=".34"/>
+          <polygon points="200,690 640,436 640,586 380,736" fill="#ffffff" fill-opacity=".045"/>
+          <path d="M150 470L640 188" stroke="#27e6c5" stroke-opacity=".55" stroke-width="1.5" fill="none"/>
+          <path d="M380 736L640 586" stroke="#27e6c5" stroke-opacity=".30" stroke-width="1.5" fill="none"/>
         </svg>
         <div class="lg-brand-in">
-          <div class="lg-mark"><img class="lg-wordmark" src="/dashboard/assets/developer/synrtech-studio-wordmark-white.svg" alt="SynrTech Studio" width="166" height="40"><small>AI WORKSPACE</small></div>
+          <div class="lg-mark"><img class="lg-wordmark" src="/dashboard/assets/developer/synrtechs-logo-white.svg" alt="SYNRTECHS" width="260" height="48"><small>AI WORKSPACE</small></div>
           <div class="lg-hero">
             <h2>A better conversation.<br><em>A closer connection.</em></h2>
             <p>One workspace for your WhatsApp conversations, customer care, and appointments.</p>
@@ -411,7 +412,7 @@ async function renderLogin(view) {
       <section class="lg-form">
         <div class="lg-top"><div class="theme-slot" data-theme-switch></div><div class="lang-slot" data-lang-switch></div></div>
         <div class="auth-card lg-card">
-          <span class="wm lg-wm"><img class="wm-light" src="/dashboard/assets/developer/synrtech-studio-wordmark-black.svg" alt="SynrTech Studio" width="150" height="36"><img class="wm-dark" src="/dashboard/assets/developer/synrtech-studio-wordmark-white.svg" alt="SynrTech Studio" width="150" height="36"></span>
+          <span class="wm lg-wm"><img class="wm-light" src="/dashboard/assets/developer/synrtechs-logo.svg" alt="SYNRTECHS" width="180" height="33"><img class="wm-dark" src="/dashboard/assets/developer/synrtechs-logo-white.svg" alt="SYNRTECHS" width="180" height="33"></span>
           <p class="lg-brandname"><span>AI WORKSPACE</span></p>
           <h3>${isSetup ? 'Set up your workspace' : 'Welcome back'}</h3>
           <p class="muted lg-sub">${isSetup ? 'Create an administrator account to get started.' : 'Sign in to manage your AI assistant.'}</p>
@@ -452,7 +453,7 @@ async function renderLogin(view) {
     const card = view.querySelector('.auth-card');
     let timer = null;
     card.innerHTML = `
-      <span class="wm lg-wm"><img class="wm-light" src="/dashboard/assets/developer/synrtech-studio-wordmark-black.svg" alt="SynrTech Studio" width="150" height="36"><img class="wm-dark" src="/dashboard/assets/developer/synrtech-studio-wordmark-white.svg" alt="SynrTech Studio" width="150" height="36"></span><p class="eyebrow">CHECK YOUR EMAIL</p>
+      <span class="wm lg-wm"><img class="wm-light" src="/dashboard/assets/developer/synrtechs-logo.svg" alt="SYNRTECHS" width="180" height="33"><img class="wm-dark" src="/dashboard/assets/developer/synrtechs-logo-white.svg" alt="SYNRTECHS" width="180" height="33"></span><p class="eyebrow">CHECK YOUR EMAIL</p>
       <h3>Enter your verification code</h3>
       <p class="muted">We sent a 6-digit code to <span class="otp-sent">${esc(info.email || 'your email address')}</span>. It expires in 10 minutes and can be used once.</p>
       <form id="otp-form" autocomplete="off">
@@ -1122,7 +1123,7 @@ route('#/system', 'System', 'Live process and dependency status.', async (view) 
         <dt>Environment</dt><dd>${esc(data.environment)}</dd>
         <dt>Provider mode</dt><dd>${data.providerMode === 'mock' ? badge('Mock', 'green') : badge('Production', 'blue')}</dd>
         <dt>Process uptime</dt><dd>${data.uptimeSeconds}s</dd>
-        <dt>Developed by</dt><dd translate="no">SynrTech Studio</dd>
+        <dt>Developed by</dt><dd translate="no">SYNRTECHS</dd>
         <dt>Node.js version</dt><dd class="file">${esc(data.nodeVersion)}</dd>
         <dt>Database file</dt><dd class="file">${esc(data.databasePath)}</dd>
         <dt>Database reachable</dt><dd>${data.databaseReachable ? badge('Yes', 'green') : badge('No', 'red')}</dd>

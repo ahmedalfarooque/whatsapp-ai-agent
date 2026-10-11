@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app';
@@ -13,6 +14,8 @@ import { getAuthUser } from '../../src/dashboard/permissions';
 import { runWithAccount } from '../../src/accounts/accountContext';
 import { TINY_PNG } from '../fixtures/makePdf';
 
+/** The Rowad Alfa company logo bundled with the application: the logo the owner approved for Rowad Alfa Auto Care AND JOTUN Rowad Alfa. */
+const BUNDLED_LOGO = fs.readFileSync(path.resolve(__dirname, '../../dashboard/assets/logo.webp'));
 const OWNER = 'owner@example.com';
 const PASSWORD = 'a-very-long-test-password-123';
 
@@ -21,6 +24,8 @@ describe('who the interface is for: branding decided on the server from the real
   let ROWAD: number; // the original business (account 1)
   let JOTUN: number;
   let QMULATE: number;
+  let PLAIN: number;
+  let sharedLogoDocId: number;
   let ownerId: number;
   const user: Record<string, number> = {};
   const as = (userId: number) => {
@@ -51,9 +56,15 @@ describe('who the interface is for: branding decided on the server from the real
     getDb().prepare("UPDATE whatsapp_accounts SET name = 'Rowad Alfa Auto Care', name_ar = 'شركة رواد ألفا للعناية بالسيارات' WHERE id = 1").run();
     JOTUN = createAccount({ name: 'JOTUN Rowad Alfa', nameAr: 'جوتن رواد الفا' }).id;
     QMULATE = createAccount({ name: 'QMULATE Real Estate Consultancy', nameAr: 'QMULATE للاستشارات العقارية' }).id;
-    // QMULATE has its own verified logo document; Rowad Alfa uses the bundled one; JOTUN has none
+    // QMULATE has its own verified logo document; Rowad Alfa uses the bundled one; JOTUN Rowad Alfa is under the same parent company, so it has
+    // its OWN copy of that same logo (its own document in its own upload folder: nothing between the two businesses is merged)
     const logo = saveDocument({ originalName: 'logo.png', mimeType: 'image/png', bytes: TINY_PNG, visibility: 'internal', title: 'QMULATE logo', accountId: QMULATE, purpose: 'logo' });
     runWithAccount(QMULATE, () => updateBusinessSettings({ logoDocumentId: logo.id }));
+    const shared = saveDocument({ originalName: 'logo.webp', mimeType: 'image/webp', bytes: BUNDLED_LOGO, visibility: 'internal', title: 'Rowad Alfa logo', accountId: JOTUN, purpose: 'logo' });
+    sharedLogoDocId = shared.id;
+    runWithAccount(JOTUN, () => updateBusinessSettings({ logoDocumentId: shared.id }));
+    PLAIN = createAccount({ name: 'Plain Trading Co' }).id; // a business with no logo at all
+    await makeUser('plain', { role: 'manager', accountIds: [PLAIN] });
     await makeUser('rowad', { role: 'manager', accountIds: [ROWAD] });
     await makeUser('jotun', { role: 'manager', accountIds: [JOTUN] });
     await makeUser('qmulate', { role: 'user', accountIds: [QMULATE] });
@@ -63,7 +74,7 @@ describe('who the interface is for: branding decided on the server from the real
     revokeAccountAccess(user.nobody!, JOTUN); // an account list that ended up empty
   });
 
-  it('Super Admin gets the SynrTech Studio (developer) branding, and so does a user granted every account', async () => {
+  it('Super Admin gets the SYNRTECHS (developer) branding, and so does a user granted every account', async () => {
     for (const id of [ownerId, user.all!]) {
       const res = await as(id).me();
       expect(res.status).toBe(200);
@@ -76,7 +87,10 @@ describe('who the interface is for: branding decided on the server from the real
     const rowad = (await as(user.rowad!).me()).body.branding;
     expect(rowad).toMatchObject({ mode: 'company', company: { accountId: ROWAD, name: 'Rowad Alfa Auto Care', nameAr: 'شركة رواد ألفا للعناية بالسيارات', logoUrl: '/dashboard/assets/logo.webp' } });
     const jotun = (await as(user.jotun!).me()).body.branding;
-    expect(jotun).toMatchObject({ mode: 'company', company: { accountId: JOTUN, name: 'JOTUN Rowad Alfa', nameAr: 'جوتن رواد الفا', logoUrl: null } }); // no verified logo: a neutral tile, never another company's logo
+    expect(jotun).toMatchObject({ mode: 'company', company: { accountId: JOTUN, name: 'JOTUN Rowad Alfa', nameAr: 'جوتن رواد الفا' } }); // its own name, the parent company's logo
+    expect(jotun.company.logoUrl).toMatch(/^\/api\/dashboard\/branding\/logo\?v=\d+-\d+$/);
+    const plain = (await as(user.plain!).me()).body.branding;
+    expect(plain).toMatchObject({ mode: 'company', company: { accountId: PLAIN, name: 'Plain Trading Co', logoUrl: null } }); // no verified logo: a neutral tile, never another company's logo
     const q = (await as(user.qmulate!).me()).body.branding;
     expect(q).toMatchObject({ mode: 'company', company: { accountId: QMULATE, name: 'QMULATE Real Estate Consultancy', nameAr: 'QMULATE للاستشارات العقارية' } });
     expect(q.company.logoUrl).toMatch(/^\/api\/dashboard\/branding\/logo\?v=\d+-\d+$/);
@@ -91,12 +105,47 @@ describe('who the interface is for: branding decided on the server from the real
     expect((res.body as Buffer).equals(TINY_PNG)).toBe(true);
     expect((await request(app).get('/api/dashboard/branding/logo')).status).toBe(401);
     // a company without a stored logo has none to fetch; developer-branded users never get a company logo
-    expect((await as(user.jotun!).get('/api/dashboard/branding/logo')).status).toBe(404);
+    expect((await as(user.plain!).get('/api/dashboard/branding/logo')).status).toBe(404);
     expect((await as(user.both!).get('/api/dashboard/branding/logo')).status).toBe(404);
     expect((await as(ownerId).get('/api/dashboard/branding/logo')).status).toBe(404);
   });
 
-  it('several accounts, or none, or an unclear assignment resolve to SynrTech Studio — never to a guessed company', async () => {
+  it('Rowad Alfa Auto Care and JOTUN Rowad Alfa show the same company logo under their own names, with nothing merged between them', async () => {
+    const rowad = as(user.rowad!);
+    const jotun = as(user.jotun!);
+    const rowadBrand = (await rowad.me()).body.branding.company;
+    const jotunBrand = (await jotun.me()).body.branding.company;
+    expect(rowadBrand.name).toBe('Rowad Alfa Auto Care');
+    expect(jotunBrand.name).toBe('JOTUN Rowad Alfa'); // account-specific names stay distinct
+    expect(rowadBrand.accountId).not.toBe(jotunBrand.accountId);
+    // the very same artwork: account 1 loads the bundled file, JOTUN its own stored copy of it, byte for byte
+    const jotunLogo = await jotun.get('/api/dashboard/branding/logo');
+    expect(jotunLogo.status).toBe(200);
+    expect(jotunLogo.headers['content-type']).toBe('image/webp');
+    expect((jotunLogo.body as Buffer).equals(BUNDLED_LOGO)).toBe(true);
+    const bundled = await request(app).get(rowadBrand.logoUrl); // the bundled asset is public application artwork
+    expect(bundled.status).toBe(200);
+    expect(Buffer.from(bundled.body).equals(BUNDLED_LOGO)).toBe(true);
+    // JOTUN's copy lives in JOTUN's own upload folder (not account 1's, not QMULATE's)
+    const doc = getDb().prepare('SELECT * FROM business_documents WHERE id = ?').get(sharedLogoDocId) as { whatsapp_account_id: number };
+    expect(doc.whatsapp_account_id).toBe(JOTUN);
+    expect(documentPath(doc as never)).toContain(path.join('accounts', String(JOTUN), 'uploads'));
+    // sharing the logo gives neither business access to the other: data and logo routes stay account-scoped
+    for (const url of ['/api/dashboard/customers/directory', '/api/dashboard/branding/logo', '/api/dashboard/me']) {
+      expect((await rowad.get(url, JOTUN)).status, `rowad -> jotun ${url}`).toBe(403);
+      expect((await jotun.get(url, ROWAD)).status, `jotun -> rowad ${url}`).toBe(403);
+    }
+    // and QMULATE's own logo is a different file, unreachable for both
+    const qLogo = await as(user.qmulate!).get('/api/dashboard/branding/logo');
+    expect((qLogo.body as Buffer).equals(BUNDLED_LOGO)).toBe(false);
+    expect((await rowad.get('/api/dashboard/branding/logo', QMULATE)).status).toBe(403);
+    expect((await jotun.get('/api/dashboard/branding/logo', QMULATE)).status).toBe(403);
+    // two businesses, two settings rows: the shared logo did not merge their profiles
+    const rows = getDb().prepare('SELECT id, business_name FROM business_settings WHERE id IN (?, ?)').all(ROWAD, JOTUN) as { id: number }[];
+    expect(rows.map((r) => r.id).sort()).toEqual([ROWAD, JOTUN].sort());
+  });
+
+  it('several accounts, or none, or an unclear assignment resolve to SYNRTECHS — never to a guessed company', async () => {
     expect((await as(user.both!).me()).body.branding).toEqual({ mode: 'developer', company: null });
     // no assigned account at all: the server refuses the session's dashboard calls (fails closed) and offers no company identity
     const nobody = await as(user.nobody!).me();
@@ -131,27 +180,28 @@ describe('who the interface is for: branding decided on the server from the real
     getDb().prepare('UPDATE business_settings SET logo_document_id = ? WHERE id = ?').run(foreign.id, JOTUN);
     expect((await as(user.jotun!).me()).body.branding.company.logoUrl).toBeNull();
     expect((await as(user.jotun!).get('/api/dashboard/branding/logo')).status).toBe(404);
-    getDb().prepare('UPDATE business_settings SET logo_document_id = NULL WHERE id = ?').run(JOTUN);
+    getDb().prepare('UPDATE business_settings SET logo_document_id = ? WHERE id = ?').run(sharedLogoDocId, JOTUN);
+    expect((await as(user.jotun!).me()).body.branding.company.logoUrl).toMatch(/branding\/logo/); // back to its own copy of the shared logo
   });
 
   it('a missing, archived or oversized logo falls back to the neutral tile instead of failing', async () => {
-    const logo = saveDocument({ originalName: 'logo.png', mimeType: 'image/png', bytes: TINY_PNG, visibility: 'internal', title: 'JOTUN logo', accountId: JOTUN, purpose: 'logo' });
-    runWithAccount(JOTUN, () => updateBusinessSettings({ logoDocumentId: logo.id }));
-    expect((await as(user.jotun!).me()).body.branding.company.logoUrl).toMatch(/branding\/logo/);
+    const logo = saveDocument({ originalName: 'logo.png', mimeType: 'image/png', bytes: TINY_PNG, visibility: 'internal', title: 'Plain logo', accountId: PLAIN, purpose: 'logo' });
+    runWithAccount(PLAIN, () => updateBusinessSettings({ logoDocumentId: logo.id }));
+    expect((await as(user.plain!).me()).body.branding.company.logoUrl).toMatch(/branding\/logo/);
     // archived
     getDb().prepare("UPDATE business_documents SET status = 'archived' WHERE id = ?").run(logo.id);
-    expect((await as(user.jotun!).me()).body.branding.company.logoUrl).toBeNull();
+    expect((await as(user.plain!).me()).body.branding.company.logoUrl).toBeNull();
     getDb().prepare("UPDATE business_documents SET status = 'active' WHERE id = ?").run(logo.id);
     // oversized
     getDb().prepare('UPDATE business_documents SET size_bytes = ? WHERE id = ?').run(5 * 1024 * 1024, logo.id);
-    expect((await as(user.jotun!).me()).body.branding.company.logoUrl).toBeNull();
+    expect((await as(user.plain!).me()).body.branding.company.logoUrl).toBeNull();
     getDb().prepare('UPDATE business_documents SET size_bytes = ? WHERE id = ?').run(TINY_PNG.length, logo.id);
     // file gone from disk
-    fs.rmSync(documentPath(runWithAccount(JOTUN, () => getDb().prepare('SELECT * FROM business_documents WHERE id = ?').get(logo.id)) as never), { force: true });
-    const me = await as(user.jotun!).me();
+    fs.rmSync(documentPath(runWithAccount(PLAIN, () => getDb().prepare('SELECT * FROM business_documents WHERE id = ?').get(logo.id)) as never), { force: true });
+    const me = await as(user.plain!).me();
     expect(me.status).toBe(200);
     expect(me.body.branding.company.logoUrl).toBeNull();
-    expect((await as(user.jotun!).get('/api/dashboard/branding/logo')).status).toBe(404);
+    expect((await as(user.plain!).get('/api/dashboard/branding/logo')).status).toBe(404);
   });
 
   it('follows the assignments as they change: no stale company after access is granted, revoked or the account is disabled', async () => {

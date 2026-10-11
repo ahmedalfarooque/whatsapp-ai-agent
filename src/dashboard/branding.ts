@@ -10,10 +10,10 @@ import { accessibleAccountIds, isSuperAdmin, type AuthUser } from './permissions
 /**
  * Who is the interface "for"?  Decided here, on the server, from the authenticated user's real account assignments, and nowhere else.
  *
- *   Super Admin                                  -> SynrTech Studio (the developer's administrative experience)
- *   a user granted "all accounts"                -> SynrTech Studio
+ *   Super Admin                                  -> SYNRTECHS (the developer's administrative experience)
+ *   a user granted "all accounts"                -> SYNRTECHS
  *   exactly ONE assigned, existing, enabled account -> that company
- *   several assigned accounts, none, or anything unclear (account missing / disabled, access revoked) -> SynrTech Studio
+ *   several assigned accounts, none, or anything unclear (account missing / disabled, access revoked) -> SYNRTECHS
  *
  * Never from a URL parameter, a header, browser storage or a company id the client sends: the only input is the signed-in user. A company
  * branding carries only what is already visible to that user on their own account (its name, Arabic name and logo); no other company's

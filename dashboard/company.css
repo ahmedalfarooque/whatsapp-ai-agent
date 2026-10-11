@@ -1,16 +1,20 @@
 /* Company-branded workspace: a user with exactly ONE assigned WhatsApp account gets that company's name and logo, in the design language of the
    sign-in page (deep brand panel for the sidebar, gradient header, white logo tile, spaced caps sub-line). The server decides who gets it
-   (me.branding); this file only styles body[data-brand="company"]. Everyone else keeps the SynrTech Studio look below.
+   (me.branding); this file only styles body[data-brand="company"]. Everyone else keeps the SYNRTECHS look.
    Dark-theme counterparts live in theme-dark.css. */
 
 /* the brand block (both modes) */
 .brand[data-pending]{visibility:hidden}
 .brand-wm img{height:24px;width:auto}
-.brand-initial{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;flex:none;background:var(--brand-grad);color:#fff;font-weight:700;font-size:20px;line-height:1}
+body:not([data-brand="company"]) .brand{flex-direction:column;align-items:flex-start;gap:7px}  /* logo above the "AI WORKSPACE" line */
+body:not([data-brand="company"]) #brand-name small{font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.22em}
+:root[dir="rtl"] body:not([data-brand="company"]) #brand-name small{font-family:inherit;letter-spacing:0;font-size:12px}
+.brand-initial{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;flex:none;background:#071740;color:#fff;font-weight:700;font-size:20px;line-height:1}
 .brand-initial.sm{width:36px;height:36px;border-radius:50%;font-size:16px}
 .topbar-mark.has-brand{background:#fff;border-color:rgba(255,255,255,.55);overflow:hidden}
 .topbar-mark .topbar-logo{width:100%;height:100%;object-fit:contain;padding:4px;border-radius:50%;background:#fff}
 .topbar-mark .brand-initial.sm{width:100%;height:100%}
+.topbar-mark img.mk{height:24px;width:auto;display:block}  /* the official S mark (white variant: the top bar is a coloured / navy surface in both appearances) */
 
 /* a single-account user needs no account switcher, and sees no other business */
 body[data-brand="company"] #account-list,
@@ -26,11 +30,11 @@ body[data-brand="company"] #brand-name{display:block;min-width:0;text-align:star
 body[data-brand="company"] #brand-name b{display:block;font-size:17px;font-weight:700;line-height:1.2;letter-spacing:-.01em;overflow-wrap:anywhere}
 body[data-brand="company"] #brand-name small{display:block;margin-top:3px;font-size:10.5px;letter-spacing:.2em;font-weight:600}
 [data-theme="light"] body[data-brand="company"] .sidebar{
-  background:linear-gradient(168deg,#04233d 0%,#07324f 50%,#0a4b5e 100%);border-inline-end:0;color:#e8f3f5;
-  --color-text:#e8f3f5;--color-text-2:#cfe3e8;--color-text-muted:#9fbcc4;--color-text-subtle:#8fb0b8;
+  background:radial-gradient(120% 55% at 100% 0%,rgba(105,65,226,.38) 0%,rgba(105,65,226,0) 60%),linear-gradient(168deg,#071740 0%,#071740 60%,#050e2d 100%);border-inline-end:0;color:#e9eefc;
+  --color-text:#e9eefc;--color-text-2:#c3cdee;--color-text-muted:#aab6dc;--color-text-subtle:#aab6dc;
   --color-surface-hover:rgba(255,255,255,.09);--color-surface-raised:rgba(255,255,255,.08);--color-border:rgba(255,255,255,.15);--color-border-strong:rgba(255,255,255,.28);
-  --color-primary:#3fe3d0;--color-primary-soft:rgba(63,227,208,.15);--focus-ring:#3fe3d0;--blue-400:#3fe3d0}
+  --color-primary:#27e6c5;--color-primary-soft:rgba(39,230,197,.15);--focus-ring:#27e6c5;--blue-400:#27e6c5}
 [data-theme="light"] body[data-brand="company"] .sidebar .brand{color:#fff}
 [data-theme="light"] body[data-brand="company"] .sidebar nav a.active{color:#fff}
-[data-theme="light"] body[data-brand="company"] .sidebar .sidebar-note{border-color:rgba(255,255,255,.15);color:#9fbcc4}
+[data-theme="light"] body[data-brand="company"] .sidebar .sidebar-note{border-color:rgba(255,255,255,.15);color:#aab6dc}
 [data-theme="light"] body[data-brand="company"] .sidebar::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25)}

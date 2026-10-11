@@ -23,9 +23,9 @@ const company = (extra: Record<string, unknown> = {}) => ({ branding: { mode: 'c
 describe('branding model: what the page draws for the server\'s decision', () => {
   const b = load();
 
-  it('developer mode (Super Admin, several accounts, anything unclear) is SynrTech Studio and carries no company', () => {
+  it('developer mode (Super Admin, several accounts, anything unclear) is SYNRTECHS and carries no company', () => {
     for (const me of [{ branding: { mode: 'developer', company: null } }, {}, null, undefined, { branding: null }, { branding: { mode: 'company', company: null } }, { branding: { mode: 'company', company: { accountId: 1, name: '   ' } } }, { branding: { mode: 'somethingElse', company: { name: 'X' } } }]) {
-      expect(b.brandModel(me, 'en')).toMatchObject({ mode: 'developer', name: 'SynrTech Studio', logoUrl: null, accountId: null });
+      expect(b.brandModel(me, 'en')).toMatchObject({ mode: 'developer', name: 'SYNRTECHS', logoUrl: null, accountId: null });
     }
   });
 
@@ -94,13 +94,14 @@ describe('company-branded workspace: styling and identity rules', () => {
   });
 
   it('every company rule is scoped to the company experience or to the new brand elements, so the default look cannot change', () => {
-    const allowed = /^(\.brand\[data-pending\]|\.brand-wm|\.brand-initial|\.topbar-mark|body\[data-brand="company"\]|\[data-theme="light"\] body\[data-brand="company"\])/;
+    // body:not([data-brand="company"]) = the developer-mode brand block (SYNRTECHS lockup above the "AI WORKSPACE" line), nothing else
+    const allowed = /^(\.brand\[data-pending\]|\.brand-wm|\.brand-initial|\.topbar-mark|body\[data-brand="company"\]|body:not\(\[data-brand="company"\]\) (\.brand|#brand-name small)|:root\[dir="rtl"\] body:not\(\[data-brand="company"\]\) #brand-name small|\[data-theme="light"\] body\[data-brand="company"\])/;
     const offenders = selectorsOf(css).filter((s) => s.split(',').some((p) => !allowed.test(p.trim())));
     expect(offenders).toEqual([]);
   });
 
   it('light company sidebar reuses the sign-in brand panel gradient and the dark theme has its own counterpart', () => {
-    expect(css).toMatch(/\[data-theme="light"\] body\[data-brand="company"\] \.sidebar\{\s*background:linear-gradient\(168deg,#04233d/);
+    expect(css).toMatch(/\[data-theme="light"\] body\[data-brand="company"\] \.sidebar\{\s*background:radial-gradient\([^;]*linear-gradient\(168deg,#071740/);
     expect(dark).toContain('[data-theme="dark"] body[data-brand="company"] .brand');
     expect(dark).toContain('[data-theme="dark"] .brand-initial');
   });
@@ -110,14 +111,49 @@ describe('company-branded workspace: styling and identity rules', () => {
     expect(dark).toMatch(/body\[data-brand="company"\] \.brand-logo\{[^}]*background:#fff/);
   });
 
-  it('SynrTech Studio stays the identity of the sign-in page, the default shell and developer mode: only the official wordmark artwork is used', () => {
+  it('SYNRTECHS stays the identity of the sign-in page, the default shell and developer mode: only the official logo artwork is used', () => {
     const app = read('app.js');
     const branding = read('branding.js');
+    const html = read('index.html');
     expect(app).not.toContain('lg-logo');
-    expect(app).toContain('synrtech-studio-wordmark-white.svg');
-    expect(app).toContain('synrtech-studio-wordmark-black.svg');
-    expect(branding).toContain('synrtech-studio-wordmark-black.svg');
-    expect(read('index.html')).toContain('<title>SynrTech Studio · AI Workspace</title>');
+    expect(app).toContain('synrtechs-logo-white.svg');
+    expect(app).toContain('synrtechs-logo.svg');
+    expect(branding).toContain('synrtechs-logo.svg');
+    expect(branding).toContain('synrtechs-logo-white.svg');
+    expect(html).toContain('<title>SYNRTECHS · AI Workspace</title>');
+    expect(html).toContain('synrtechs-mark-white.svg'); // compact header: the official S mark
+    // no stale developer artwork from the earlier brand kit is referenced anywhere
+    for (const file of fs.readdirSync(DASH).filter((f) => /\.(js|html|css)$/.test(f))) expect(read(file), file).not.toMatch(/synrtech-studio-wordmark|pattern-sculpted-contours/);
+  });
+
+  it('the sign-in page shows only the developer identity: no customer logo in the page, the favicon or the icon files', () => {
+    const app = read('app.js');
+    const html = read('index.html');
+    const login = app.slice(app.indexOf('<section class="lg-brand"'), app.indexOf('function renderOtpStep'));
+    expect(login).not.toMatch(/logo\.webp|branding\/logo|company/i);
+    expect(html).toContain('<link rel="icon" type="image/png" href="/dashboard/assets/favicon.png">');
+    // favicon and app icon are the guide's navy S tile (rendered from the supplied PDF), not the Rowad Alfa logo the tab used to show
+    for (const icon of ['assets/favicon.png', 'assets/logo-192.png']) {
+      const png = fs.readFileSync(path.join(DASH, icon));
+      expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+      expect(png.equals(fs.readFileSync(path.join(DASH, 'assets/logo.webp')))).toBe(false);
+    }
+    expect(fs.statSync(path.join(DASH, 'assets/favicon.png')).size).toBeLessThan(6000); // the navy tile (≈2.6 KB), not the 30 KB knot artwork it replaced
+  });
+
+  it('the supplied SYNRTECHS artwork is shipped as drawn: colour lockup (navy + violet mark, black lettering) and the white variant', () => {
+    const colour = read('assets/developer/synrtechs-logo.svg');
+    const white = read('assets/developer/synrtechs-logo-white.svg');
+    const mark = read('assets/developer/synrtechs-mark.svg');
+    const markWhite = read('assets/developer/synrtechs-mark-white.svg');
+    expect(colour.match(/<path /g)).toHaveLength(12); // nine letters + the three parts of the S mark
+    expect(white.match(/<path /g)).toHaveLength(12);
+    expect(mark.match(/<path /g)).toHaveLength(3);
+    expect(markWhite.match(/<path /g)).toHaveLength(3);
+    expect(colour).toContain('#071740');
+    expect(colour).toContain('#6941E2');
+    expect([...new Set([...white.matchAll(/fill="(#[0-9A-F]{6})"/g)].map((m) => m[1]))]).toEqual(['#FFFFFF']);
+    for (const svg of [colour, white, mark, markWhite]) expect(svg).not.toMatch(/<script|<image|href=|onload/i); // plain vector artwork only
   });
 
   it('the developer is credited next to a company workspace and not next to its own identity', () => {

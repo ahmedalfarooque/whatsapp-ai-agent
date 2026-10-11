@@ -4,33 +4,34 @@
 .lg{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);min-height:100vh;min-height:100dvh}
 
 /* ---- brand panel ---- */
-.lg-brand{position:relative;overflow:hidden;color:#e8f3f5;background:linear-gradient(158deg,#04233d 0%,#07324f 46%,#0a4b5e 100%);padding:44px clamp(28px,5vw,72px);display:flex}
-.lg-waves{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+/* SYNRTECHS brand panel: the guide's navy #071740 with a violet light from the top corner and a teal one from the bottom, identical in both appearances.
+   Text contrast on it: white 17:1, #c3cdee 10:1, #aab6dc 8.6:1, teal #27e6c5 11:1. */
+.lg-brand{position:relative;overflow:hidden;color:#e9eefc;background:
+  radial-gradient(110% 75% at 100% 0%,rgba(105,65,226,.42) 0%,rgba(105,65,226,0) 58%),
+  radial-gradient(90% 60% at 0% 100%,rgba(39,230,197,.15) 0%,rgba(39,230,197,0) 62%),
+  linear-gradient(162deg,#071740 0%,#071740 58%,#050e2d 100%);padding:48px clamp(28px,5vw,76px);display:flex}
+.lg-geo{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .lg-brand-in{position:relative;display:flex;flex-direction:column;justify-content:space-between;gap:36px;width:100%;max-width:560px;margin-inline:auto}
-.lg-mark{display:flex;align-items:center;gap:14px}
-.lg-mark img{width:52px;height:52px;object-fit:contain;filter:drop-shadow(0 2px 8px rgba(0,0,0,.25))}
-.lg-mark b{display:block;font-size:24px;font-weight:700;letter-spacing:-.01em;color:#fff}
-.lg-mark small{display:block;font-size:11.5px;letter-spacing:.2em;color:#8fd9d1;margin-top:2px}
+.lg-mark{display:flex;align-items:flex-start;flex-direction:column;gap:12px}
+.lg-mark small{display:block;font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:11.5px;letter-spacing:.24em;color:#27e6c5}
 .lg-hero h2{margin:0 0 16px;font-size:clamp(30px,3.6vw,46px);line-height:1.1;font-weight:700;letter-spacing:-.025em;color:#fff}
-.lg-hero h2 em{font-style:normal;color:#3fe3d0}
-.lg-hero>p{margin:0 0 30px;max-width:46ch;font-size:16px;line-height:1.55;color:#bcd3d9}
+.lg-hero h2 em{font-style:normal;color:#27e6c5}
+.lg-hero>p{margin:0 0 30px;max-width:46ch;font-size:16px;line-height:1.55;color:#c3cdee}
 .lg-points{list-style:none;margin:0;padding:0;display:grid;gap:18px}
 .lg-points li{display:flex;gap:14px;align-items:flex-start}
-.lg-pt{flex:none;width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.12);color:#8fe9dd}
+.lg-pt{flex:none;width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);color:#27e6c5}
 .lg-ico{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .lg-points b{display:block;font-size:15px;font-weight:650;color:#fff}
-.lg-points small{display:block;margin-top:2px;font-size:13px;line-height:1.45;color:#a9c4cb}
-.lg-copy{font-size:12.5px;color:#8fb0b8}
+.lg-points small{display:block;margin-top:2px;font-size:13px;line-height:1.45;color:#aab6dc}
+.lg-copy{font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:12px;color:#aab6dc}
 
 /* ---- form panel ---- */
 .lg-form{display:flex;flex-direction:column;background:var(--color-canvas);padding:22px clamp(18px,4vw,56px) 34px;min-width:0}
 .lg-top{display:flex;justify-content:flex-end;min-height:44px}
 .lg-card{margin:auto;width:100%;max-width:468px;padding:34px 36px 28px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:26px;box-shadow:var(--elev-2);display:flex;flex-direction:column;justify-content:flex-start;animation:lg-rise .35s ease both}
 @keyframes lg-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.lg-logo{display:block;width:64px;height:64px;object-fit:contain;margin:0 auto 6px}
 .lg-brandname{margin:0 0 22px;text-align:center;line-height:1.25}
-.lg-brandname b{display:block;font-size:19px;color:var(--color-text)}
-.lg-brandname span{display:block;font-size:10.5px;letter-spacing:.2em;color:var(--color-text-muted)}
+.lg-brandname span{display:block;font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.24em;color:var(--color-text-muted)}
 .lg-card h3{margin:0;font-size:26px;font-weight:700;letter-spacing:-.02em;color:var(--color-text)}
 .lg-sub{margin:6px 0 0;font-size:14.5px}
 .lg-card form{margin-top:22px}
@@ -45,9 +46,9 @@
 .lg-eye:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
 .lg-eye .lg-ico{position:static;color:inherit}
 .lg-card .form-error{margin:0 0 14px;padding:10px 12px;border-radius:12px;background:var(--color-danger-soft);color:var(--color-danger);font-size:13.5px}
-.lg-submit{width:100%;min-height:54px;display:flex;align-items:center;justify-content:center;gap:10px;border:0;border-radius:15px;font:inherit;font-size:16px;font-weight:650;color:#fff;cursor:pointer;background:var(--brand-grad);box-shadow:0 10px 22px -12px rgba(12,128,121,.8);transition:transform .15s ease,box-shadow .15s ease,filter .15s ease}
-.lg-submit:hover:not(:disabled){filter:brightness(1.05);transform:translateY(-1px)}
-.lg-submit:focus-visible{outline:3px solid color-mix(in srgb,var(--color-primary) 45%,transparent);outline-offset:2px}
+.lg-submit{width:100%;min-height:54px;display:flex;align-items:center;justify-content:center;gap:10px;border:0;border-radius:15px;font:inherit;font-size:16px;font-weight:650;color:#fff;cursor:pointer;background:#071740;box-shadow:0 10px 22px -12px rgba(7,23,64,.75);transition:transform .15s ease,box-shadow .15s ease,background-color .15s ease}
+.lg-submit:hover:not(:disabled){background:#6941e2;transform:translateY(-1px)}
+.lg-submit:focus-visible{outline:3px solid #6941e2;outline-offset:2px}
 .lg-submit:disabled{cursor:progress;opacity:.85}
 .lg-submit .lg-ico{stroke:#fff}
 .lg-spin{display:none;width:18px;height:18px;border-radius:50%;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;animation:lg-turn .7s linear infinite}
@@ -73,8 +74,6 @@
   .lg-brand{padding:22px 24px}
   .lg-brand-in{gap:0}
   .lg-hero,.lg-copy{display:none}
-  .lg-mark img{width:40px;height:40px}
-  .lg-mark b{font-size:20px}
   .lg-form{padding-top:18px}
 }
 @media (max-width:560px){
@@ -100,15 +99,13 @@
 .lg-dev img{height:18px}
 footer .dev-credit{gap:6px}
 
-/* ---- SynrTech Studio wordmark (official artwork: black on light, white on dark; never retyped) ---- */
+/* ---- SYNRTECHS logo (official artwork from the brand guide: colour lockup on light, white lockup on dark; never retyped, recoloured or stretched) ---- */
 .wm{display:inline-flex;align-items:center;line-height:0}
 .wm img{display:block;height:auto}
 .wm .wm-dark{display:none}
-.lg-wordmark{display:block;width:166px;height:auto;max-width:100%}
-.lg-mark{flex-direction:column;align-items:flex-start;gap:6px}
-.lg-mark small{margin-top:0}
-.lg-wm{display:flex;justify-content:center;margin:2px auto 6px}
-.lg-wm img{width:150px;height:auto}
-
-.lg-mark img.lg-wordmark{width:166px;height:auto;max-width:100%;filter:none;object-fit:initial}
-@media (max-width:960px){.lg-mark img.lg-wordmark{width:140px}}
+.lg-mark img.lg-wordmark{display:block;width:260px;height:auto;max-width:100%}
+@media (max-width:960px){.lg-mark img.lg-wordmark{width:200px}}
+/* the form card carries its own logo only where the brand panel is not shown (phones) */
+.lg-wm,.lg-brandname{display:none}
+.lg-wm img{width:190px;height:auto}
+@media (max-width:560px){.lg-wm{display:flex;justify-content:center;margin:2px auto 8px}.lg-brandname{display:block}}

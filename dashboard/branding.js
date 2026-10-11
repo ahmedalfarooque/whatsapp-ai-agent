@@ -2,13 +2,14 @@
 // real account assignments; this file only DRAWS that decision. It never reads the browser's storage, the URL or a company id to choose a
 // company: the single input is the `branding` object the server returned for the authenticated session.
 //
-//   developer  Super Admin, users with several accounts, and anything unclear  -> the SynrTech Studio wordmark
+//   developer  Super Admin, users with several accounts, and anything unclear  -> the SYNRTECHS logo
 //   company    a user with exactly one assigned account                        -> that company's name and logo
 //
 // Loaded after shell.js (which calls applyBranding() whenever /me is (re)loaded) and before app.js.
 
-const DEV_NAME = 'SynrTech Studio';
-const DEV_WORDMARK = { light: '/dashboard/assets/developer/synrtech-studio-wordmark-black.svg', dark: '/dashboard/assets/developer/synrtech-studio-wordmark-white.svg' };
+const DEV_NAME = 'SYNRTECHS';
+// Official artwork taken as drawn from the supplied brand guide: the colour lockup for light surfaces, the white lockup for dark ones (never retyped or recoloured).
+const DEV_WORDMARK = { light: '/dashboard/assets/developer/synrtechs-logo.svg', dark: '/dashboard/assets/developer/synrtechs-logo-white.svg' };
 
 /** First letter of the name as shown (Latin or Arabic) for the neutral tile used when a company has no verified logo. */
 function brandInitial(name) {
@@ -42,7 +43,7 @@ function brandMarkHtml(model, cls) {
 }
 
 function wordmarkHtml(cls) {
-  return `<span class="wm ${cls}"><img class="wm-light" src="${DEV_WORDMARK.light}" alt="${DEV_NAME}" width="104" height="25"><img class="wm-dark" src="${DEV_WORDMARK.dark}" alt="${DEV_NAME}" width="104" height="25"></span>`;
+  return `<span class="wm ${cls}"><img class="wm-light" src="${DEV_WORDMARK.light}" alt="${DEV_NAME}" width="132" height="24"><img class="wm-dark" src="${DEV_WORDMARK.dark}" alt="${DEV_NAME}" width="132" height="24"></span>`;
 }
 
 let appliedBrandKey = '';

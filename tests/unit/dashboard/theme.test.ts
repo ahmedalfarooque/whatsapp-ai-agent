@@ -16,31 +16,36 @@ function ratio(a: string, b: string): number {
   return (hi! + 0.05) / (lo! + 0.05);
 }
 
-/** The value of a custom property declared in the dark layer, e.g. token('--syn-graphite') -> '#222222'. */
+/** The value of a custom property declared in the dark layer, e.g. token('--syn-panel') -> '#0b1c4a'. */
 function token(name: string): string {
   const m = new RegExp(`${name.replace(/[-]/g, '\\-')}:\\s*(#[0-9a-fA-F]{6})`).exec(dark);
   if (!m) throw new Error(`token ${name} not found`);
   return m[1]!.toLowerCase();
 }
 
-describe('dark theme: SynrTech Studio brand', () => {
-  it('uses the approved palette tokens exactly (brand-tokens.json v2.1)', () => {
-    expect(token('--syn-charcoal')).toBe('#111112');
-    expect(token('--syn-graphite')).toBe('#222222');
-    expect(token('--syn-copper')).toBe('#d7a17f');
-    expect(token('--syn-teal')).toBe('#20afbd');
-    expect(token('--syn-tertiary')).toBe('#a1a3a4');
-    expect(token('--syn-rule')).toBe('#363637');
+describe('dark theme: SYNRTECHS brand', () => {
+  it('uses the palette of the supplied brand guide exactly (navy, teal, purple) and the derived steps between them', () => {
+    expect(token('--syn-navy')).toBe('#071740');
+    expect(token('--syn-teal')).toBe('#27e6c5');
+    expect(token('--syn-violet')).toBe('#6941e2');
     expect(token('--syn-white')).toBe('#ffffff');
+    // derived from the navy (documented in the file header): canvas, panel, raised row, hairline, input border, muted text
+    expect(token('--syn-canvas')).toBe('#050e2d');
+    expect(token('--syn-panel')).toBe('#0b1c4a');
+    expect(token('--syn-raised')).toBe('#122760');
+    expect(token('--syn-line')).toBe('#26396f');
+    expect(token('--syn-line-strong')).toBe('#6f83c0');
+    expect(token('--syn-muted')).toBe('#aab6dc');
+    expect(dark).toContain('#ff6b6b'); // coral: danger
   });
 
-  it('never uses a retired brand colour, and keeps the brand rules: titles copper, body white, primary action teal with a charcoal label', () => {
-    for (const retired of ['#155e75', '#5cb8f4', '#f7f3ee', '#9b6046']) expect(dark.toLowerCase()).not.toContain(retired);
-    expect(dark).toMatch(/h1[^{]*\{[^}]*color:var\(--syn-copper\)/);
+  it('never uses a retired brand colour, and keeps the rules: titles white, body white, primary action teal with a navy label', () => {
+    for (const retired of ['#155e75', '#5cb8f4', '#f7f3ee', '#9b6046', '#111112', '#222222', '#d7a17f', '#20afbd', '#a1a3a4', '#363637']) expect(dark.toLowerCase()).not.toContain(retired);
+    expect(dark).toMatch(/h1[^{]*\{[^}]*color:var\(--syn-title\)/);
     expect(dark).toMatch(/--color-text:var\(--syn-white\)/);
     expect(dark).toMatch(/--color-primary:var\(--syn-teal\)/);
-    expect(dark).toMatch(/--color-on-primary:var\(--syn-charcoal\)/);
-    expect(dark).toMatch(/\.btn\.primary\{[^}]*color:var\(--syn-charcoal\)/);
+    expect(dark).toMatch(/--color-on-primary:var\(--syn-canvas\)/);
+    expect(dark).toMatch(/\.btn\.primary\{[^}]*color:var\(--syn-canvas\)/);
   });
 
   it('every rule is scoped to the dark appearance, so the light theme (the default) cannot change', () => {
@@ -53,46 +58,55 @@ describe('dark theme: SynrTech Studio brand', () => {
     expect(read('index.html')).toContain('<html lang="en" data-theme="light">'); // light stays the default
   });
 
-  it('reaches the brand contrast levels for the pairs the interface uses', () => {
-    const charcoal = token('--syn-charcoal');
-    const graphite = token('--syn-graphite');
-    const raised = token('--syn-graphite-2');
+  it('reaches the contrast levels for the pairs the interface uses', () => {
+    const canvas = token('--syn-canvas');
+    const panel = token('--syn-panel');
+    const raised = token('--syn-raised');
+    const navy = token('--syn-navy');
+    const teal = token('--syn-teal');
+    const muted = token('--syn-muted');
     const checks: [string, string, string, number][] = [
-      ['white body on charcoal', '#ffffff', charcoal, 4.5], ['white body on graphite', '#ffffff', graphite, 4.5], ['white body on raised rows', '#ffffff', raised, 4.5],
-      ['copper titles on charcoal', token('--syn-copper'), charcoal, 4.5], ['copper titles on graphite', token('--syn-copper'), graphite, 4.5], ['copper on raised', token('--syn-copper'), raised, 4.5],
-      ['tertiary on charcoal', token('--syn-tertiary'), charcoal, 4.5], ['tertiary on graphite', token('--syn-tertiary'), graphite, 4.5], ['tertiary on raised', token('--syn-tertiary'), raised, 4.5],
-      ['charcoal label on teal button', charcoal, token('--syn-teal'), 4.5], ['teal on charcoal (focus, active marks)', token('--syn-teal'), charcoal, 3], ['teal on graphite', token('--syn-teal'), graphite, 3],
-      ['input border on graphite (UI component)', token('--syn-rule-strong'), graphite, 3], ['input border on charcoal', token('--syn-rule-strong'), charcoal, 3],
+      ['white body on canvas', '#ffffff', canvas, 4.5], ['white body on panel', '#ffffff', panel, 4.5], ['white body on raised rows', '#ffffff', raised, 4.5],
+      ['muted on canvas', muted, canvas, 4.5], ['muted on panel', muted, panel, 4.5], ['muted on raised', muted, raised, 4.5],
+      ['teal text and figures on canvas', teal, canvas, 4.5], ['teal on panel', teal, panel, 4.5], ['teal on raised', teal, raised, 4.5],
+      ['navy label on teal button', canvas, teal, 4.5], ['brand navy label on teal', navy, teal, 4.5],
+      ['violet text tint on panel', token('--syn-violet-text'), panel, 4.5],
+      ['input border on panel (UI component)', token('--syn-line-strong'), panel, 3], ['input border on canvas', token('--syn-line-strong'), canvas, 3],
+      // the sign-in brand panel (login.css) is navy in both appearances
+      ['white on the navy panel', '#ffffff', navy, 4.5], ['hero copy on the navy panel', '#c3cdee', navy, 4.5], ['small copy on the navy panel', '#aab6dc', navy, 4.5], ['teal on the navy panel', teal, navy, 4.5],
+      ['white on the violet hover of the sign-in button', '#ffffff', token('--syn-violet'), 4.5], ['white on the navy sign-in button', '#ffffff', navy, 4.5],
     ];
     const failures = checks.filter(([, fg, bg, min]) => ratio(fg, bg) < min).map(([name, fg, bg, min]) => `${name}: ${ratio(fg, bg).toFixed(2)} < ${min} (${fg} on ${bg})`);
     expect(failures).toEqual([]);
     // functional status colours read on the panels they appear on
-    for (const [name, value] of [['success', '#6fd0a7'], ['warning', '#d7a17f'], ['danger', '#e8837a']] as const) {
+    for (const [name, value] of [['success', '#6fd0a7'], ['warning', '#f5b94a'], ['danger', '#ff6b6b']] as const) {
       expect(dark, name).toContain(value);
-      expect(ratio(value, graphite), `${name} on graphite`).toBeGreaterThanOrEqual(4.5);
-      expect(ratio(value, charcoal), `${name} on charcoal`).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(value, panel), `${name} on panel`).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(value, canvas), `${name} on canvas`).toBeGreaterThanOrEqual(4.5);
     }
   });
 
-  it('ships only what the licences allow: Geist (open licence) and the official wordmark, never the Thmanyah font files', () => {
+  it('ships only open-licence fonts (Cairo for Arabic, Space Mono for labels, Geist), each with its licence, and never the Thmanyah files', () => {
     const files = fs.readdirSync(path.join(DASH, 'assets'), { recursive: true }).map(String);
     expect(files.filter((f) => /thmanyah/i.test(f))).toEqual([]);
-    expect(files).toEqual(expect.arrayContaining([path.join('fonts', 'Geist-Variable.woff2'), path.join('fonts', 'Geist-OFL.txt')]));
+    const fonts = ['Geist-Variable.woff2', 'Geist-OFL.txt', 'cairo-arabic-wght-normal.woff2', 'cairo-latin-wght-normal.woff2', 'space-mono-latin-400-normal.woff2', 'space-mono-latin-700-normal.woff2', 'Cairo-SpaceMono-OFL.txt'];
+    expect(files).toEqual(expect.arrayContaining(fonts.map((f) => path.join('fonts', f))));
+    expect(read('assets/fonts/Cairo-SpaceMono-OFL.txt')).toMatch(/SIL Open Font License/);
     expect(dark).not.toMatch(/url\([^)]*thmanyah/i);
-    expect(dark).toMatch(/"Thmanyah Sans","Geist",Arial/); // used only when installed on the viewer's device; Arial is the single fallback
-    // the logo is always black or white (founder rule): the two wordmark files carry exactly one fill each
-    expect(read('assets/developer/synrtech-studio-wordmark-white.svg')).toMatch(/fill="#FFFFFF"/);
-    expect(read('assets/developer/synrtech-studio-wordmark-black.svg')).toMatch(/fill="#000000"/);
+    for (const m of dark.matchAll(/url\("\/dashboard\/assets\/fonts\/([^"]+)"\)/g)) expect(files, m[1]).toContain(path.join('fonts', m[1]!)); // every declared font file exists
+    expect(dark).toMatch(/--font-sans:"Cairo","Segoe UI",Tahoma,Arial/); // Arabic (dark)
+    expect(read('rtl.css')).toMatch(/:root\[dir="rtl"\] body\{font-family:"Cairo"/); // Arabic (both appearances)
+    expect(dark).toMatch(/--font-mono:"Space Mono"/);
   });
 
-  it('developer credit uses the approved spelling and does not replace the business identity', () => {
+  it('developer credit uses the official name and logo and does not replace the business identity', () => {
     const html = read('index.html');
     const app = read('app.js');
-    expect(html).toContain('alt="SynrTech Studio"');
-    expect(app).toContain('alt="SynrTech Studio"');
-    expect(html + app).not.toMatch(/Synertech|SYNRTECH(?!\s*Studio)|Synrtech Studio/);
+    expect(html).toContain('alt="SYNRTECHS"');
+    expect(app).toContain('alt="SYNRTECHS"');
+    expect(html + app).not.toMatch(/SynrTech Studio|Synrtech Studio|SYNRTECHS Studio/);
     // no customer business is hard-coded into the interface: company identity comes from the server (me.branding), the sign-in page and the
-    // default shell are SynrTech Studio's
+    // default shell are SYNRTECHS's
     const scripts = fs.readdirSync(DASH).filter((f) => f.endsWith('.js') && !f.startsWith('i18n')).map(read).join('\n');
     expect(scripts + html).not.toMatch(/Rowad Alfa|JOTUN|QMULATE/);
     expect(html).not.toContain('/dashboard/assets/logo-192.png');

@@ -7,7 +7,7 @@
 .lang-slot{margin-inline-start:4px}
 
 /* Arabic type: a system stack with real Arabic shaping; slightly looser line height, no letter-spacing (breaks joins) */
-:root[dir="rtl"] body{font-family:"Segoe UI",Tahoma,"Noto Sans Arabic","Noto Naskh Arabic",Arial,sans-serif;line-height:1.65}
+:root[dir="rtl"] body{font-family:"Cairo","Segoe UI",Tahoma,"Noto Sans Arabic","Noto Naskh Arabic",Arial,sans-serif;line-height:1.65}
 :root[dir="rtl"] *{letter-spacing:0 !important}
 :root[dir="rtl"] .brand small{letter-spacing:0 !important;text-transform:none}
 :root[dir="rtl"] h1,:root[dir="rtl"] h2,:root[dir="rtl"] h3{line-height:1.4}
@@ -88,7 +88,10 @@
 
 /* login: the submit arrow points the reading direction; the brand panel text/waves mirror with the layout */
 :root[dir="rtl"] .lg-submit svg{transform:scaleX(-1)}
-:root[dir="rtl"] .lg-brand svg.waves,:root[dir="rtl"] .lg-waves{transform:scaleX(-1)}
+:root[dir="rtl"] .lg-geo{transform:scaleX(-1)}  /* the decorative slabs mirror with the layout; the logo image itself is never mirrored */
+
+/* the small spaced labels use Space Mono in English; Arabic has no glyphs there, so it takes the body face (Cairo) with no tracking */
+:root[dir="rtl"] .lg-mark small,:root[dir="rtl"] .lg-copy,:root[dir="rtl"] .lg-brandname span{font-family:"Cairo","Segoe UI",Tahoma,Arial,sans-serif;letter-spacing:0;font-size:13px}
 
 /* light / dark switch slot on the sign-in page: sits beside the language switch, mirrored automatically */
 :root[dir="rtl"] .theme-switch{padding:0 12px}
