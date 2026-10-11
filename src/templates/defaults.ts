@@ -27,6 +27,7 @@ export interface TemplateDefault {
 }
 
 import { DEFAULT_GOOGLE_MAPS_URL } from '../config/businessSettings';
+import { CART_TEMPLATES } from './cartDefaults';
 
 /** Confirmed Google Maps link (the dashboard Location page can override it; templates use {maps}). */
 export const GOOGLE_MAPS_LINK = DEFAULT_GOOGLE_MAPS_URL;
@@ -448,6 +449,7 @@ export const TEMPLATE_DEFAULTS: TemplateDefault[] = [
     ar: 'شكراً لرسالتك. سيقوم أحد موظفينا بالرد عليك قريباً. للقائمة الآلية أرسل: القائمة أو 0',
     en: 'Thanks for your message. A staff member will reply shortly. For the automated menu, reply: Menu or 0',
   },
+  ...CART_TEMPLATES,
 ];
 
 /** Keys of templates removed from this list; unmodified rows are cleaned up on boot. */

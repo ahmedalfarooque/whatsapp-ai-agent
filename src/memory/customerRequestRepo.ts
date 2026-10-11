@@ -3,7 +3,8 @@ import { getDb } from './db';
 import { currentAccountId } from '../accounts/accountContext';
 
 export type CustomerRequestKind = 'appointment' | 'quotation';
-export const REQUEST_STATUSES = ['pending', 'contacted', 'confirmed', 'rejected', 'cancelled', 'completed', 'closed'] as const;
+// pending/contacted/confirmed/rejected/cancelled/completed/closed existed first; preparing/approved/sent/expired belong to the quotation lifecycle only (requests/quotationLifecycle.ts).
+export const REQUEST_STATUSES = ['pending', 'preparing', 'contacted', 'approved', 'sent', 'confirmed', 'rejected', 'cancelled', 'completed', 'expired', 'closed'] as const;
 export type CustomerRequestStatus = (typeof REQUEST_STATUSES)[number];
 
 export interface RequestEvent {
@@ -14,6 +15,9 @@ export interface RequestEvent {
   new_status: string;
   actor: 'dashboard' | 'whatsapp' | 'system';
   actor_detail: string | null;
+  /** The dashboard user behind a dashboard transition, and the reason staff gave (rejections, manual sends, delivery failures). */
+  admin_user_id: number | null;
+  reason: string | null;
   created_at: string;
 }
 
@@ -91,6 +95,14 @@ export function listCustomerRequests(
   return rows.map(toRequest);
 }
 
+/** One customer's own requests in one business, newest first (the customer's status check; never another customer's). */
+export function listCustomerRequestsFor(customerId: number, limit = 5, db: Database.Database = getDb(), accountId: number = currentAccountId()): CustomerRequest[] {
+  const rows = db
+    .prepare(`SELECT * FROM customer_requests WHERE customer_id = ? AND whatsapp_account_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`)
+    .all(customerId, accountId, Math.max(1, Math.min(limit, 50))) as Row[];
+  return rows.map(toRequest);
+}
+
 /**
  * Lookup by id. `accountId: null` (used by the request service, which then
  * works inside the request's own account) skips the scope; the dashboard uses
@@ -114,15 +126,15 @@ export function setCustomerRequestStatus(id: number, status: CustomerRequestStat
 }
 
 export function insertRequestEvent(
-  input: { requestId: number; reference: string; oldStatus: string | null; newStatus: string; actor: RequestEvent['actor']; actorDetail: string | null },
+  input: { requestId: number; reference: string; oldStatus: string | null; newStatus: string; actor: RequestEvent['actor']; actorDetail: string | null; adminUserId?: number | null; reason?: string | null },
   db: Database.Database = getDb(),
 ): RequestEvent {
   const r = db
     .prepare(
-      `INSERT INTO request_events (request_id, reference, old_status, new_status, actor, actor_detail)
-       VALUES (@requestId, @reference, @oldStatus, @newStatus, @actor, @actorDetail)`,
+      `INSERT INTO request_events (request_id, reference, old_status, new_status, actor, actor_detail, admin_user_id, reason)
+       VALUES (@requestId, @reference, @oldStatus, @newStatus, @actor, @actorDetail, @adminUserId, @reason)`,
     )
-    .run(input);
+    .run({ ...input, adminUserId: input.adminUserId ?? null, reason: input.reason?.slice(0, 500) ?? null });
   return db.prepare('SELECT * FROM request_events WHERE id = ?').get(r.lastInsertRowid) as RequestEvent;
 }
 

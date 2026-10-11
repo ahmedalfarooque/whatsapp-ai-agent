@@ -40,6 +40,8 @@ import { getAutomationSettings, recordReplyActivity, type ReplyActivityKind } fr
 import { currentAccountId, runWithAccount, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 import { isOutsideBusinessHours } from '../setup/hours';
 import { getMenuTables } from '../automation/menuConfig';
+import { runCart } from '../cart/cartFlow';
+import { isCartState } from '../cart/cartStates';
 import { detectHumanHandoffIntent } from '../handoff/intent';
 import { customerLeavesHold, getHold, requestHandoff, type Handoff } from '../handoff/handoffRepo';
 
@@ -109,6 +111,7 @@ function suppressedByHandoff(ctx: ReplyContext, hold: Handoff | null = getHold(c
 
 function inGuidedFlow(state: string | null): boolean {
   if (!state) return false;
+  if (isCartState(state)) return true;
   return Object.values(getMenuTables().flows).some((flow) => state.startsWith(flow.statePrefix));
 }
 
@@ -355,6 +358,11 @@ async function applyRoute(ctx: ReplyContext, route: RouteResult): Promise<void> 
     customer = getCustomerById(customer.id, undefined, null) ?? customer;
   }
 
+  if (route.cart) {
+    await applyCart(ctx, customer, route.cart.input);
+    return;
+  }
+
   const vars: TemplateVars = { ...route.vars };
   if (route.request) {
     const request = createCustomerRequest({ customerId: customer.id, waId: ctx.msg.waId, kind: route.request.kind, payload: route.request.payload });
@@ -377,6 +385,23 @@ async function applyRoute(ctx: ReplyContext, route: RouteResult): Promise<void> 
   }
   if (route.catalogueId !== undefined) await deliverCatalogue(nextCtx, route.catalogueId);
   if (route.kind === 'human_handoff') await replyOutOfHours(nextCtx);
+}
+
+/** One Inquiry Cart step: the cart changes first, then the customer's menu state, then the replies (one WhatsApp message each). */
+async function applyCart(ctx: ReplyContext, customer: Customer, input: string | null): Promise<void> {
+  const outcome = runCart(customer, ctx.msg.waId, input);
+  const updated = setCustomerMenuState(customer.id, outcome.state, outcome.flowData);
+  const language: CustomerLanguage = updated.language ?? 'en';
+  const nextCtx: ReplyContext = { ...ctx, customer: updated, language };
+  if (outcome.request) {
+    logger.info({ waId: maskWaId(ctx.msg.waId), reference: outcome.request.reference }, 'inquiry cart submitted as a quotation request');
+    try {
+      notifyBusinessNewRequest(outcome.request);
+    } catch (error) {
+      logger.error({ error, reference: outcome.request.reference }, 'could not queue the staff alert for a new request');
+    }
+  }
+  for (const r of outcome.replies) await replyTemplate(nextCtx, r.key, 'rule', r.vars ?? {});
 }
 
 const OFFERS_LIST_TEMPLATE = 'prices_offers_list';

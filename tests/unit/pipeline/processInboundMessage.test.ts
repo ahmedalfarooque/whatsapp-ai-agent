@@ -411,8 +411,9 @@ describe('processInboundMessage — automation controls & human handoff', () => 
     publishTemplate('main_menu', undefined, 'test');
     const waId2 = '15550000025';
     await processInboundMessage(textMsg(waId2, '2'), { knowledge: KNOWLEDGE });
-    // The staff-edited text is shown as written; the permanent "Change language" line is the only addition.
+    // The staff-edited text is shown as written; the permanent Inquiry Cart and "Change language" lines are the only additions.
     expect(sent()[0]).toBe(`DRAFT MENU
+🔟 🛒 Inquiry Cart
 
 ${LANGUAGE_OPTION_EN}`);
     resetTemplateToDefault('main_menu', 'test');

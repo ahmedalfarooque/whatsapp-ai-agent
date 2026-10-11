@@ -20,6 +20,7 @@ import { createCustomerRequest, listCustomerRequests, getCustomerRequest, getCus
 import { saveDocument, listDocuments, getDocument } from '../../../src/documents/documentStore';
 import { buildSystemPrompt } from '../../../src/llm/buildSystemPrompt';
 import { withLanguageOption } from '../../../src/templates/languageOption';
+import { withCartOption } from '../../../src/cart/cartOption';
 import { enqueueNotification, listOutbox, flushOutbox, registerOutboxSender, NotConnectedError, outboxSummary } from '../../../src/notifications/outbox';
 import { changeRequestStatus, businessNotificationJid, handleOperatorCommand } from '../../../src/requests/requestService';
 import { processInboundMessage } from '../../../src/pipeline/processInboundMessage';
@@ -107,9 +108,9 @@ describe('no cross-account data leakage', () => {
     expect(salonBefore.liveEn).not.toContain('Car Audio');
     expect(salonBefore.liveEn).toContain('{business}');
     runWithAccount(SALON, () => publishTemplate('main_menu', { ar: 'قائمة الصالون', en: 'Salon menu' }, 'test'));
-    // The staff-edited text is shown as written, plus the permanent "Change language" line every business's main menu carries.
-    expect(runWithAccount(SALON, () => resolveTemplate('main_menu', 'en'))).toBe(withLanguageOption('Salon menu', 'en'));
-    expect(resolveTemplate('main_menu', 'en')).toBe(withLanguageOption(cars, 'en')); // the car business's own text is untouched
+    // The staff-edited text is shown as written, plus the permanent Inquiry Cart and "Change language" lines every business's main menu carries.
+    expect(runWithAccount(SALON, () => resolveTemplate('main_menu', 'en'))).toBe(withLanguageOption(withCartOption('Salon menu', 'en', 9), 'en')); // the salon's 8 items + the Inquiry Cart as 9
+    expect(resolveTemplate('main_menu', 'en')).toBe(withLanguageOption(withCartOption(cars, 'en', 10), 'en')); // the car business's own text is untouched (plus its permanent Inquiry Cart, 10 after its nine options)
     const salonKeys = runWithAccount(SALON, () => listTemplates()).map((t) => t.key);
     expect(salonKeys).not.toContain('car_audio');
     expect(salonKeys).toContain('menu_about');

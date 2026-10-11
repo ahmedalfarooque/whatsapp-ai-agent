@@ -23,6 +23,7 @@ const fixtures = vi.hoisted(() => ({
   operator: vi.fn(() => ({ text: 'done', result: { changed: true } })),
   outboxSender: null as null | ((jid: string, text: string) => Promise<string | null>),
   flush: vi.fn(async () => 0),
+  capture: vi.fn(async () => undefined),
   written: [] as string[],
 }));
 
@@ -88,7 +89,11 @@ vi.mock('../../../src/notifications/outbox', () => ({
   registerOutboxSender: vi.fn((fn: unknown) => { fixtures.outboxSender = fn as (jid: string, text: string) => Promise<string | null>; }),
   flushOutbox: fixtures.flush,
   NotConnectedError: class NotConnectedError extends Error {},
+  onOutboxOutcome: vi.fn(),
 }));
+vi.mock('../../../src/quotations/quotationService', () => ({ handleQuotationOutcome: vi.fn() }));
+vi.mock('../../../src/files/customerFileRepo', () => ({ getCustomerFile: vi.fn(), readCustomerFile: vi.fn() }));
+vi.mock('../../../src/files/inboundCapture', () => ({ captureInboundFile: fixtures.capture }));
 vi.mock('@whiskeysockets/baileys', () => {
   const makeWASocket = vi.fn(() => {
     const ev = new EventEmitter();
@@ -107,6 +112,7 @@ vi.mock('@whiskeysockets/baileys', () => {
     makeWASocket,
     useMultiFileAuthState: vi.fn().mockResolvedValue({ state: { creds: { me: undefined } }, saveCreds: vi.fn() }),
     fetchLatestBaileysVersion: vi.fn().mockResolvedValue({ version: [2, 3000, 1] }),
+    downloadMediaMessage: vi.fn(),
     DisconnectReason: { loggedOut: 401, timedOut: 408, connectionClosed: 428, restartRequired: 515 },
   };
 });
@@ -223,6 +229,11 @@ describe('Baileys QR connection lifecycle', () => {
     expect(by('t1')).toMatchObject({ type: 'text', text: 'Do you have exterior paint?' });
     // The connection itself never answers anything — only the pipeline can, and it ignores every non-text type.
     expect(socket.sendMessage).not.toHaveBeenCalled();
+    // A picture and a document the customer sent are handed to the customer-file store (never answered); text, reactions and voice are not.
+    const kept = fixtures.capture.mock.calls.map((c) => c[0] as { whatsappMessageId: string; media: { kind: string }; customerWaId: string });
+    expect(kept.map((k) => [k.whatsappMessageId, k.media.kind])).toEqual(expect.arrayContaining([['qr:i1', 'image'], ['qr:d1', 'document']]));
+    expect(kept.some((k) => ['qr:t1', 'qr:r1'].includes(k.whatsappMessageId))).toBe(false);
+    expect(kept.every((k) => k.customerWaId === '966500000001@s.whatsapp.net' || k.customerWaId === '966500000001')).toBe(true);
   });
 
   it('sends replies through the same socket and flattens interactive menus to numbered text', async () => {

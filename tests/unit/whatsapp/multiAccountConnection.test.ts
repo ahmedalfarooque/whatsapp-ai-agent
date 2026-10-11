@@ -23,6 +23,7 @@ const fixtures = vi.hoisted(() => ({
   operator: vi.fn(() => ({ text: 'done', result: { changed: true } })),
   outboxSender: null as null | ((jid: string, text: string) => Promise<string | null>),
   flush: vi.fn(async () => 0),
+  capture: vi.fn(async () => undefined),
   written: [] as string[],
 }));
 
@@ -88,7 +89,11 @@ vi.mock('../../../src/notifications/outbox', () => ({
   registerOutboxSender: vi.fn((fn: unknown) => { fixtures.outboxSender = fn as (jid: string, text: string) => Promise<string | null>; }),
   flushOutbox: fixtures.flush,
   NotConnectedError: class NotConnectedError extends Error {},
+  onOutboxOutcome: vi.fn(),
 }));
+vi.mock('../../../src/quotations/quotationService', () => ({ handleQuotationOutcome: vi.fn() }));
+vi.mock('../../../src/files/customerFileRepo', () => ({ getCustomerFile: vi.fn(), readCustomerFile: vi.fn() }));
+vi.mock('../../../src/files/inboundCapture', () => ({ captureInboundFile: fixtures.capture }));
 vi.mock('@whiskeysockets/baileys', () => {
   const makeWASocket = vi.fn(() => {
     const ev = new EventEmitter();
@@ -107,6 +112,7 @@ vi.mock('@whiskeysockets/baileys', () => {
     makeWASocket,
     useMultiFileAuthState: vi.fn().mockResolvedValue({ state: { creds: { me: undefined } }, saveCreds: vi.fn() }),
     fetchLatestBaileysVersion: vi.fn().mockResolvedValue({ version: [2, 3000, 1] }),
+    downloadMediaMessage: vi.fn(),
     DisconnectReason: { loggedOut: 401, timedOut: 408, connectionClosed: 428, restartRequired: 515 },
   };
 });

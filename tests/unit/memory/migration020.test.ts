@@ -32,7 +32,9 @@ describe('migration 020 — human handoffs (additive)', () => {
     const messages = db.prepare('SELECT * FROM conversation_messages ORDER BY id').all();
     runMigrations(db);
 
-    expect(db.prepare('SELECT * FROM customers ORDER BY id').all()).toEqual(customers);
+    // Later additive migrations may add nullable columns (021: email, company_name); every original column must be unchanged.
+    const original = (rows: unknown[]) => rows.map((r) => { const { email: _e, company_name: _c, ...rest } = r as Record<string, unknown>; return rest; });
+    expect(original(db.prepare('SELECT * FROM customers ORDER BY id').all())).toEqual(original(customers));
     expect(db.prepare('SELECT * FROM admin_users ORDER BY id').all()).toEqual(admins);
     expect(db.prepare('SELECT * FROM conversation_messages ORDER BY id').all()).toEqual(messages);
 

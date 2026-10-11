@@ -11,7 +11,7 @@ import { specFor } from '../../../src/dashboard/authorize';
  */
 const DIR = path.join(__dirname, '..', '..', '..', 'dashboard');
 const read = (name: string) => fs.readFileSync(path.join(DIR, name), 'utf-8');
-const SCRIPTS = ['theme-init.js', 'shell.js', 'app.js', 'pages-automation.js', 'inbox-core.js', 'pages-inbox.js', 'pages-accounts.js', 'pages-setup.js', 'pages-users.js', 'pages-home.js'];
+const SCRIPTS = ['theme-init.js', 'shell.js', 'app.js', 'pages-automation.js', 'inbox-core.js', 'pages-inbox.js', 'pages-accounts.js', 'pages-setup.js', 'pages-users.js', 'pages-home.js', 'pages-customers.js'];
 
 /** The sidebar exactly as it was before the redesign: [group, [route, label]...]. */
 const ORIGINAL_SIDEBAR: Array<[string, Array<[string, string]>]> = [
@@ -34,12 +34,15 @@ function parseSidebar(html: string): Array<[string, Array<[string, string]>]> {
 }
 
 describe('dashboard shell', () => {
-  it('keeps the original sidebar: same groups, same labels, same order and destinations (only Users & Permissions is added)', () => {
+  it('keeps the original sidebar: same groups, same labels, same order and destinations (only Users & Permissions and Customer Reports are added)', () => {
     const current = parseSidebar(read('index.html'));
-    const withoutUsers = current.map(([group, items]) => [group, items.filter(([route]) => route !== '#/users')] as [string, Array<[string, string]>]);
+    const added = new Set(['#/users', '#/customer-reports']);
+    const withoutUsers = current.map(([group, items]) => [group, items.filter(([route]) => !added.has(route))] as [string, Array<[string, string]>]);
     expect(withoutUsers).toEqual(ORIGINAL_SIDEBAR);
     const users = current.flatMap(([, items]) => items).filter(([route]) => route === '#/users');
     expect(users).toEqual([['#/users', 'Users & Permissions']]);
+    const reports = current.flatMap(([, items]) => items).filter(([route]) => route === '#/customer-reports');
+    expect(reports).toEqual([['#/customer-reports', 'Customer Reports']]);
     // the account switcher and the "Add WhatsApp account" link are still there
     const html = read('index.html');
     expect(html).toContain('id="account-list"');

@@ -113,8 +113,10 @@ describe('the router follows each business\'s own menu', () => {
     expect(route(shop, '2')).toMatchObject({ send: ['prices_offers_list'] });
     expect(route(shop, '3')).toMatchObject({ send: ['location_hours'] });
     expect(route(shop, '4')).toMatchObject({ kind: 'human_handoff', send: ['human_support'] });
+    // the number after this business's own four items is the Inquiry Cart (every business has it)
+    expect(route(shop, '5')).toMatchObject({ send: [], cart: { input: null } });
     // an option that does not exist in THIS menu is invalid here even though it exists in the original business's
-    expect(route(shop, '5')).toMatchObject({ send: ['invalid_option', 'main_menu'] });
+    expect(route(shop, '6')).toMatchObject({ send: ['invalid_option', 'main_menu'] });
     expect(route(shop, '9')).toMatchObject({ send: ['invalid_option', 'main_menu'] });
     // free text still goes to the AI
     expect(route(shop, 'do you have emulsion paint?')).toBeNull();

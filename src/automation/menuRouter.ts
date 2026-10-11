@@ -4,6 +4,8 @@ import type { TemplateVars } from '../templates/templateRepo';
 import { normalizeNumerals } from '../whatsapp/jid';
 import { MENU_STATES, type FlowSet, type MenuOption } from './menuStatic';
 import { getMenuTables } from './menuConfig';
+import { cartOptionNumber } from '../cart/cartOption';
+import { cartConsumesFreeText, isCartState } from '../cart/cartStates';
 import { currentAccountId } from '../accounts/accountContext';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { isCatalogueRequest } from '../catalogues/catalogueIntent';
@@ -82,6 +84,11 @@ export interface RouteResult {
   request?: { kind: 'appointment' | 'quotation'; payload: Record<string, string> };
   /** A catalogue the customer picked: the pipeline sends its PDF after the template bubbles. */
   catalogueId?: number;
+  /**
+   * The message belongs to the Inquiry Cart (cart/cartFlow.ts): `input` null = the customer just chose it in the main menu, otherwise
+   * what they sent while in a cart state. The pipeline runs it; the router stays free of database writes.
+   */
+  cart?: { input: string | null };
 }
 
 const DIGITS = /^\d{1,2}$/;
@@ -110,6 +117,7 @@ function catalogueList(): RouteResult {
 
 function applyOption(option: MenuOption, current: Customer, flows: FlowSet): RouteResult {
   if (option.catalogues) return catalogueList();
+  if (option.cart) return { kind: 'rule', send: [], cart: { input: null } };
   if (option.handoff) {
     return { kind: 'human_handoff', send: ['human_support'], state: MENU_STATES.MAIN_MENU, flowData: null };
   }
@@ -224,6 +232,12 @@ export function routeMenu(input: RouteInput): RouteResult | null {
     return { kind: 'rule', send: [], catalogueId: picked.id, state: MENU_STATES.CATALOGUE_SELECT, flowData: null };
   }
 
+  // 4c. Inquiry Cart: free-text steps (an item, a quantity, a reference) consume the whole message; the numbered steps take a number.
+  if (isCartState(state)) {
+    if (cartConsumesFreeText(state) || DIGITS.test(normalized)) return { kind: 'rule', send: [], cart: { input: raw } };
+    return null; // free text at a numbered cart step → AI, like every other menu
+  }
+
   // 5. Sub-menus.
   const submenu = state ? tables.submenus[state] : undefined;
   if (submenu) {
@@ -234,6 +248,9 @@ export function routeMenu(input: RouteInput): RouteResult | null {
 
   // 6. Main menu (also the default for unknown / stale states).
   if (!DIGITS.test(normalized)) return null; // free text → AI
-  const option = tables.main[String(Number(normalized))];
+  const chosen = String(Number(normalized));
+  // The Inquiry Cart takes the first number after the business's own items — for every business, whatever its menu looks like.
+  if (chosen === String(cartOptionNumber(tables))) return { kind: 'rule', send: [], cart: { input: null } };
+  const option = tables.main[chosen];
   return option ? applyOption(option, customer, tables.flows) : invalidChoice();
 }

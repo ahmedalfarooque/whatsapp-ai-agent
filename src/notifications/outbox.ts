@@ -14,7 +14,7 @@ import { currentAccountId, runWithAccount } from '../accounts/accountContext';
  * caller; failures are retried with backoff.
  */
 
-export type OutboxKind = 'business_new_request' | 'business_status' | 'customer_status' | 'operator_result';
+export type OutboxKind = 'business_new_request' | 'business_status' | 'customer_status' | 'operator_result' | 'customer_quotation';
 export type OutboxStatus = 'pending' | 'sent' | 'failed';
 
 export interface OutboxRow {
@@ -29,13 +29,35 @@ export interface OutboxRow {
   attempts: number;
   last_error: string | null;
   message_id: string | null;
+  /** A customer file to send with the message (the quotation document). NULL = text only. */
+  attachment_file_id: number | null;
   next_attempt_at: string;
   created_at: string;
   sent_at: string | null;
 }
 
-/** Delivers one message through the given account's connection; throws NotConnectedError when that account is offline. */
-export type OutboxSender = (jid: string, text: string, accountId: number) => Promise<string | null>;
+/**
+ * Delivers one message through the given account's connection; throws NotConnectedError when that account is offline. With an attachment,
+ * the file is sent as a WhatsApp document/image with the text as its caption (or the text first when it is too long for a caption).
+ * Resolves with the WhatsApp message id only when WhatsApp accepted the message.
+ */
+export type OutboxSender = (jid: string, text: string, accountId: number, attachment?: { fileId: number }) => Promise<string | null>;
+
+/** Called after a row is delivered / permanently fails, so a feature (the quotation) can record the real delivery outcome. Never throws into the flush. */
+export type OutboxOutcomeHook = (row: OutboxRow, outcome: 'delivered' | 'failed') => void;
+const outcomeHooks: OutboxOutcomeHook[] = [];
+export function onOutboxOutcome(hook: OutboxOutcomeHook): void {
+  if (!outcomeHooks.includes(hook)) outcomeHooks.push(hook);
+}
+function notifyOutcome(row: OutboxRow, outcome: 'delivered' | 'failed'): void {
+  for (const hook of outcomeHooks) {
+    try {
+      hook(row, outcome);
+    } catch (error) {
+      logger.warn({ id: row.id, kind: row.kind, error: String((error as Error).message) }, '[OUTBOX] outcome hook failed');
+    }
+  }
+}
 
 export class NotConnectedError extends Error {
   constructor(accountId?: number) {
@@ -61,19 +83,19 @@ const BACKOFF_S = [5, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 3600, 3600];
 
 /** Idempotent: a second call with the same dedupeKey is a no-op and returns the existing row. */
 export function enqueueNotification(
-  input: { kind: OutboxKind; requestId?: number | null; targetJid: string; body: string; dedupeKey: string; accountId?: number },
+  input: { kind: OutboxKind; requestId?: number | null; targetJid: string; body: string; dedupeKey: string; accountId?: number; attachmentFileId?: number | null },
   db: Database.Database = getDb(),
 ): { row: OutboxRow; created: boolean } {
   const existing = db.prepare('SELECT * FROM notification_outbox WHERE dedupe_key = ?').get(input.dedupeKey) as OutboxRow | undefined;
   if (existing) return { row: existing, created: false };
   const result = db
     .prepare(
-      `INSERT INTO notification_outbox (dedupe_key, kind, request_id, target_jid, body, whatsapp_account_id)
-       VALUES (@dedupeKey, @kind, @requestId, @targetJid, @body, @accountId)`,
+      `INSERT INTO notification_outbox (dedupe_key, kind, request_id, target_jid, body, whatsapp_account_id, attachment_file_id)
+       VALUES (@dedupeKey, @kind, @requestId, @targetJid, @body, @accountId, @attachmentFileId)`,
     )
     .run({
       dedupeKey: input.dedupeKey, kind: input.kind, requestId: input.requestId ?? null, targetJid: input.targetJid, body: input.body,
-      accountId: input.accountId ?? currentAccountId(),
+      accountId: input.accountId ?? currentAccountId(), attachmentFileId: input.attachmentFileId ?? null,
     });
   const row = db.prepare('SELECT * FROM notification_outbox WHERE id = ?').get(result.lastInsertRowid) as OutboxRow;
   return { row, created: true };
@@ -127,10 +149,11 @@ export function flushOutbox(db: Database.Database = getDb()): Promise<number> {
       for (const row of due) {
         if (offlineAccounts.has(row.whatsapp_account_id)) continue;
         try {
-          const messageId = await runWithAccount(row.whatsapp_account_id, () => sender!(row.target_jid, row.body, row.whatsapp_account_id));
+          const messageId = await runWithAccount(row.whatsapp_account_id, () => sender!(row.target_jid, row.body, row.whatsapp_account_id, row.attachment_file_id ? { fileId: row.attachment_file_id } : undefined));
           db.prepare(`UPDATE notification_outbox SET status = 'sent', sent_at = datetime('now'), message_id = ?, attempts = attempts + 1, last_error = NULL WHERE id = ?`).run(messageId, row.id);
           delivered += 1;
           logger.info({ id: row.id, kind: row.kind, account: row.whatsapp_account_id, to: maskWaId(row.target_jid), messageId }, '[OUTBOX] delivered');
+          notifyOutcome({ ...row, status: 'sent', message_id: messageId }, 'delivered');
         } catch (error) {
           const attempts = row.attempts + 1;
           const notConnected = error instanceof NotConnectedError;
@@ -141,6 +164,7 @@ export function flushOutbox(db: Database.Database = getDb()): Promise<number> {
                next_attempt_at = @nextAttemptAt WHERE id = @id`,
           ).run({ id: row.id, status: exhausted ? 'failed' : 'pending', attempts: notConnected ? row.attempts : attempts, error: String((error as Error).message ?? error).slice(0, 300), nextAttemptAt: sqliteTime(Date.now() + (notConnected ? 30 : delay) * 1000) });
           logger.warn({ id: row.id, kind: row.kind, account: row.whatsapp_account_id, attempts, notConnected, error: String((error as Error).message) }, '[OUTBOX] delivery deferred');
+          if (exhausted) notifyOutcome({ ...row, status: 'failed', attempts, last_error: String((error as Error).message ?? error).slice(0, 300) }, 'failed');
           if (notConnected) offlineAccounts.add(row.whatsapp_account_id); // nothing else leaves this account until it reconnects
         }
       }

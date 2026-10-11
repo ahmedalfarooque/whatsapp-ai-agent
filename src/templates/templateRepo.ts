@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import { getDb } from '../memory/db';
 import { withLanguageOption } from './languageOption';
+import { withCartOption, cartOptionNumber } from '../cart/cartOption';
+import { getMenuTables } from '../automation/menuConfig';
 import { getBusinessSettings, formatBusinessHours, formatAddress } from '../config/businessSettings';
 import { renderCustomerOffers } from '../offers/offerRepo';
 import { renderCustomerCatalogues } from '../catalogues/catalogueRepo';
@@ -312,7 +314,9 @@ function renderTemplateBody(text: string, vars: TemplateVars): string {
  */
 export function renderTemplateText(text: string, vars: TemplateVars = {}): string {
   const rendered = renderTemplateBody(text, vars);
-  return vars.templateKey === 'main_menu' ? withLanguageOption(rendered, vars.language ?? 'en') : rendered;
+  if (vars.templateKey !== 'main_menu') return rendered;
+  const language = vars.language ?? 'en';
+  return withLanguageOption(withCartOption(rendered, language, cartOptionNumber(getMenuTables())), language);
 }
 
 /** The live message resolver. Reads live_* only — drafts are never sent to customers. */

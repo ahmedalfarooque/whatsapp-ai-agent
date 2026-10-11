@@ -2,6 +2,7 @@ import type { TemplateDefault } from './defaults';
 import { TEMPLATE_DEFAULTS } from './defaults';
 import { getMenuConfig, menuTemplateKeys, renderMainMenuText, renderSubmenuText, keycap, type MenuItem } from '../automation/menuConfig';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
+import { CART_TEMPLATES } from './cartDefaults';
 
 /**
  * Reply templates for every business EXCEPT the original one.
@@ -150,6 +151,7 @@ export function genericTemplateDefaults(accountId: number): TemplateDefault[] {
     reuse('unsupported_message'),
     reuse('fallback_error'),
     reuse('ai_disabled'),
+    ...CART_TEMPLATES,
   );
 
   // The catalogue library (only for a business that has it): the list is generated from the database at send time.

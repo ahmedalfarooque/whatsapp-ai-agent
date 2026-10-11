@@ -30,6 +30,8 @@ export interface MenuOption {
   handoff?: boolean;
   /** Shows the business's catalogue list (only ever set by a non-original business's own menu). */
   catalogues?: boolean;
+  /** Opens the Inquiry Cart (the platform-wide cart every business has in its main menu). */
+  cart?: boolean;
 }
 
 export interface SubmenuDef {
@@ -85,7 +87,8 @@ export const SUBMENUS: Record<string, SubmenuDef> = {
       '2': { template: 'prices_services' },
       '3': { template: 'prices_offers_list' },
       '4': { flow: 'quotation' },
-      '5': { template: 'prices_inquiry_cart' },
+      // The old static "cart is empty" page is replaced by the real Inquiry Cart (the same one the main menu offers to every business).
+      '5': { cart: true },
     },
   },
 };

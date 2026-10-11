@@ -19,6 +19,7 @@ import {
 import { resolveTemplate, type TemplateVars } from '../templates/templateRepo';
 import { enqueueNotification, flushOutbox, listOutbox, type OutboxRow } from '../notifications/outbox';
 import { currentAccountId, runWithAccount } from '../accounts/accountContext';
+import { RequestTransitionError, canTransition, statusAllowedForKind } from './quotationLifecycle';
 
 /**
  * One source of truth for appointment / quotation status. Every transition —
@@ -38,6 +39,18 @@ const CUSTOMER_TEMPLATE: Partial<Record<CustomerRequestStatus, string>> = {
   completed: 'request_status_update',
 };
 
+/** Quotations have their own customer wording for approval / rejection; sent has none because the quotation message itself is the notice. */
+const QUOTATION_TEMPLATE: Partial<Record<CustomerRequestStatus, string>> = {
+  ...CUSTOMER_TEMPLATE,
+  approved: 'quotation_approved',
+  rejected: 'quotation_rejected',
+  expired: 'request_status_update',
+};
+
+function customerTemplateFor(kind: CustomerRequest['kind'], status: CustomerRequestStatus): string | undefined {
+  return (kind === 'quotation' ? QUOTATION_TEMPLATE : CUSTOMER_TEMPLATE)[status];
+}
+
 const STATUS_LABEL: Record<CustomerRequestStatus, { en: string; ar: string }> = {
   pending: { en: 'Pending', ar: 'قيد الانتظار' },
   contacted: { en: 'Contacted', ar: 'تم التواصل' },
@@ -46,6 +59,10 @@ const STATUS_LABEL: Record<CustomerRequestStatus, { en: string; ar: string }> = 
   cancelled: { en: 'Cancelled', ar: 'ملغي' },
   completed: { en: 'Completed', ar: 'مكتمل' },
   closed: { en: 'Closed', ar: 'مغلق' },
+  preparing: { en: 'Being prepared', ar: 'قيد الإعداد' },
+  approved: { en: 'Approved', ar: 'تمت الموافقة' },
+  sent: { en: 'Sent', ar: 'تم الإرسال' },
+  expired: { en: 'Expired', ar: 'منتهي الصلاحية' },
 };
 
 const KIND_LABEL = { appointment: { en: 'Appointment', ar: 'موعد' }, quotation: { en: 'Quotation', ar: 'عرض سعر' } } as const;
@@ -100,7 +117,7 @@ export function businessNotificationJid(db: Database.Database = getDb(), account
   return session.jid ? canonicalJid(session.jid) : null;
 }
 
-function kick(): void {
+export function kickOutbox(): void {
   void flushOutbox().catch((error) => logger.warn({ error }, '[OUTBOX] flush failed'));
 }
 
@@ -118,7 +135,7 @@ export function notifyBusinessNewRequest(request: CustomerRequest, db: Database.
       { kind: 'business_new_request', requestId: request.id, targetJid: target, body, dedupeKey: `business:new:${request.id}`, accountId: request.whatsapp_account_id },
       db,
     );
-    kick();
+    kickOutbox();
     return row;
   });
 }
@@ -139,6 +156,14 @@ export function isRequestStatus(value: unknown): value is CustomerRequestStatus 
  * Customer notification keyed by (request, status) so a status is announced
  * to the customer at most once, even if staff flip back and forth.
  */
+export interface StatusChangeMeta {
+  /** The dashboard user making the change, and the reason they gave: both kept on the audit event. */
+  adminUserId?: number | null;
+  reason?: string | null;
+  /** Only the quotation delivery code sets this: "sent" is a delivery outcome, never a button. */
+  allowSent?: boolean;
+}
+
 export function changeRequestStatus(
   id: number,
   newStatus: CustomerRequestStatus,
@@ -146,20 +171,24 @@ export function changeRequestStatus(
   db: Database.Database = getDb(),
   /** Dashboard callers pass their selected account so another business's request id is "not found"; internal callers pass null. */
   accountId: number | null = currentAccountId(),
+  meta: StatusChangeMeta = {},
 ): StatusChangeResult | undefined {
   const current = getCustomerRequest(id, db, accountId);
   if (!current) return undefined;
   if (current.status === newStatus) return { request: current, changed: false, event: null, notifications: [] };
+  if (!statusAllowedForKind(current.kind, newStatus)) throw new RequestTransitionError(` does not apply to an ${current.kind}`);
+  if (newStatus === 'sent' && !meta.allowSent) throw new RequestTransitionError('A quotation becomes Sent only when it is actually delivered to the customer');
+  if (!canTransition(current.kind, current.status, newStatus)) throw new RequestTransitionError(`A ${current.kind} cannot go from ${current.status} to ${newStatus}`);
 
   // Everything below (templates, staff number, outbox rows) belongs to the request's own business.
   return runWithAccount(current.whatsapp_account_id, () => {
     const account = current.whatsapp_account_id;
     const updated = setCustomerRequestStatus(id, newStatus, db)!;
-    const event = insertRequestEvent({ requestId: id, reference: updated.reference, oldStatus: current.status, newStatus, actor: actor.type, actorDetail: actor.detail ?? null }, db);
+    const event = insertRequestEvent({ requestId: id, reference: updated.reference, oldStatus: current.status, newStatus, actor: actor.type, actorDetail: actor.detail ?? null, adminUserId: meta.adminUserId ?? null, reason: meta.reason ?? null }, db);
     const notifications: OutboxRow[] = [];
     const customer = getCustomerById(updated.customer_id, db, null);
 
-    const templateKey = CUSTOMER_TEMPLATE[newStatus];
+    const templateKey = customerTemplateFor(updated.kind, newStatus);
     if (templateKey && customer) {
       const language = (customer.language ?? 'en') as 'ar' | 'en';
       const body = resolveTemplate(templateKey, language, requestTemplateVars(updated, customer, language), db, account);
@@ -182,7 +211,7 @@ export function changeRequestStatus(
       }
     }
     logger.info({ reference: updated.reference, account, from: current.status, to: newStatus, actor: actor.type, queued: notifications.length }, '[REQUEST] status changed');
-    kick();
+    kickOutbox();
     return { request: updated, changed: true, event, notifications };
   });
 }
@@ -195,6 +224,7 @@ const COMMANDS: Record<string, CustomerRequestStatus> = {
   cancel: 'cancelled', cancelled: 'cancelled', canceled: 'cancelled', 'إلغاء': 'cancelled', 'الغاء': 'cancelled',
   complete: 'completed', completed: 'completed', done: 'completed', 'إكمال': 'completed', 'اكمال': 'completed', 'تم': 'completed',
   contacted: 'contacted', 'تواصل': 'contacted',
+  approve: 'approved', approved: 'approved', 'اعتماد': 'approved', 'موافقة': 'approved',
   close: 'closed', closed: 'closed', 'إغلاق': 'closed', 'اغلاق': 'closed',
 };
 
@@ -227,7 +257,15 @@ export function handleOperatorCommand(
 ): { text: string; result: StatusChangeResult | null } {
   const request = getCustomerRequestByReference(command.reference, db, accountId);
   if (!request) return { text: `⚠️ ${command.reference}: no such request. / لا يوجد طلب بهذا الرقم.`, result: null };
-  const result = changeRequestStatus(request.id, command.status, { type: 'whatsapp', detail: actorDetail }, db, accountId)!;
+  // A quotation is APPROVED (a decision to quote), not "confirmed"; the older word keeps working and means approval for a quotation.
+  const wanted = request.kind === 'quotation' && command.status === 'confirmed' && request.status !== 'confirmed' ? 'approved' : command.status;
+  let result: StatusChangeResult;
+  try {
+    result = changeRequestStatus(request.id, wanted, { type: 'whatsapp', detail: actorDetail }, db, accountId)!;
+  } catch (error) {
+    if (error instanceof RequestTransitionError) return { text: `⚠️ ${request.reference}: ${error.message}. / لا يمكن تنفيذ هذا الإجراء على الحالة الحالية.`, result: null };
+    throw error;
+  }
   const customer = getCustomerById(result.request.customer_id, db, null);
   const vars = requestTemplateVars(result.request, customer, 'en', { actor: 'WhatsApp operator' });
   if (!result.changed) {

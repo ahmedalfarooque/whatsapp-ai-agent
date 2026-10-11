@@ -513,73 +513,8 @@ async function renderLogin(view) {
 route('#/login', 'Sign in', '', renderLogin);
 
 // ---------------------------------------------------------------------
-// Customers (list + search + pagination + detail)
+// Customers: the directory, the customer profile and Customer Reports live in pages-customers.js
 // ---------------------------------------------------------------------
-
-route('#/customers', 'Customers', 'Everyone who has messaged the agent, from the live database.', async (view) => {
-  let state = { search: '', offset: 0, limit: 20 };
-
-  async function draw() {
-    const data = await api(`/api/dashboard/customers?search=${encodeURIComponent(state.search)}&limit=${state.limit}&offset=${state.offset}`);
-    view.innerHTML = `
-      <section class="panel">
-        <div class="toolbar"><input id="search" type="search" placeholder="Search by name or WhatsApp number…" value="${esc(state.search)}" /></div>
-        ${
-          data.items.length
-            ? `<table class="data-table"><thead><tr><th>Customer</th><th>Conversations</th><th>Bookings</th><th>Last interaction</th></tr></thead><tbody>${data.items
-                .map(
-                  (c) =>
-                    `<tr class="row-link" data-id="${c.id}"><td>${esc(c.display_name || c.wa_id)}</td><td>${c.conversationCount}</td><td>${c.bookingCount}</td><td>${formatDate(c.lastInteractionAt)}</td></tr>`,
-                )
-                .join('')}</tbody></table>`
-            : emptyView(state.search ? 'No customers match that search.' : 'No customers yet — they appear automatically once someone messages the agent.')
-        }
-        <div class="pager"><span class="muted">${data.total} total</span><div><button id="prev" class="btn" ${state.offset === 0 ? 'disabled' : ''}>← Prev</button><button id="next" class="btn" ${state.offset + state.limit >= data.total ? 'disabled' : ''}>Next →</button></div></div>
-      </section>`;
-
-    const searchInput = view.querySelector('#search');
-    let debounceTimer;
-    searchInput.addEventListener('input', (e) => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        state.search = e.target.value;
-        state.offset = 0;
-        draw();
-      }, 250);
-    });
-    view.querySelector('#prev')?.addEventListener('click', () => {
-      state.offset = Math.max(0, state.offset - state.limit);
-      draw();
-    });
-    view.querySelector('#next')?.addEventListener('click', () => {
-      state.offset += state.limit;
-      draw();
-    });
-    view.querySelectorAll('.row-link').forEach((row) => {
-      row.addEventListener('click', () => {
-        location.hash = `#/customers/${row.dataset.id}`;
-      });
-    });
-  }
-
-  await draw();
-});
-
-route(/^#\/customers\/(?<id>\d+)$/, 'Customer', '', async (view, params) => {
-  const customer = await api(`/api/dashboard/customers/${params.id}`);
-  view.innerHTML = `
-    <a class="back-link" href="#/customers">← Back to customers</a>
-    <section class="panel detail">
-      <h3>${esc(customer.display_name || customer.wa_id)}</h3>
-      <dl class="detail-grid">
-        <dt>WhatsApp number</dt><dd>${esc(customer.wa_id)}</dd>
-        <dt>Conversations</dt><dd>${customer.conversationCount}</dd>
-        <dt>Confirmed bookings</dt><dd>${customer.bookingCount}</dd>
-        <dt>Last interaction</dt><dd>${formatDate(customer.lastInteractionAt)}</dd>
-        <dt>Customer since</dt><dd>${formatDate(customer.created_at)}</dd>
-      </dl>
-    </section>`;
-});
 
 // ---------------------------------------------------------------------
 // Conversations (the unified inbox: see pages-inbox.js)

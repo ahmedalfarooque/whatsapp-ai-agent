@@ -92,6 +92,35 @@ export function classifyMessage(message: { message?: unknown } | null | undefine
   return { kind: 'other', text: '', caption: '' };
 }
 
+export interface MediaDescriptor {
+  kind: 'image' | 'document' | 'video' | 'audio' | 'voice' | 'sticker';
+  mimeType: string;
+  fileName: string;
+  /** Size WhatsApp reports, when it does (checked BEFORE downloading anything). */
+  fileLength: number | null;
+}
+
+/** The file behind an image / document / video / audio message — what the customer sent, as WhatsApp describes it. Null for everything else. */
+export function describeMedia(message: { message?: unknown } | null | undefined): MediaDescriptor | null {
+  const m = unwrap(message?.message as Content);
+  if (!m) return null;
+  const entries: [MediaDescriptor['kind'], string][] = [
+    ['image', 'imageMessage'], ['document', 'documentMessage'], ['video', 'videoMessage'], ['audio', 'audioMessage'], ['sticker', 'stickerMessage'],
+  ];
+  for (const [kind, key] of entries) {
+    const node = m[key] as { mimetype?: unknown; fileName?: unknown; fileLength?: unknown } | undefined;
+    if (!node) continue;
+    const length = typeof node.fileLength === 'number' ? node.fileLength : typeof node.fileLength === 'object' && node.fileLength !== null && 'toNumber' in node.fileLength ? (node.fileLength as { toNumber(): number }).toNumber() : Number(node.fileLength);
+    return {
+      kind: kind === 'audio' && (node as { ptt?: unknown }).ptt ? 'voice' : kind,
+      mimeType: str(node.mimetype),
+      fileName: str(node.fileName),
+      fileLength: Number.isFinite(length) && length > 0 ? length : null,
+    };
+  }
+  return null;
+}
+
 /** True for a message the assistant may answer automatically. */
 export function isAnswerableKind(kind: string): boolean {
   return kind === 'text';

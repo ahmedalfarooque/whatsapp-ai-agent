@@ -76,6 +76,8 @@ import { ensureProviderHealth, refreshModelHealth } from '../llm/aiProviderHealt
 import { accountUiStatus } from '../accounts/accountStatus';
 import { canManageConfiguration, canManageConnections, featureLevel, levelAtLeast, type AuthUser } from './permissions';
 import { runWithAccount } from '../accounts/accountContext';
+import { registerCustomerRoutes } from './customerRoutes';
+import { RequestTransitionError, nextStatuses } from '../requests/quotationLifecycle';
 import {
   listAccountsForAdmin, getAccount, createAccount, updateAccount, setAccountEnabled, AccountValidationError, accountIdsForAdmin, grantAccountAccess, type WhatsappAccount,
 } from '../accounts/accountRepo';
@@ -337,6 +339,7 @@ export function createDashboardRouter(): Router {
   registerUserRoutes(router);
   registerHandoffRoutes(router);
   registerInboxRoutes(router);
+  registerCustomerRoutes(router);
 
   // ---- WhatsApp accounts (businesses) ----------------------------------------
   function accountView(account: WhatsappAccount) {
@@ -685,7 +688,7 @@ export function createDashboardRouter(): Router {
     const kind = typeof req.query.kind === 'string' && ['appointment', 'quotation'].includes(req.query.kind) ? (req.query.kind as CustomerRequestKind) : undefined;
     const status = isRequestStatus(req.query.status) ? req.query.status : undefined;
     const limit = Number.parseInt(String(req.query.limit ?? '50'), 10);
-    const requests = listCustomerRequests({ kind, status, limit: Number.isFinite(limit) ? limit : 50 }).map((rq) => ({ ...rq, ...requestTimeline(rq.id) }));
+    const requests = listCustomerRequests({ kind, status, limit: Number.isFinite(limit) ? limit : 50 }).map((rq) => ({ ...rq, ...requestTimeline(rq.id), nextStatuses: nextStatuses(rq.kind, rq.status) }));
     res.json({
       requests,
       pending: countCustomerRequests('pending'),
@@ -701,7 +704,13 @@ export function createDashboardRouter(): Router {
       res.status(400).json({ error: `status must be one of: ${REQUEST_STATUSES.join(', ')}` });
       return;
     }
-    const result = changeRequestStatus(id, status, { type: 'dashboard', detail: actor(req) });
+    let result: ReturnType<typeof changeRequestStatus>;
+    try {
+      result = changeRequestStatus(id, status, { type: 'dashboard', detail: actor(req) }, undefined, undefined, { adminUserId: req.authUser?.id ?? null, reason: typeof (req.body as { reason?: unknown })?.reason === 'string' ? (req.body as { reason: string }).reason : null });
+    } catch (error) {
+      if (error instanceof RequestTransitionError) { res.status(409).json({ error: error.message }); return; }
+      throw error;
+    }
     if (!result) { res.status(404).json({ error: 'Request not found' }); return; }
     res.json({ ...result.request, changed: result.changed, event: result.event, queued: result.notifications.length, ...requestTimeline(id) });
   });

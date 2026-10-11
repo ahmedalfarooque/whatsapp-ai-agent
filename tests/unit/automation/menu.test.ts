@@ -138,7 +138,8 @@ describe('menu router — submenus, flows, universal commands', () => {
     expect(routeMenu({ text: '3', customer: inPrices })).toMatchObject({ send: ['prices_offers_list'] });
     expect(DATA_DRIVEN_FALLBACKS.prices_offers_list).toEqual({ placeholder: 'offers', fallback: 'prices_offers' });
     expect(routeMenu({ text: '4', customer: inPrices })).toMatchObject({ send: ['quotation_intro'], state: 'QUOTATION_STEP_1', flowData: {} });
-    expect(routeMenu({ text: '5', customer: inPrices })).toMatchObject({ send: ['prices_inquiry_cart'] });
+    // Option 5 is the real Inquiry Cart now (the old static "cart is empty" page is gone).
+    expect(routeMenu({ text: '5', customer: inPrices })).toMatchObject({ send: [], cart: { input: null } });
   });
 
   it('the appointment flow collects eight answers in order and completes with a request', () => {

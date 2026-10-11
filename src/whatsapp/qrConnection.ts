@@ -4,6 +4,7 @@ import pino from 'pino';
 import QRCode from 'qrcode';
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
   type WASocket,
@@ -35,8 +36,12 @@ import { recordReplyActivity } from '../automation/settingsRepo';
 import { replyTransport, type ReplyTransport } from './replyTransport';
 import type { OutboundDocument } from './types';
 import { isDirectChatJid, isLidJid, jidToPhoneNumber, jidToUser } from './jid';
-import { classifyMessage } from './messageKind';
-import { registerOutboxSender, flushOutbox, NotConnectedError } from '../notifications/outbox';
+import { classifyMessage, describeMedia } from './messageKind';
+import { captureInboundFile } from '../files/inboundCapture';
+import { registerOutboxSender, flushOutbox, NotConnectedError, onOutboxOutcome } from '../notifications/outbox';
+import { handleQuotationOutcome } from '../quotations/quotationService';
+import { getCustomerFile, readCustomerFile } from '../files/customerFileRepo';
+import { MAX_IMAGE_CAPTION_CHARS } from '../offers/offerMedia';
 import { parseOperatorCommand, handleOperatorCommand } from '../requests/requestService';
 
 /**
@@ -436,11 +441,37 @@ class QrConnection {
   // ---- outbound
 
   /** Delivers one notification through this account's socket (the outbox sender). */
-  async send(jid: string, text: string): Promise<string | null> {
+  async send(jid: string, text: string, attachment?: { fileId: number }): Promise<string | null> {
     if (!this.sock || this.phase !== 'connected') throw new NotConnectedError(this.accountId);
+    if (attachment) return this.sendWithAttachment(this.sock, jid, text, attachment.fileId);
     const sent = await this.sock.sendMessage(jid, { text });
     this.rememberSent(sent?.key?.id);
     return sent?.key?.id ?? null;
+  }
+
+  /**
+   * A message with a customer file (the quotation document). The file is read from THIS business's own store; a missing or unreadable file
+   * fails the delivery (it is retried, then reported) instead of quietly sending the text alone. The text is the file's caption when it
+   * fits; a longer text follows the file as its own message.
+   */
+  private async sendWithAttachment(sock: WASocket, jid: string, text: string, fileId: number): Promise<string | null> {
+    const file = getCustomerFile(fileId, undefined, this.accountId);
+    const bytes = file ? readCustomerFile(file) : null;
+    if (!file || !bytes) throw new Error('The attached file is missing or unreadable');
+    const fitsCaption = text.length <= MAX_IMAGE_CAPTION_CHARS;
+    const caption = fitsCaption ? text : (text.split('\n')[0] ?? '').slice(0, MAX_IMAGE_CAPTION_CHARS);
+    const content = file.kind === 'image'
+      ? { image: bytes, mimetype: file.mime_type ?? 'image/jpeg', caption }
+      : { document: bytes, mimetype: file.mime_type ?? 'application/octet-stream', fileName: file.original_name ?? 'quotation', caption };
+    const sent = await sock.sendMessage(jid, content);
+    this.rememberSent(sent?.key?.id);
+    let id = sent?.key?.id ?? null;
+    if (!fitsCaption) {
+      const follow = await sock.sendMessage(jid, { text });
+      this.rememberSent(follow?.key?.id);
+      id = follow?.key?.id ?? id;
+    }
+    return id;
   }
 
   private buildTransport(instance: WASocket, run: number, replyJid: string): ReplyTransport {
@@ -504,6 +535,23 @@ class QrConnection {
   }
 
   // ---- inbound
+
+  /** Starts keeping the picture / document of an inbound message (customer files). Fire-and-forget; every failure is recorded for staff, never thrown. */
+  private keepCustomerFile(instance: WASocket, message: WAMessage, messageId: string, customerJid: string, identityCertain: boolean, caption: string): void {
+    const media = describeMedia(message);
+    if (!media) return;
+    void runWithAccount(this.accountId, () =>
+      captureInboundFile({
+        accountId: this.accountId,
+        customerWaId: customerJid,
+        whatsappMessageId: messageId,
+        media,
+        caption,
+        identityCertain,
+        download: () => downloadMediaMessage(message, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: instance.updateMediaMessage }) as Promise<Buffer>,
+      }),
+    );
+  }
 
   private async handleInbound(instance: WASocket, run: number, message: WAMessage): Promise<void> {
     const remoteJid = message.key.remoteJid ?? '';
@@ -591,6 +639,7 @@ class QrConnection {
     if (Date.now() - sentAt > STALE_MESSAGE_MS) {
       // Offline backlog delivered on (re)connect: never auto-answer old messages.
       markWebhookEventProcessed(messageId);
+      this.keepCustomerFile(instance, message, messageId, customerJid, Boolean(phoneJid) || !isLidJid(customerJid), classified.caption);
       recordReplyActivity({ waId: customerJid, channel: QR_CHANNEL, kind: 'suppressed', detail: 'Stale message delivered after reconnect — not auto-answered', accountId: this.accountId });
       logger.info({ account: this.accountId, customer: maskWaId(customerJid), ageSeconds: Math.round((Date.now() - sentAt) / 1000) }, '[WA-INBOUND] filtered stale');
       return;
@@ -618,6 +667,8 @@ class QrConnection {
           const customer = getCustomerByWaId(customerJid, undefined, this.accountId);
           if (customer) setCustomerReplyJid(customer.id, replyJid);
           markWebhookEventProcessed(messageId);
+          // A file the customer sent is kept with that customer. Never answered, never awaited: it cannot delay or break the conversation.
+          this.keepCustomerFile(instance, message, messageId, customerJid, Boolean(phoneJid) || !isLidJid(customerJid), classified.caption);
           logger.info({ account: this.accountId, customer: maskWaId(customerJid) }, '[WA-INBOUND] processInboundMessage completed');
         } catch (error) {
           markWebhookEventFailed(messageId, 'QR message processing failed');
@@ -999,11 +1050,13 @@ export function listConnections(): QrStatus[] {
 }
 
 /** Outbox sender: a row leaves ONLY through its own account's connected socket; otherwise it stays pending. */
-registerOutboxSender(async (jid, text, accountId) => {
+registerOutboxSender(async (jid, text, accountId, attachment) => {
   const connection = connections.get(accountId);
   if (!connection) throw new NotConnectedError(accountId);
-  return connection.send(jid, text);
+  return connection.send(jid, text, attachment);
 });
+// A quotation message becomes "sent" only when this delivery succeeds (quotations/quotationService.ts).
+onOutboxOutcome((row, outcome) => handleQuotationOutcome(row, outcome));
 
 export function getQrStatus(accountId: number = LEGACY_ACCOUNT_ID): QrStatus {
   return getConnection(accountId).status();

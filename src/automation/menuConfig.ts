@@ -267,7 +267,7 @@ export function getMenuTables(accountId: number = currentAccountId(), db: Databa
 
 // ---------------------------------------------------------------- rendering helpers
 
-const KEYCAPS = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
+const KEYCAPS = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
 export const keycap = (n: number): string => KEYCAPS[n] ?? `${n}.`;
 
 /** The numbered list shown for the main menu (or a sub-menu's entries). */

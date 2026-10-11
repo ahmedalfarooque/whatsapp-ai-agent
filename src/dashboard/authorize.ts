@@ -80,6 +80,7 @@ const RULES: readonly Rule[] = [
   { test: /^\/handoffs(\/|$)/, spec: F('support') },
   { test: /^\/inbox(\/|$)/, spec: F('conversations') },
   { test: /^\/customers(\/|$)/, spec: F('customers') },
+  { test: /^\/customer-reports(\/|$)/, spec: F('customers') },
   { test: /^\/support-queue$/, spec: F('support') },
   { test: /^\/(requests|bookings)(\/|$)/, spec: F('requests') },
   { test: /^\/notifications(\/|$)/, spec: F('notifications') },

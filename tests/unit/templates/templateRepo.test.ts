@@ -1,4 +1,8 @@
 import { withLanguageOption } from '../../../src/templates/languageOption';
+import { withCartOption } from '../../../src/cart/cartOption';
+
+// What a customer of the original business receives: the stored text plus the permanent Inquiry Cart (number 10 after its nine items) and language lines.
+const mainMenuAsSent = (text: string, language: 'ar' | 'en'): string => withLanguageOption(withCartOption(text, language, 10), language);
 import { describe, it, expect, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createTestDb } from '../../../src/memory/db';
@@ -42,8 +46,8 @@ describe('reply templates — default / draft / live separation', () => {
     expect(t.status).toBe('draft');
     expect(t.hasDraft).toBe(true);
     expect(t.draftEn).toBe('DRAFT ONLY');
-    expect(resolveTemplate('main_menu', 'en', {}, db)).toBe(withLanguageOption(t.defaultEn, 'en'));
-    expect(resolveTemplate('main_menu', 'ar', {}, db)).toBe(withLanguageOption(t.defaultAr, 'ar'));
+    expect(resolveTemplate('main_menu', 'en', {}, db)).toBe(mainMenuAsSent(t.defaultEn, 'en'));
+    expect(resolveTemplate('main_menu', 'ar', {}, db)).toBe(mainMenuAsSent(t.defaultAr, 'ar'));
   });
 
   it('publishing promotes the draft to live, clears the draft, and keeps the default intact', () => {
@@ -54,8 +58,8 @@ describe('reply templates — default / draft / live separation', () => {
     expect(published.draftEn).toBeNull();
     expect(published.defaultEn).toBe(TEMPLATE_DEFAULTS.find((t) => t.key === 'main_menu')!.en);
     expect(published.isModified).toBe(true);
-    expect(resolveTemplate('main_menu', 'en', {}, db)).toBe(withLanguageOption('New menu', 'en'));
-    expect(resolveTemplate('main_menu', 'ar', {}, db)).toBe(withLanguageOption('القائمة الجديدة', 'ar'));
+    expect(resolveTemplate('main_menu', 'en', {}, db)).toBe(mainMenuAsSent('New menu', 'en'));
+    expect(resolveTemplate('main_menu', 'ar', {}, db)).toBe(mainMenuAsSent('القائمة الجديدة', 'ar'));
   });
 
   it('discarding a draft leaves live content untouched', () => {
