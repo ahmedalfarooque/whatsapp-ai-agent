@@ -380,7 +380,14 @@ select.input,.field select{width:100%;height:42px;padding:0 12px;border-radius:1
 }
 @media (max-width:480px){
   .kpi-value{font-size:28px}
-  .topbar{padding:12px 14px;border-radius:20px}
+  .topbar{padding:12px 14px;border-radius:20px;gap:8px 10px}
+  /* phone header: row 1 = menu button, logo and the selected account's identity (name, masked number, status); then the page title and
+     its description (two lines at most); then the controls. The heading wrapper dissolves so its parts can take their own rows. */
+  .topbar .page-heading{display:contents}
+  .topbar .crumb{flex:1 1 0;min-width:0;margin:0}
+  .topbar h1{flex:0 0 100%;order:1}
+  .topbar #page-subtitle{flex:0 0 100%;order:2;margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .topbar-controls{order:3;gap:8px}
 }
 @media (prefers-reduced-motion:reduce){
   .dskel,.skeleton i{animation:none}

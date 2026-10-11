@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { getDb } from '../memory/db';
 import { currentAccountId } from '../accounts/accountContext';
+import { logger } from '../logger';
 
 /**
  * The human-handoff lifecycle of one customer of one WhatsApp account, stored in the database (so it survives restarts and
@@ -222,6 +223,32 @@ export function requestHandoff(
   input: { customerId: number; conversationId?: number | null; source: HandoffSource; reason?: string | null },
   actor: HandoffActor = { type: 'customer' },
   db: Database.Database = getDb(),
+): { handoff: Handoff; outcome: RequestOutcome } {
+  const result = requestHandoffCore(input, actor, db);
+  // A customer, the assistant or the menu asking for a person (not a repeat, not staff or a migration): features that keep their own record of the
+  // customer's enquiry (the real estate add-on) are told once, after the handoff is saved. A hook never changes or blocks the handoff.
+  if ((result.outcome === 'created' || result.outcome === 'reopened') && (input.source === 'customer' || input.source === 'menu' || input.source === 'ai')) {
+    for (const hook of requestedHooks) {
+      try {
+        hook({ customerId: input.customerId, accountId: customerRow(db, input.customerId).whatsapp_account_id, conversationId: input.conversationId ?? null, source: input.source, outcome: result.outcome });
+      } catch (error) {
+        logger.warn({ errorName: (error as Error)?.name }, 'handoff requested hook failed');
+      }
+    }
+  }
+  return result;
+}
+
+export interface HandoffRequestedInfo { customerId: number; accountId: number; conversationId: number | null; source: HandoffSource; outcome: 'created' | 'reopened' }
+const requestedHooks: Array<(info: HandoffRequestedInfo) => void> = [];
+export function onHandoffRequested(hook: (info: HandoffRequestedInfo) => void): void {
+  if (!requestedHooks.includes(hook)) requestedHooks.push(hook);
+}
+
+function requestHandoffCore(
+  input: { customerId: number; conversationId?: number | null; source: HandoffSource; reason?: string | null },
+  actor: HandoffActor,
+  db: Database.Database,
 ): { handoff: Handoff; outcome: RequestOutcome } {
   const reason = input.reason ? input.reason.slice(0, 300) : null;
   const run = db.transaction((): { handoff: Handoff; outcome: RequestOutcome } => {

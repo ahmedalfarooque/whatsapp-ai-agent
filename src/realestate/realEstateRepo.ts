@@ -450,4 +450,14 @@ export function overview(accountId: number = currentAccountId(), db: Database.Da
   };
 }
 
+/** Open enquiries whose staff alert could not be queued because no staff destination was configured at the time (and none was queued since). */
+export function leadsWithoutStaffAlert(accountId: number = currentAccountId(), db: Database.Database = getDb()): number {
+  return (db.prepare(
+    `SELECT COUNT(*) AS n FROM real_estate_leads l
+      WHERE l.whatsapp_account_id = ? AND l.status <> 'closed'
+        AND EXISTS (SELECT 1 FROM real_estate_lead_events e WHERE e.lead_id = l.id AND e.event = 'alert_pending_configuration')
+        AND NOT EXISTS (SELECT 1 FROM real_estate_lead_events e WHERE e.lead_id = l.id AND e.event = 'alert_queued')`,
+  ).get(accountId) as { n: number }).n;
+}
+
 export type { FieldKey };

@@ -228,7 +228,7 @@ Arabic: ${LICENCE_AR}
 ## Contact (published on the website)
 - Address: King Abdulaziz Rd, Albasatin Dist., P.O. Box 23718, Jeddah 9351, Kingdom of Saudi Arabia (Arabic: طريق الملك عبدالعزيز، حي البساتين، ص.ب 23718، جدة 9351، المملكة العربية السعودية)
 - Email: ceo@qmulate.com
-- Phone: +966 53 333 9052 (the contact number published on the website; this chat is a separate WhatsApp line)
+- Phone: +966 53 333 9052 (the contact number published on the website)
 - Website: ${SITE_EN} (Arabic: ${SITE_AR})
 - Response time: ${RESPONSE_EN}
 - Opening hours: not published. Do not state any.

@@ -7,8 +7,10 @@ import { canAdminAccessAccount } from '../accounts/accountRepo';
 import { listCustomerFiles, publicFile } from '../files/customerFileRepo';
 import { LEAD_KINDS, LEAD_STATUSES, FIELD_LABELS, missingFields, type LeadKind, type LeadStatus } from '../realestate/leadFields';
 import {
-  RealEstateError, archiveProject, createProject, getLead, leadEvents, leadProjects, listLeads, listProjects, overview, updateLeadByStaff, updateProject, type Project,
+  RealEstateError, archiveProject, createProject, getLead, getProject, leadEvents, leadProjects, leadsWithoutStaffAlert, listLeads, listProjects, overview, updateLeadByStaff, updateProject, type Project,
 } from '../realestate/realEstateRepo';
+import { staffAlertDestination } from '../requests/requestService';
+import { outboxSummary } from '../notifications/outbox';
 
 /**
  * Staff API of the real estate section (leads, projects, follow-ups, documents). Header-scoped like the other dashboard routes: it runs inside the
@@ -52,7 +54,11 @@ function projectView(p: Project) {
 export function registerRealEstateRoutes(router: Router): void {
   router.get('/api/dashboard/realestate/overview', (req, res) => {
     if (!enabled(req, res)) return;
-    try { res.json({ ...overview(), labels: FIELD_LABELS }); } catch (error) { fail(res, error); }
+    try {
+      // Staff alerts: only whether a destination is configured (never the number) and the real outbox state, so "not configured" is never mistaken for "delivered".
+      const destination = staffAlertDestination();
+      res.json({ ...overview(), labels: FIELD_LABELS, staffAlerts: { ...destination, leadsWithoutAlert: leadsWithoutStaffAlert(), outbox: outboxSummary() } });
+    } catch (error) { fail(res, error); }
   });
 
   // ---- leads ---------------------------------------------------------------------
@@ -113,7 +119,9 @@ export function registerRealEstateRoutes(router: Router): void {
     if (!enabled(req, res)) return;
     try {
       const actor = `staff:${req.adminUserId}`;
-      res.status(201).json({ project: projectView(createProject(req.body ?? {}, actor)) });
+      const project = createProject(req.body ?? {}, actor);
+      logger.info({ account: currentAccountId(), project: project.id, admin: req.adminUserId, published: project.published }, 'real estate project created');
+      res.status(201).json({ project: projectView(project) });
     } catch (error) { fail(res, error); }
   });
 
@@ -121,14 +129,25 @@ export function registerRealEstateRoutes(router: Router): void {
     if (!enabled(req, res)) return;
     const id = idParam(req.params.id);
     if (!id) { res.status(404).json({ error: 'Project not found' }); return; }
-    try { res.json({ project: projectView(updateProject(id, req.body ?? {})) }); } catch (error) { fail(res, error); }
+    try {
+      const before = getProject(id);
+      const project = updateProject(id, req.body ?? {});
+      // The audit line names who changed which project and whether its customer visibility changed — never the content.
+      logger.info({ account: currentAccountId(), project: id, admin: req.adminUserId, fields: Object.keys(req.body ?? {}).slice(0, 20), visibilityChanged: before ? (before.published && !before.archived) !== (project.published && !project.archived) : null }, 'real estate project updated');
+      res.json({ project: projectView(project) });
+    } catch (error) { fail(res, error); }
   });
 
   router.post('/api/dashboard/realestate/projects/:id/archive', (req, res) => {
     if (!enabled(req, res)) return;
     const id = idParam(req.params.id);
     if (!id) { res.status(404).json({ error: 'Project not found' }); return; }
-    try { res.json({ project: projectView(archiveProject(id, req.body?.archived !== false)) }); } catch (error) { fail(res, error); }
+    try {
+      const archived = req.body?.archived !== false;
+      const project = archiveProject(id, archived);
+      logger.info({ account: currentAccountId(), project: id, admin: req.adminUserId, archived }, 'real estate project archive state changed');
+      res.json({ project: projectView(project) });
+    } catch (error) { fail(res, error); }
   });
 
   // ---- follow-ups (leads waiting for a person + consultation requests) ------------------

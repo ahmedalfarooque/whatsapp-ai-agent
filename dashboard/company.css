@@ -23,7 +23,14 @@ body:not([data-brand="company"]) #brand-name small{font-family:"Space Mono","Gei
 .acct-line .acct-st{display:inline-flex;align-items:center;gap:6px;font-weight:600}
 .acct-line .acct-st .dot{box-shadow:0 0 0 2px rgba(255,255,255,.55)}
 .acct-line .acct-sep{opacity:.6}
-@media (max-width:640px){.acct-line .acct-num,.acct-line .acct-sep{display:none}.acct-line .acct-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+/* Narrow screens: nothing of the identity is hidden or cut. The name may wrap onto a second line, and the masked number and the connection status
+   follow it (on their own line when they do not fit beside it). Separators are dropped because the wrapped items carry their own gap. */
+@media (max-width:640px){
+  .acct-line .acct-sep{display:none}
+  .topbar .crumb.acct-line{gap:2px 12px}
+  .acct-line .acct-name{max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.25}
+  .acct-line .acct-num,.acct-line .acct-st{flex:none}
+}
 .topbar-mark img.mk{height:24px;width:auto;display:block}  /* the official S mark (white variant: the top bar is a coloured / navy surface in both appearances) */
 
 /* a single-account user needs no account switcher, and sees no other business */

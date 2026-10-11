@@ -871,7 +871,9 @@ route('#/business', 'Business Profile', 'Identity the assistant uses when it int
           ${fieldRow('Description (English)', 'descriptionEn', s.descriptionEn, { textarea: true })}
           ${fieldRow('Description (Arabic)', 'descriptionAr', s.descriptionAr, { textarea: true, dir: 'rtl' })}
           ${fieldRow('Logo document id', 'logoDocumentId', s.logoDocumentId, { type: 'number', help: 'Upload an image below, then enter its id (shown in the table).' })}
-          ${fieldRow('Staff alerts WhatsApp number', 'staffWhatsappNumber', s.staffWhatsappNumber, { placeholder: '+9665XXXXXXXX', help: 'Where new-request alerts and status changes are sent. Leave empty to use the linked business number\'s own chat.' })}
+          ${fieldRow('Staff alerts WhatsApp number (internal)', 'staffWhatsappNumber', s.staffWhatsappNumber, { placeholder: '+9665XXXXXXXX', help: (typeof realEstateEnabled === 'function' && realEstateEnabled())
+            ? 'Internal: where new-enquiry and consultation alerts go. Never shown to customers and not the published business number. Until it is set, no WhatsApp alert is sent anywhere (enquiries are still saved in the dashboard).'
+            : 'Where new-request alerts and status changes are sent. Leave empty to use the linked business number\'s own chat.' })}
         </div>
         <div class="toolbar" style="margin-top:14px"><button class="btn success" type="submit">Save &amp; publish live</button><span class="muted" id="bp-status"></span></div>
         <p class="muted">Saving publishes immediately: the next WhatsApp reply and the AI prompt use the new values — no restart. (Profile fields have no separate draft stage; templates do.)</p></form>

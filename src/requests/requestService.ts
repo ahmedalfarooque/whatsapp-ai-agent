@@ -19,6 +19,7 @@ import {
 import { resolveTemplate, type TemplateVars } from '../templates/templateRepo';
 import { enqueueNotification, flushOutbox, listOutbox, type OutboxRow } from '../notifications/outbox';
 import { currentAccountId, runWithAccount } from '../accounts/accountContext';
+import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { RequestTransitionError, canTransition, statusAllowedForKind } from './quotationLifecycle';
 
 /**
@@ -108,13 +109,27 @@ export function customerNotificationJid(customer: Customer): string {
   return getLidForPn(pn) ?? pn;
 }
 
-/** Where staff alerts go for one business: its configured staff number, else its own linked number's chat. */
+/**
+ * Where staff alerts go for one business: its configured staff number, else its own linked number's chat.
+ * A business with the real estate add-on is the exception: its published business number is the number customers write to, so it is never
+ * assumed to be where staff want their alerts. Only an explicitly configured staff number receives them; until then they are "pending
+ * configuration" (see staffAlertDestination) instead of being sent anywhere.
+ */
 export function businessNotificationJid(db: Database.Database = getDb(), accountId: number = currentAccountId()): string | null {
   const settings = getBusinessSettings(accountId);
   const staff = settings.staffWhatsappNumber?.replace(/[^\d]/g, '');
   if (staff) return `${staff}@s.whatsapp.net`;
+  if (accountHasFeature(accountId, FEATURES.REAL_ESTATE)) return null;
   const session = getQrSession(db, accountId);
   return session.jid ? canonicalJid(session.jid) : null;
+}
+
+/** What the dashboard may say about the staff alert destination: whether one is configured and where it comes from, never the number itself. */
+export function staffAlertDestination(db: Database.Database = getDb(), accountId: number = currentAccountId()): { configured: boolean; source: 'staff_number' | 'linked_number' | 'none' } {
+  const settings = getBusinessSettings(accountId);
+  if (settings.staffWhatsappNumber?.replace(/[^\d]/g, '')) return { configured: true, source: 'staff_number' };
+  if (accountHasFeature(accountId, FEATURES.REAL_ESTATE)) return { configured: false, source: 'none' };
+  return businessNotificationJid(db, accountId) ? { configured: true, source: 'linked_number' } : { configured: false, source: 'none' };
 }
 
 export function kickOutbox(): void {

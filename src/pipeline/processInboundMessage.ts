@@ -23,6 +23,8 @@ import { notifyBusinessNewRequest } from '../requests/requestService';
 import { isRestartCommand } from '../restart/isRestartCommand';
 import { buildSystemPrompt } from '../llm/buildSystemPrompt';
 import { renderPublishedProjects } from '../realestate/realEstateRepo';
+import { redactSensitiveText } from '../realestate/leadFields';
+import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { runAgentLoop } from '../llm/agentLoop';
 import fs from 'node:fs';
 import { sendTextMessage, sendDocumentMessage, sendImageMessage, ImageDeliveryUnsupportedError, DocumentDeliveryUnsupportedError } from '../whatsapp/client';
@@ -129,6 +131,14 @@ function storeInbound(conversationId: number, msg: InboundMessage): void {
   });
 }
 
+function withoutSensitiveValues(msg: InboundMessage): InboundMessage {
+  if (msg.type !== 'text' || !msg.text || !accountHasFeature(currentAccountId(), FEATURES.REAL_ESTATE)) return msg;
+  const cleaned = redactSensitiveText(msg.text);
+  if (!cleaned.redacted) return msg;
+  logger.info({ waId: maskWaId(msg.waId) }, 'sensitive value removed from an inbound message before it was stored or sent to the AI');
+  return { ...msg, text: cleaned.text };
+}
+
 /** Protocol-level noise (reactions, edits, receipts): not worth a row in the conversation or the activity list. */
 const SILENT_UNSTORED_TYPES = new Set(['reaction', 'other']);
 
@@ -150,7 +160,10 @@ export function resetCredentialFallbackThrottle(): void {
   lastCredentialFallback.clear();
 }
 
-async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessDependencies): Promise<void> {
+async function processInboundMessageUnlocked(inbound: InboundMessage, deps: ProcessDependencies): Promise<void> {
+  // A business with the real estate add-on never keeps or forwards an IBAN, card number or national ID that a customer typed into the chat:
+  // it is replaced here, before the message is stored, routed or sent to the AI provider (the customer is told not to share them).
+  const msg = withoutSensitiveValues(inbound);
   const maskedId = maskWaId(msg.waId);
   const channel = msg.channel ?? 'cloud';
   const settings = getAutomationSettings();

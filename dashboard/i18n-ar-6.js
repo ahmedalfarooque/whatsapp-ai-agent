@@ -26,6 +26,10 @@ Object.assign(window.I18N_AR, {
   'QR code expired. Click Refresh QR to generate a new one.': 'انتهت صلاحية رمز QR. اضغط «تحديث QR» لتوليد رمز جديد.',
   'Nobody scanned in time. Click Refresh QR Code for a new one.': 'لم يمسح أحد الرمز في الوقت المناسب. اضغط «تحديث رمز QR» للحصول على رمز جديد.',
   'WhatsApp disconnected': 'واتساب غير متصل', 'WhatsApp: QR code expired': 'واتساب: انتهت صلاحية رمز QR',
+  // the connection chip under the page header (pages-automation.js builds "WhatsApp: <status>"): every status reads in Arabic
+  'WhatsApp: Not connected': 'واتساب: غير متصل', 'WhatsApp: Preparing session': 'واتساب: تجهيز الجلسة', 'WhatsApp: Pairing / connecting': 'واتساب: اقتران / اتصال',
+  'WhatsApp: Reconnecting': 'واتساب: إعادة الاتصال', 'WhatsApp: Disconnected': 'واتساب: غير متصل', 'WhatsApp: Logged out — authentication required': 'واتساب: تم تسجيل الخروج — المصادقة مطلوبة',
+  'WhatsApp: Connection error': 'واتساب: خطأ في الاتصال', 'WhatsApp Live': 'واتساب متصل',
   'Suppressed — document message — not answered automatically': 'مُنع — رسالة مستند — لا يُجاب عنها تلقائياً',
   'Right-click the spot in Google Maps → copy the coordinates. Map selection by click needs a Maps API key, which this app does not use.': 'انقر بزر الفأرة الأيمن على الموضع في خرائط Google ← انسخ الإحداثيات. اختيار الموقع بالنقر على الخريطة يحتاج إلى مفتاح Maps API الذي لا يستخدمه هذا التطبيق.',
   'The public HTTPS URL you register with Meta as the Callback URL. This application always answers at': 'رابط HTTPS العام الذي تسجّله لدى Meta كرابط الاستدعاء. يجيب هذا التطبيق دائماً على',
@@ -184,7 +188,15 @@ Object.assign(window.I18N_AR, {
   'No projects have been entered. Customers who ask are told that the team will review their requirements; nothing is invented.': 'لم تُدخَل أي مشاريع. يُخبَر العملاء الذين يسألون بأن الفريق سيراجع متطلباتهم؛ ولا يُختلق أي شيء.',
   'Enter only facts you have verified. Customers see a project only while it is published; a draft or archived project is never shown or mentioned.': 'أدخل الحقائق التي تحققت منها فقط. لا يرى العملاء المشروع إلا وهو منشور؛ ولا تُعرض المسودة أو المشروع المؤرشف ولا يُذكران.',
   'Name (English)': 'الاسم (بالإنجليزية)', 'Name (Arabic)': 'الاسم (بالعربية)', 'City': 'المدينة', 'District / area': 'الحي / المنطقة', 'Property type': 'نوع العقار',
-  'Summary (English)': 'الملخص (بالإنجليزية)', 'Summary (Arabic)': 'الملخص (بالعربية)', 'Brochure (a customer-visible document)': 'الكتيّب (مستند مرئي للعملاء)', 'None': 'لا شيء',
+  'Summary (English)': 'الملخص (بالإنجليزية)', 'Summary (Arabic)': 'الملخص (بالعربية)', 'Brochure or approved picture (a customer-visible document: a PDF is sent as a file, an image as a picture)': 'كتيّب أو صورة معتمدة (مستند مرئي للعملاء: يُرسل ملف PDF كملف، والصورة كصورة)', 'None': 'لا شيء',
+  // staff alert status (the banner above the real estate pages, the business profile field and the history of an enquiry)
+  'Staff alerts are pending configuration.': 'تنبيهات الموظفين بانتظار الإعداد.',
+  'No WhatsApp alert is sent for new enquiries or consultation requests until an internal staff number is set in Business Profile. Enquiries are still saved here.': 'لا يُرسل أي تنبيه واتساب للاستفسارات الجديدة أو طلبات الاستشارة إلى أن يُحدَّد رقم داخلي للموظفين في ملف النشاط. تُحفظ الاستفسارات هنا مع ذلك.',
+  'Open Business Profile': 'فتح ملف النشاط',
+  'Staff alerts: an internal staff number is configured.': 'تنبيهات الموظفين: تم إعداد رقم داخلي للموظفين.',
+  'The queue retries automatically with back-off, and alerts leave only while this WhatsApp account is connected.': 'تُعيد قائمة الإرسال المحاولة تلقائياً بفواصل متزايدة، ولا تُرسل التنبيهات إلا أثناء اتصال حساب واتساب هذا.',
+  'Staff alert not sent (no staff number)': 'لم يُرسل تنبيه للموظفين (لا يوجد رقم للموظفين)', 'Staff alert queued': 'أُضيف تنبيه الموظفين إلى قائمة الإرسال',
+  'Internal: where new-enquiry and consultation alerts go. Never shown to customers and not the published business number. Until it is set, no WhatsApp alert is sent anywhere (enquiries are still saved in the dashboard).': 'داخلي: الجهة التي تصلها تنبيهات الاستفسارات الجديدة والاستشارات. لا يظهر للعملاء وليس رقم النشاط المنشور. إلى أن يُحدَّد لا يُرسل أي تنبيه واتساب إلى أي جهة (وتُحفظ الاستفسارات في لوحة التحكم).',
   'Published (customers can see and ask about it)': 'منشور (يمكن للعملاء رؤيته والسؤال عنه)', 'Save project': 'حفظ المشروع', 'Cancel': 'إلغاء', 'Restore': 'استعادة', 'Archive': 'أرشفة',
   'Project saved.': 'تم حفظ المشروع.', 'Project updated.': 'تم تحديث المشروع.',
   // follow-ups and documents
@@ -202,6 +214,8 @@ Object.assign(window.I18N_AR, {
   'created': 'إنشاء', 'updated': 'تحديث', 'status': 'الحالة', 'assigned': 'إسناد', 'documents': 'المستندات', 'note': 'ملاحظة',
 });
 window.I18N_AR_PATTERNS.push(
+  [/^(\d+) open enquir(?:y was|ies were) saved without an alert\.$/, function (n) { return 'حُفظ ' + n + ' استفسار مفتوح دون إرسال تنبيه.'; }],
+  [/^Delivery queue: (\d+) waiting, (\d+) delivered, (\d+) failed\.$/, function (p, s, f) { return 'قائمة الإرسال: ' + p + ' بالانتظار، ' + s + ' تم تسليمها، ' + f + ' فشلت.'; }],
   [/^(\d+) enquir(?:y|ies)$/, function (n) { return n + ' استفسار'; }],
   [/^Missing: (.+)$/, function (list) { return 'ناقص: ' + list.split(', ').map(function (x) { return window.I18N.lookup(x) || x; }).join('، '); }],
   [/^Still to ask: (.+)$/, function (list) { return 'ما يزال مطلوباً: ' + list.split(', ').map(function (x) { return window.I18N.lookup(x) || x; }).join('، '); }]

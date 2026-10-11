@@ -13,3 +13,5 @@
 .timeline{list-style:none;margin:0;padding:0;display:grid;gap:10px}
 .timeline li{padding:8px 12px;border-inline-start:3px solid var(--color-border-strong);background:var(--color-surface-raised);border-radius:8px}
 .notice{padding:10px 12px;border-radius:10px;background:var(--color-warning-soft);color:var(--color-text);margin:10px 0}
+#re-alert-banner{line-height:1.5}
+#re-alert-banner a{font-weight:650}

@@ -2,15 +2,17 @@ import fs from 'node:fs';
 import { TOOL_NAMES } from '../config/constants';
 import { getDb } from '../memory/db';
 import { logger } from '../logger';
-import { currentAccountId } from '../accounts/accountContext';
+import { currentAccountId, runWithAccount } from '../accounts/accountContext';
+import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
+import { onHandoffRequested, type HandoffRequestedInfo } from '../handoff/handoffRepo';
 import { getCustomerFlowData, setCustomerMenuState } from '../memory/customerRepo';
 import { MENU_STATES } from '../automation/menuStatic';
 import { documentPath, getDocument } from '../documents/documentStore';
-import { sendDocumentMessage, DocumentDeliveryUnsupportedError } from '../whatsapp/client';
+import { sendDocumentMessage, sendImageMessage, DocumentDeliveryUnsupportedError, ImageDeliveryUnsupportedError } from '../whatsapp/client';
 import { enqueueNotification } from '../notifications/outbox';
 import { businessNotificationJid, kickOutbox } from '../requests/requestService';
 import { FIELD_KEYS, FIELD_LABELS, LEAD_KINDS, missingFields, nextQuestions } from '../realestate/leadFields';
-import { RealEstateError, getProject, searchPublishedProjects, upsertLeadFromAssistant, publishedProjects, type Lead } from '../realestate/realEstateRepo';
+import { RealEstateError, addLeadEvent, getProject, openLeadsForCustomer, searchPublishedProjects, upsertLeadFromAssistant, publishedProjects, type Lead } from '../realestate/realEstateRepo';
 
 /**
  * The three tools of the real estate assistant (offered ONLY to a business with the real estate add-on, see tools/index.ts).
@@ -95,13 +97,43 @@ const LEAD_ALERT = (lead: Lead, customerName: string | null, waId: string, why: 
 function alertStaff(lead: Lead, customer: ConversationRow, why: string, key: string): void {
   try {
     const target = businessNotificationJid(getDb(), lead.accountId);
-    if (!target) { logger.warn({ reference: lead.reference, account: lead.accountId }, 'no business WhatsApp number linked — real estate staff alert not queued'); return; }
-    enqueueNotification({ kind: 'business_new_request', requestId: null, targetJid: target, body: LEAD_ALERT(lead, customer.displayName, customer.waId, why), dedupeKey: `re-lead:${key}:${lead.accountId}:${lead.id}`, accountId: lead.accountId });
+    if (!target) {
+      // Visible to staff on the lead itself and on the real estate overview: the enquiry is saved, only the alert is waiting for a staff destination.
+      logger.warn({ reference: lead.reference, account: lead.accountId }, 'no staff alert number configured — real estate staff alert not queued');
+      addLeadEvent(lead.id, 'system', 'alert_pending_configuration', 'No staff alert number is configured, so the team was not alerted on WhatsApp. The enquiry is saved here.', lead.accountId);
+      return;
+    }
+    const { created } = enqueueNotification({ kind: 'business_new_request', requestId: null, targetJid: target, body: LEAD_ALERT(lead, customer.displayName, customer.waId, why), dedupeKey: `re-lead:${key}:${lead.accountId}:${lead.id}`, accountId: lead.accountId });
+    if (created) addLeadEvent(lead.id, 'system', 'alert_queued', `Staff alert queued (${why}).`, lead.accountId);
     kickOutbox();
   } catch (error) {
     logger.error({ error, reference: lead.reference }, 'could not queue the real estate staff alert');
   }
 }
+
+/**
+ * A customer of the real estate business asked for a person (by writing it, through the menu, or through the assistant). The enquiry context is kept
+ * for the advisor: every open enquiry of this customer is flagged "needs a person" (or, when there is none yet, a general enquiry is opened so the
+ * request is not lost), and the staff are alerted once per enquiry — or, without a staff number, the enquiry records that the alert is pending configuration.
+ */
+function noteAdvisorRequest(info: HandoffRequestedInfo): void {
+  if (!accountHasFeature(info.accountId, FEATURES.REAL_ESTATE)) return;
+  runWithAccount(info.accountId, () => {
+    const db = getDb();
+    const customer = db.prepare('SELECT id, wa_id AS waId, display_name AS displayName, language, menu_state AS menuState FROM customers WHERE id = ? AND whatsapp_account_id = ?').get(info.customerId, info.accountId) as { id: number; waId: string; displayName: string | null; language: string | null; menuState: string | null } | undefined;
+    if (!customer) return;
+    const row: ConversationRow = { customerId: customer.id, waId: customer.waId, language: customer.language, menuState: customer.menuState, displayName: customer.displayName };
+    const open = openLeadsForCustomer(customer.id, info.accountId);
+    const leads = open.length
+      ? open.map((l) => upsertLeadFromAssistant({ customerId: customer.id, kind: l.kind, needsStaff: true }, info.accountId).lead)
+      : [upsertLeadFromAssistant({ customerId: customer.id, kind: 'general', needsStaff: true, summary: 'The customer asked to speak to an advisor.', language: customer.language }, info.accountId).lead];
+    for (const lead of leads) {
+      if (open.length) addLeadEvent(lead.id, 'system', 'needs_staff', 'The customer asked to speak to an advisor.', info.accountId);
+      alertStaff(lead, row, 'asked for a person', 'staff');
+    }
+  });
+}
+onHandoffRequested(noteAdvisorRequest);
 
 export async function saveRealEstateLeadHandler(args: unknown, context: { conversationId: number }): Promise<unknown> {
   const a = (args ?? {}) as { kind?: string; fields?: unknown; summary?: string; needs_staff?: boolean; interested_project_ids?: number[]; documents_requested?: boolean };
@@ -167,11 +199,13 @@ export async function sendProjectBrochureHandler(args: unknown, context: { conve
   }
   const name = customer.language === 'ar' && project.nameAr ? project.nameAr : project.nameEn;
   try {
-    await sendDocumentMessage(customer.waId, { fileName: doc.original_name, mimeType: doc.mime_type, bytes, caption: name });
+    // An approved picture is sent as real WhatsApp image media, a brochure (PDF …) as a document; the staff decide which by the file they attach.
+    if (doc.mime_type.startsWith('image/')) await sendImageMessage(customer.waId, { fileName: doc.original_name, mimeType: doc.mime_type, bytes, caption: name });
+    else await sendDocumentMessage(customer.waId, { fileName: doc.original_name, mimeType: doc.mime_type, bytes, caption: name });
   } catch (error) {
-    if (error instanceof DocumentDeliveryUnsupportedError) return { sent: false, reason: 'channel_cannot_send_files' };
+    if (error instanceof DocumentDeliveryUnsupportedError || error instanceof ImageDeliveryUnsupportedError) return { sent: false, reason: 'channel_cannot_send_files' };
     logger.error({ account: currentAccountId(), documentId: doc.id, errorName: (error as Error)?.name }, 'project brochure could not be sent');
     return { sent: false, reason: 'send_failed' };
   }
-  return { sent: true, note: 'The brochure was sent as a WhatsApp file. Do not describe its contents beyond the project summary.' };
+  return { sent: true, note: 'The brochure or picture was sent on WhatsApp. Do not describe its contents beyond the project summary.' };
 }

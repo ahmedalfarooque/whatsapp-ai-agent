@@ -185,7 +185,7 @@ Object.assign(window.I18N_AR, {
   'Exact text customers receive — rendered by the live resolver. Nothing is sent. Placeholders show sample values.': 'النص الدقيق الذي يستلمه العملاء — يُعرض بواسطة المحلّل الحي. لا يُرسل شيء. تُظهر العناصر النائبة قيماً نموذجية.',
   'Open in Reply Editor →': 'فتح في محرر الردود ←',
   'Staff Notifications': 'إشعارات الموظفين',
-  'Staff alerts WhatsApp number': 'رقم واتساب لتنبيهات الموظفين',
+  'Staff alerts WhatsApp number (internal)': 'رقم واتساب لتنبيهات الموظفين (داخلي)',
   'Where new-request alerts and status changes are sent. Leave empty to use the linked business number\'s own chat.': 'إلى أين تُرسل تنبيهات الطلبات الجديدة وتغييرات الحالة. اتركه فارغاً لاستخدام محادثة رقم النشاط المرتبط نفسه.',
   
 

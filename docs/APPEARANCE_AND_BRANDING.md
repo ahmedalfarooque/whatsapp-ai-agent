@@ -86,6 +86,14 @@ keeps the bundled artwork URL. The identity is redrawn on every account switch, 
 `workspace:lang`), and a logo that fails to load becomes the neutral initial tile, so a stale or foreign logo cannot remain. Tests: `tests/integration/branding.e2e.test.ts`,
 `tests/unit/dashboard/branding.test.ts`.
 
+### The header on a phone
+At 640 px and below the account name may wrap onto a second line and the masked number and connection status follow it (nothing is hidden or
+ellipsised); at 480 px and below the header becomes: menu button, logo and identity on the first row, then the page title and its description (two
+lines at most), then the controls (language, AI state, theme, user). A status chip wider than the screen wraps inside itself. This was measured in
+a browser at 320, 360, 375, 390, 430, tablet and desktop widths, English and Arabic, light and dark, for a single-account and a multi-account user:
+no element clipped, overlapping or outside the screen, and no horizontal page scroll. The one deliberate truncation left is the small detail line of
+the AI pill on desktop (its full text is in the pill's tooltip). The rules are guarded by `tests/unit/dashboard/responsiveHeader.test.ts`.
+
 ## Developer branding
 
 * The developer is shown as **SYNRTECHS**. The artwork is taken **as drawn from the supplied brand guide** (`Synrtechs_DESIGN 1.pdf`): the lockup (S mark + lettering) is vector

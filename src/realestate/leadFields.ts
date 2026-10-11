@@ -50,7 +50,8 @@ const MAX_VALUE = 300;
 // Never stored: bank (IBAN) numbers, card-like digit runs, and — in free-text fields — 10-digit national ID / residence numbers.
 const IBAN = /\bSA\d{2}\s?(?:\d{4}\s?){4,5}\d{0,4}\b/i;
 const CARD_LIKE = /(?:\d[ -]?){13,19}/;
-const NATIONAL_ID = /(?<![\d.,])[12]\d{9}(?![\d.,])/;
+// A 10-digit number starting with 1 or 2 that is not part of a longer number or a decimal ("1234567890," at the end of a clause still counts).
+const NATIONAL_ID = /(?<!\d)(?<!\d[.,])[12]\d{9}(?!\d)(?![.,]\d)/;
 const FREE_TEXT_FIELDS = new Set<FieldKey>(['notes', 'contact_name', 'preferred_contact', 'callback_time', 'ownership_status', 'authorized_to_sell', 'occupancy', 'service_interest']);
 
 export interface SanitizedFields {
@@ -79,6 +80,43 @@ export function sanitizeFields(input: unknown): SanitizedFields {
     out.fields[k] = value;
   }
   return out;
+}
+
+const ARABIC_INDIC = '٠١٢٣٤٥٦٧٨٩';
+const luhnValid = (digits: string): boolean => {
+  let sum = 0;
+  for (let i = 0; i < digits.length; i += 1) {
+    let d = Number(digits[digits.length - 1 - i]);
+    if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+  }
+  return sum % 10 === 0;
+};
+
+/**
+ * Removes what must never be kept or sent to the AI provider from a customer's message: an IBAN, a payment card number (13–19 digits that pass the
+ * card checksum, so phone numbers and budgets are left alone) and a 10-digit national ID / residence number. Works on Arabic-Indic digits too.
+ * The rest of the message is untouched, so the conversation still makes sense.
+ */
+export function redactSensitiveText(text: string): { text: string; redacted: boolean } {
+  const ascii = text.replace(/[٠-٩]/g, (d) => String(ARABIC_INDIC.indexOf(d))); // same length: indexes line up with the original
+  const spans: Array<[number, number, string]> = [];
+  for (const m of ascii.matchAll(new RegExp(IBAN.source, 'gi'))) spans.push([m.index!, m.index! + m[0].trimEnd().length, '[bank number removed]']);
+  for (const m of ascii.matchAll(new RegExp(CARD_LIKE.source, 'g'))) {
+    const digits = m[0].replace(/\D/g, '');
+    if (digits.length >= 13 && digits.length <= 19 && luhnValid(digits)) spans.push([m.index!, m.index! + m[0].trimEnd().length, '[card number removed]']);
+  }
+  for (const m of ascii.matchAll(new RegExp(NATIONAL_ID.source, 'g'))) spans.push([m.index!, m.index! + m[0].length, '[ID number removed]']);
+  if (spans.length === 0) return { text, redacted: false };
+  spans.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  let out = '';
+  let cursor = 0;
+  for (const [start, end, label] of spans) {
+    if (start < cursor) continue; // overlaps a span that was already replaced
+    out += text.slice(cursor, start) + label;
+    cursor = end;
+  }
+  return { text: out + text.slice(cursor), redacted: true };
 }
 
 export function missingFields(kind: LeadKind, details: Record<string, string>): FieldKey[] {

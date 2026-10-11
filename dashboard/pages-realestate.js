@@ -17,6 +17,23 @@ const reQs = (obj) => Object.entries(obj).filter(([, v]) => v !== undefined && v
 const reAnswers = (d) => ['property_type', 'city', 'budget', 'currency', 'asking_price'].map((k) => d[k]).filter(Boolean).join(' · ');
 const reDate = (v) => (v ? formatDate(v.includes('T') ? v : `${String(v).replace(' ', 'T')}Z`) : '—');
 
+const RE_EVENT_LABEL = { alert_pending_configuration: 'Staff alert not sent (no staff number)', alert_queued: 'Staff alert queued' };
+
+/**
+ * The state of the staff alerts, said honestly: "not configured" is never presented as "sent". The server returns only whether an internal staff
+ * destination exists (never the number) and the real delivery queue of this business.
+ */
+function reAlertBanner(a) {
+  if (!a) return '';
+  if (!a.configured) {
+    // one sentence per element, so each is translated as a whole in the Arabic interface
+    const waiting = a.leadsWithoutAlert ? ` <span>${a.leadsWithoutAlert} open enquir${a.leadsWithoutAlert === 1 ? 'y was' : 'ies were'} saved without an alert.</span>` : '';
+    return `<p class="notice warn" id="re-alert-banner"><b>Staff alerts are pending configuration.</b> <span>No WhatsApp alert is sent for new enquiries or consultation requests until an internal staff number is set in Business Profile. Enquiries are still saved here.</span>${waiting}${can('business', 'edit') ? ' <a href="#/business">Open Business Profile</a>' : ''}</p>`;
+  }
+  const o = a.outbox || { pending: 0, sent: 0, failed: 0 };
+  return `<p class="notice ${o.failed > 0 ? 'warn' : ''}" id="re-alert-banner"><b>Staff alerts: an internal staff number is configured.</b> <span>Delivery queue: ${o.pending} waiting, ${o.sent} delivered, ${o.failed} failed.</span> <span>The queue retries automatically with back-off, and alerts leave only while this WhatsApp account is connected.</span></p>`;
+}
+
 function reTabs(items, current) {
   return `<div class="tabs" role="tablist">${items.map(([key, label]) => `<button type="button" class="tab ${key === current ? 'active' : ''}" role="tab" data-tab="${esc(key)}">${esc(label)}</button>`).join('')}</div>`;
 }
@@ -31,6 +48,7 @@ route('#/re-overview', 'Real Estate Overview', 'Enquiries, follow-ups, consultat
   const statusRows = Object.entries(o.leads.byStatus).map(([s, n]) => `<tr><td>${reStatusBadge(s)}</td><td>${n}</td></tr>`).join('');
   const kindRows = Object.entries(o.leads.byKind).map(([k, n]) => `<tr><td>${reKindBadge(k)}</td><td>${n}</td></tr>`).join('');
   view.innerHTML = `
+    ${reAlertBanner(o.staffAlerts)}
     <section class="panel"><div class="stat-grid">
       ${box('New today', o.leads.newToday, '#/re-leads')}
       ${box('Open enquiries', o.leads.open, '#/re-leads')}
@@ -79,7 +97,9 @@ async function drawReLeads(host, f) {
 }
 
 route('#/re-leads', 'Real Estate Leads', 'Buyer, seller and investor enquiries from WhatsApp, with what each customer still has to tell us.', async (view) => {
-  view.innerHTML = '<section class="panel" id="re-body"></section>';
+  let banner = '';
+  try { banner = reAlertBanner((await api('/api/dashboard/realestate/overview')).staffAlerts); } catch { /* the list below still works without the banner */ }
+  view.innerHTML = `${banner}<section class="panel" id="re-body"></section>`;
   await drawReLeads(view.querySelector('#re-body'), { kind: 'all', status: 'open', q: '', due: false, limit: 20, offset: 0 });
 });
 
@@ -119,7 +139,7 @@ route(/^#\/re-leads\/(?<id>\d+)$/, 'Enquiry', 'Requirements, documents and follo
       <section class="panel"><div class="panel-head"><h2>Interested projects</h2></div>${d.projects.length ? `<ul>${d.projects.map((p) => `<li dir="auto">${esc(p.nameEn)}${p.city ? ` — ${esc(p.city)}` : ''}</li>`).join('')}</ul>` : '<p class="muted">None recorded.</p>'}</section>
     </div>
     <section class="panel"><div class="panel-head"><h2>Documents from this customer</h2></div>${files ? `<table class="data-table"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Received</th><th></th></tr></thead><tbody>${files}</tbody></table>` : '<p class="muted">No documents received.</p>'}</section>
-    <section class="panel"><div class="panel-head"><h2>History</h2></div>${d.events.length ? `<ul class="timeline">${d.events.map((e) => `<li><b>${esc(e.event)}</b> <span class="muted">${esc(e.actor)} · ${formatDate(e.createdAt.replace(' ', 'T') + 'Z')}</span>${e.detail ? `<br><span dir="auto">${esc(e.detail)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="muted">No history.</p>'}</section>`;
+    <section class="panel"><div class="panel-head"><h2>History</h2></div>${d.events.length ? `<ul class="timeline">${d.events.map((e) => `<li><b>${esc(RE_EVENT_LABEL[e.event] || e.event)}</b> <span class="muted">${esc(e.actor)} · ${formatDate(e.createdAt.replace(' ', 'T') + 'Z')}</span>${e.detail ? `<br><span dir="auto">${esc(e.detail)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="muted">No history.</p>'}</section>`;
   view.querySelectorAll('[data-file]').forEach((b) => b.addEventListener('click', () => openCustomerFile(b.dataset.url, b.dataset.name, false)));
   const save = async (extra) => {
     const body = { status: view.querySelector('#re-status').value, priority: view.querySelector('#re-priority').value, documentsStatus: view.querySelector('#re-docs').value, nextAction: view.querySelector('#re-next').value.trim(), followUpAt: view.querySelector('#re-follow').value ? new Date(view.querySelector('#re-follow').value).toISOString() : null, ...extra };
@@ -151,7 +171,7 @@ function reProjectForm(p, brochures) {
     </div>
     <div class="field"><label for="p-sumEn">Summary (English)</label><textarea id="p-sumEn" rows="3" maxlength="1200">${v(p && p.summaryEn)}</textarea></div>
     <div class="field"><label for="p-sumAr">Summary (Arabic)</label><textarea id="p-sumAr" rows="3" maxlength="1200" dir="auto">${v(p && p.summaryAr)}</textarea></div>
-    <div class="field"><label for="p-broch">Brochure (a customer-visible document)</label><select id="p-broch"><option value="">None</option>${brochures.map((b) => `<option value="${b.id}" ${p && p.brochureDocumentId === b.id ? 'selected' : ''}>${esc(b.title || b.original_name)}</option>`).join('')}</select></div>
+    <div class="field"><label for="p-broch">Brochure or approved picture (a customer-visible document: a PDF is sent as a file, an image as a picture)</label><select id="p-broch"><option value="">None</option>${brochures.map((b) => `<option value="${b.id}" ${p && p.brochureDocumentId === b.id ? 'selected' : ''}>${esc(b.title || b.original_name)}</option>`).join('')}</select></div>
     <label class="cu-check"><input id="p-pub" type="checkbox" ${p && p.published ? 'checked' : ''}> Published (customers can see and ask about it)</label>
     <div class="actions"><button id="p-save" class="btn primary" type="button">Save project</button> <button id="p-cancel" class="btn" type="button">Cancel</button></div></section>`;
 }
