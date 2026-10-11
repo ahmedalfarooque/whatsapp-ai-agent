@@ -1,4 +1,4 @@
-// Rowad Alfa AI Workspace — dashboard home.
+// AI Workspace — dashboard home.
 // Every figure comes from GET /api/dashboard/overview for the SELECTED WhatsApp account (the server scopes it and leaves out
 // any section the signed-in user may not read). Nothing here is a demo value: an unavailable section is simply not drawn, and
 // an empty one says so. Loaded after app.js (api, esc, route, errorView, formatDate, knownAccounts, currentAccount, …) and

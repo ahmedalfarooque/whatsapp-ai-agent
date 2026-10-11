@@ -1,4 +1,4 @@
-// Rowad Alfa AI Workspace — Users & Permissions.
+// AI Workspace — Users & Permissions.
 // A real, database-backed page: every action calls /api/dashboard/users (the server hashes passwords, enforces who may change
 // whom, protects the permanent Super Admin and checks every permission again on each request). Nothing is stored in the browser.
 // Loaded after app.js and shell.js (api, esc, route, toast, badge, formatDate, me, ROLE_LABEL, initialsOf).

@@ -99,3 +99,16 @@
 .lg-dev{margin:18px auto 0;justify-content:center;font-size:12.5px;color:var(--color-text-muted)}
 .lg-dev img{height:18px}
 footer .dev-credit{gap:6px}
+
+/* ---- SynrTech Studio wordmark (official artwork: black on light, white on dark; never retyped) ---- */
+.wm{display:inline-flex;align-items:center;line-height:0}
+.wm img{display:block;height:auto}
+.wm .wm-dark{display:none}
+.lg-wordmark{display:block;width:166px;height:auto;max-width:100%}
+.lg-mark{flex-direction:column;align-items:flex-start;gap:6px}
+.lg-mark small{margin-top:0}
+.lg-wm{display:flex;justify-content:center;margin:2px auto 6px}
+.lg-wm img{width:150px;height:auto}
+
+.lg-mark img.lg-wordmark{width:166px;height:auto;max-width:100%;filter:none;object-fit:initial}
+@media (max-width:960px){.lg-mark img.lg-wordmark{width:140px}}

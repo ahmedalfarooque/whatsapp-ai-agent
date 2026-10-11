@@ -77,6 +77,7 @@ import { accountUiStatus } from '../accounts/accountStatus';
 import { canManageConfiguration, canManageConnections, featureLevel, levelAtLeast, type AuthUser } from './permissions';
 import { runWithAccount } from '../accounts/accountContext';
 import { registerCustomerRoutes } from './customerRoutes';
+import { registerBrandingRoutes } from './branding';
 import { RequestTransitionError, nextStatuses } from '../requests/quotationLifecycle';
 import {
   listAccountsForAdmin, getAccount, createAccount, updateAccount, setAccountEnabled, AccountValidationError, accountIdsForAdmin, grantAccountAccess, type WhatsappAccount,
@@ -340,6 +341,7 @@ export function createDashboardRouter(): Router {
   registerHandoffRoutes(router);
   registerInboxRoutes(router);
   registerCustomerRoutes(router);
+  registerBrandingRoutes(router);
 
   // ---- WhatsApp accounts (businesses) ----------------------------------------
   function accountView(account: WhatsappAccount) {

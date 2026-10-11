@@ -92,3 +92,7 @@
 
 /* light / dark switch slot on the sign-in page: sits beside the language switch, mirrored automatically */
 :root[dir="rtl"] .theme-switch{padding:0 12px}
+
+/* brand block and sidebar keep their reading direction; the logo tile is never mirrored */
+:root[dir="rtl"] body[data-brand="company"] #brand-name small{letter-spacing:0}
+:root[dir="rtl"] .brand-wm{margin-inline:0}

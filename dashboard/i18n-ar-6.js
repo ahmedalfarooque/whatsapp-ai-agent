@@ -115,6 +115,7 @@ Object.assign(window.I18N_AR, {
   // developer credit and appearance
   'Developed by': 'تطوير',
   'Light appearance': 'المظهر الفاتح',
+  'AI Workspace': 'مساحة العمل الذكية',
 });
 window.I18N_AR_PATTERNS.push(
   [/^(\d+)m ago$/, function (n) { return 'منذ ' + n + ' د'; }],

@@ -15,6 +15,7 @@ import {
   presetPermissions,
   type AuthUser,
 } from './permissions';
+import { resolveBranding } from './branding';
 import { UserError, createUser, getUserView, listUsers, resetUserPassword, revokeUserSessions, setUserDisabled, updateUser, MIN_PASSWORD_LENGTH } from './users';
 
 function fail(res: Response, error: unknown): void {
@@ -48,6 +49,8 @@ export function meView(user: AuthUser, selectedAccountId: number | undefined) {
       users: canManageUsers(user),
     },
     selectedAccountId: selectedAccountId ?? null,
+    /** Whose interface this is: decided on the server from the user's real account assignments (dashboard/branding.ts). */
+    branding: resolveBranding(user),
     permissions: selectedAccountId ? effectivePermissions(user, selectedAccountId) : {},
     // Non-secret deployment labels for the top bar (every signed-in user may see which environment they are in).
     environment: env.NODE_ENV,

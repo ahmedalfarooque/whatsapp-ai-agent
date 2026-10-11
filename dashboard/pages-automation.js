@@ -1,4 +1,4 @@
-// Rowad Alfa AI Workspace — WhatsApp connection, automation control center,
+// AI Workspace — WhatsApp connection, automation control center,
 // manual reply editor, support queue, flow map, catalogue placeholders.
 // Loaded after app.js and reuses its helpers (api, esc, badge, toast, route,
 // formatDate, emptyView, disposeView). Every control here calls a real API.

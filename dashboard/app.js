@@ -244,13 +244,18 @@ function renderAccountList() {
 async function loadAccounts() {
   try {
     const data = await api('/api/dashboard/accounts');
+    const previousIds = knownAccounts.map((a) => a.id).join(',');
     knownAccounts = data.accounts || [];
+    registerAccountNames(knownAccounts);
+    // The accounts this user may open changed (access granted or revoked): re-read who they are, so permissions and branding never go stale.
+    const assignmentChanged = previousIds !== '' && previousIds !== knownAccounts.map((a) => a.id).join(',');
     const valid = knownAccounts.some((a) => a.id === selectedAccountId);
     if (!valid) {
       selectedAccountId = data.selected || (knownAccounts[0] ? knownAccounts[0].id : null);
       try { if (selectedAccountId) localStorage.setItem(ACCOUNT_STORAGE_KEY, String(selectedAccountId)); } catch { /* storage unavailable */ }
     }
     renderAccountList();
+    if (assignmentChanged) loadMe().catch(() => {}).finally(() => renderRoute());
     document.dispatchEvent(new CustomEvent('workspace:accounts', { detail: { accounts: knownAccounts, selected: selectedAccountId } }));
   } catch (error) {
     const host = document.querySelector('#account-list');
@@ -380,7 +385,7 @@ async function renderLogin(view) {
 
   view.innerHTML = `
     <div class="lg">
-      <section class="lg-brand" aria-label="Rowad Alfa AI Workspace">
+      <section class="lg-brand" aria-label="SynrTech Studio AI Workspace">
         <svg class="lg-waves" viewBox="0 0 600 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs><linearGradient id="lgw1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#19b8a5" stop-opacity=".55"/><stop offset="1" stop-color="#0e96ab" stop-opacity=".05"/></linearGradient></defs>
           <path d="M-40 560C120 470 190 640 330 560S520 380 650 460V820H-40z" fill="url(#lgw1)"/>
@@ -389,7 +394,7 @@ async function renderLogin(view) {
           <circle cx="470" cy="150" r="130" fill="none" stroke="#19b8a5" stroke-opacity=".12" stroke-width="2"/>
         </svg>
         <div class="lg-brand-in">
-          <div class="lg-mark"><img src="/dashboard/assets/logo.webp" alt="" width="52" height="52"><div><b>Rowad Alfa</b><small>AI WORKSPACE</small></div></div>
+          <div class="lg-mark"><img class="lg-wordmark" src="/dashboard/assets/developer/synrtech-studio-wordmark-white.svg" alt="SynrTech Studio" width="166" height="40"><small>AI WORKSPACE</small></div>
           <div class="lg-hero">
             <h2>A better conversation.<br><em>A closer connection.</em></h2>
             <p>One workspace for your WhatsApp conversations, customer care, and appointments.</p>
@@ -406,8 +411,8 @@ async function renderLogin(view) {
       <section class="lg-form">
         <div class="lg-top"><div class="theme-slot" data-theme-switch></div><div class="lang-slot" data-lang-switch></div></div>
         <div class="auth-card lg-card">
-          <img class="lg-logo" src="/dashboard/assets/logo.webp" alt="" width="64" height="64">
-          <p class="lg-brandname"><b>Rowad Alfa</b><span>AI WORKSPACE</span></p>
+          <span class="wm lg-wm"><img class="wm-light" src="/dashboard/assets/developer/synrtech-studio-wordmark-black.svg" alt="SynrTech Studio" width="150" height="36"><img class="wm-dark" src="/dashboard/assets/developer/synrtech-studio-wordmark-white.svg" alt="SynrTech Studio" width="150" height="36"></span>
+          <p class="lg-brandname"><span>AI WORKSPACE</span></p>
           <h3>${isSetup ? 'Set up your workspace' : 'Welcome back'}</h3>
           <p class="muted lg-sub">${isSetup ? 'Create an administrator account to get started.' : 'Sign in to manage your AI assistant.'}</p>
           <form id="auth-form" novalidate>
@@ -424,7 +429,6 @@ async function renderLogin(view) {
           </form>
           <p class="auth-footnote">Secure administrator access</p>
         </div>
-        <p class="lg-dev dev-credit"><span class="dev-label">Developed by</span> <img class="dev-light" src="/dashboard/assets/developer/synrtech-studio-wordmark-black.svg" alt="SynrTech Studio" width="83" height="20"><img class="dev-dark" src="/dashboard/assets/developer/synrtech-studio-wordmark-white.svg" alt="SynrTech Studio" width="83" height="20"></p>
       </section>
     </div>`;
   if (window.I18N) window.I18N.mountSwitches();
@@ -448,7 +452,7 @@ async function renderLogin(view) {
     const card = view.querySelector('.auth-card');
     let timer = null;
     card.innerHTML = `
-      <img class="lg-logo" src="/dashboard/assets/logo.webp" alt="" width="64" height="64"><p class="eyebrow">CHECK YOUR EMAIL</p>
+      <span class="wm lg-wm"><img class="wm-light" src="/dashboard/assets/developer/synrtech-studio-wordmark-black.svg" alt="SynrTech Studio" width="150" height="36"><img class="wm-dark" src="/dashboard/assets/developer/synrtech-studio-wordmark-white.svg" alt="SynrTech Studio" width="150" height="36"></span><p class="eyebrow">CHECK YOUR EMAIL</p>
       <h3>Enter your verification code</h3>
       <p class="muted">We sent a 6-digit code to <span class="otp-sent">${esc(info.email || 'your email address')}</span>. It expires in 10 minutes and can be used once.</p>
       <form id="otp-form" autocomplete="off">

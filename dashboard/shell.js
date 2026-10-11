@@ -1,4 +1,4 @@
-// Rowad Alfa AI Workspace — application shell: theme, signed-in user and permissions, sidebar icons/visibility,
+// AI Workspace — application shell: theme, signed-in user and permissions, sidebar icons/visibility,
 // top bar controls (AI status, appearance, date range, profile menu). Loaded BEFORE app.js; it only defines globals and
 // event wiring — it reads data through app.js's api() once the page is running.
 //
@@ -178,6 +178,7 @@ function applyAccessToShell() {
     flush();
   }
   renderProfile();
+  if (typeof applyBranding === 'function') applyBranding(); // whose interface this is: the server's decision in me.branding
   const settingsBtn = document.querySelector('#settings-btn');
   if (settingsBtn) settingsBtn.hidden = !hasCap('configuration');
   pollAiStatus();

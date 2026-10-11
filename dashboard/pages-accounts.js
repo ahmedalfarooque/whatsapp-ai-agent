@@ -1,4 +1,4 @@
-// Rowad Alfa AI Workspace — WhatsApp Accounts (multi-business).
+// AI Workspace — WhatsApp Accounts (multi-business).
 // Loaded after app.js and reuses its helpers (api, esc, badge, toast, route,
 // formatDate, selectAccount, loadAccounts, accountStatusInfo). One login, one
 // application: each WhatsApp account is a separate business with its own

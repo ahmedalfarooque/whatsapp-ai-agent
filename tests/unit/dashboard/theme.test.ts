@@ -91,9 +91,12 @@ describe('dark theme: SynrTech Studio brand', () => {
     expect(html).toContain('alt="SynrTech Studio"');
     expect(app).toContain('alt="SynrTech Studio"');
     expect(html + app).not.toMatch(/Synertech|SYNRTECH(?!\s*Studio)|Synrtech Studio/);
-    // the business still carries its own name and logo on the sign-in page and in the sidebar
-    expect(app).toContain('<b>Rowad Alfa</b>');
-    expect(html).toContain('/dashboard/assets/logo-192.png');
+    // no customer business is hard-coded into the interface: company identity comes from the server (me.branding), the sign-in page and the
+    // default shell are SynrTech Studio's
+    const scripts = fs.readdirSync(DASH).filter((f) => f.endsWith('.js') && !f.startsWith('i18n')).map(read).join('\n');
+    expect(scripts + html).not.toMatch(/Rowad Alfa|JOTUN|QMULATE/);
+    expect(html).not.toContain('/dashboard/assets/logo-192.png');
+    expect(html).toMatch(/id="dev-credit" hidden/); // the credit appears next to a company's workspace only
   });
 });
 

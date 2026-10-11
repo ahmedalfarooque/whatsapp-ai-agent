@@ -1,4 +1,4 @@
-// Rowad Alfa AI Workspace — business setup workspace (one per WhatsApp account).
+// AI Workspace — business setup workspace (one per WhatsApp account).
 // Route: #/accounts/<id>. Loaded after app.js (api, esc, badge, toast, route, formatDate,
 // selectAccount, loadAccounts, getSelectedAccountId, accountStatusInfo).
 //

@@ -52,6 +52,7 @@ const F = (feature: FeatureKey, level?: Level): Spec => ({ t: 'feature', feature
 // Paths are relative to the /api/dashboard mount point. The first matching rule wins, so specific rules come first.
 const RULES: readonly Rule[] = [
   { test: /^\/me$/, spec: { t: 'any' } },
+  { test: /^\/branding\/logo$/, methods: ['GET'], spec: { t: 'any' } },
   { test: /^\/auth\/logout$/, spec: { t: 'any' } },
   { test: /^\/accounts$/, methods: ['GET'], spec: { t: 'any' } },
   { test: /^\/accounts$/, methods: ['POST'], spec: { t: 'connection' } },
