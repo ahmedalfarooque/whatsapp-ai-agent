@@ -8,7 +8,7 @@ import { LEGACY_ACCOUNT_ID } from './accountContext';
  * place where that is enforced, so no menu, template, AI tool or dashboard
  * page of the original business can change because an add-on exists elsewhere.
  */
-export const FEATURES = { CATALOGUES: 'catalogues' } as const;
+export const FEATURES = { CATALOGUES: 'catalogues', REAL_ESTATE: 'real_estate' } as const;
 export type AccountFeature = (typeof FEATURES)[keyof typeof FEATURES];
 
 export function accountHasFeature(accountId: number, feature: AccountFeature, db: Database.Database = getDb()): boolean {

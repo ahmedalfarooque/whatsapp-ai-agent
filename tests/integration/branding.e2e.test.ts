@@ -145,6 +145,39 @@ describe('who the interface is for: branding decided on the server from the real
     expect(rows.map((r) => r.id).sort()).toEqual([ROWAD, JOTUN].sort());
   });
 
+  it('the selected-account identity: the accounts list carries each account\'s own logo URL, and a logo is served only for an account the user may open', async () => {
+    const both = as(user.both!);
+    const list = json(await both.get('/api/dashboard/accounts')).accounts as { id: number; name: string; logoUrl: string | null }[];
+    expect(list.map((a) => a.id).sort()).toEqual([JOTUN, QMULATE].sort()); // account 1 is not even listed
+    const urlOf = (id: number) => list.find((a) => a.id === id)!.logoUrl!;
+    expect(urlOf(JOTUN)).toMatch(new RegExp(`^/api/dashboard/accounts/${JOTUN}/logo\\?v=\\d+-\\d+$`));
+    expect(urlOf(QMULATE)).toMatch(new RegExp(`^/api/dashboard/accounts/${QMULATE}/logo\\?v=\\d+-\\d+$`));
+    expect(urlOf(JOTUN)).not.toBe(urlOf(QMULATE));
+    const j = await both.get(urlOf(JOTUN));
+    expect(j.status).toBe(200);
+    expect(j.headers['content-type']).toBe('image/webp');
+    expect(j.headers['cache-control']).toMatch(/^private/);
+    expect(j.headers['x-content-type-options']).toBe('nosniff');
+    expect((j.body as Buffer).equals(BUNDLED_LOGO)).toBe(true);
+    expect(((await both.get(urlOf(QMULATE))).body as Buffer).equals(TINY_PNG)).toBe(true);
+    // the same artwork for accounts 1 and 2: account 1 is the bundled file, listed for a user who may open it
+    const owner = json(await as(ownerId).get('/api/dashboard/accounts')).accounts as { id: number; logoUrl: string | null }[];
+    expect(owner.find((a) => a.id === ROWAD)!.logoUrl).toBe('/dashboard/assets/logo.webp');
+    expect(owner.find((a) => a.id === PLAIN)!.logoUrl).toBeNull(); // no logo: the page draws a neutral tile
+    // a user of one business cannot fetch another's logo by changing the id in the URL or the account header
+    const jotun = as(user.jotun!);
+    expect((await jotun.get(`/api/dashboard/accounts/${JOTUN}/logo`)).status).toBe(200);
+    expect((await jotun.get(`/api/dashboard/accounts/${QMULATE}/logo`)).status).toBe(403);
+    expect((await jotun.get(`/api/dashboard/accounts/${ROWAD}/logo`)).status).toBe(403);
+    expect((await jotun.get(`/api/dashboard/accounts/${JOTUN}/logo`, QMULATE)).status).toBe(403); // a forged header is refused before the route runs
+    expect((await jotun.get('/api/dashboard/accounts/99999/logo')).status).toBe(403); // not an account this user may open (an unknown id is not distinguishable)
+    expect((await as(ownerId).get('/api/dashboard/accounts/99999/logo')).status).toBe(404);
+    expect((await request(app).get(`/api/dashboard/accounts/${JOTUN}/logo`)).status).toBe(401);
+    expect((await as(ownerId).get(`/api/dashboard/accounts/${PLAIN}/logo`)).status).toBe(404); // an account without a stored logo
+    // an account's list never reveals another business to a single-account user
+    expect(JSON.stringify(json(await jotun.get('/api/dashboard/accounts')))).not.toMatch(/QMULATE|Rowad Alfa Auto Care|accounts\/\d+\/logo\?v=[^"]*"[^}]*QMULATE/);
+  });
+
   it('several accounts, or none, or an unclear assignment resolve to SYNRTECHS — never to a guessed company', async () => {
     expect((await as(user.both!).me()).body.branding).toEqual({ mode: 'developer', company: null });
     // no assigned account at all: the server refuses the session's dashboard calls (fails closed) and offers no company identity

@@ -39,8 +39,10 @@ export type { MenuOption } from './menuStatic';
  * to fill the placeholder with, the pipeline sends the fallback instead
  * (e.g. no customer-visible offers → the "no current offers" template).
  */
-export const DATA_DRIVEN_FALLBACKS: Record<string, { placeholder: 'offers'; fallback: string }> = {
+export const DATA_DRIVEN_FALLBACKS: Record<string, { placeholder: 'offers' | 'projects'; fallback: string }> = {
   prices_offers_list: { placeholder: 'offers', fallback: 'prices_offers' },
+  // real estate businesses: no published project → the "no project published" page (never an invented list)
+  re_projects: { placeholder: 'projects', fallback: 're_projects_none' },
 };
 
 /** Templates the pipeline sends as a second bubble right after the first (mirrored by the dashboard preview). */
@@ -222,6 +224,13 @@ export function routeMenu(input: RouteInput): RouteResult | null {
       const step = Number(state.slice(prefix.length));
       if (Number.isFinite(step) && step >= 1) return continueFlow(tables.flows, kind, step, raw, customer);
     }
+  }
+
+  // 4a. Real estate conversation (a business with the add-on): everything the customer writes — a bare number included ("3" bedrooms) — is an
+  // answer for the assistant. Only "0" (and the menu / language / human keywords handled above) leaves it.
+  if (state === MENU_STATES.REAL_ESTATE_CHAT && accountHasFeature(currentAccountId(), FEATURES.REAL_ESTATE)) {
+    if (normalized === '0' && !input.interactiveId) return { kind: 'rule', send: ['main_menu'], state: MENU_STATES.MAIN_MENU, flowData: null };
+    return null; // → AI, which sees the customer's open enquiry
   }
 
   // 4b. Choosing from the catalogue list: the number is the position in the live, enabled list.

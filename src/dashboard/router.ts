@@ -77,7 +77,9 @@ import { accountUiStatus } from '../accounts/accountStatus';
 import { canManageConfiguration, canManageConnections, featureLevel, levelAtLeast, type AuthUser } from './permissions';
 import { runWithAccount } from '../accounts/accountContext';
 import { registerCustomerRoutes } from './customerRoutes';
-import { registerBrandingRoutes } from './branding';
+import { registerBrandingRoutes, accountLogoUrl } from './branding';
+import { registerRealEstateRoutes } from './realEstateRoutes';
+import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { RequestTransitionError, nextStatuses } from '../requests/quotationLifecycle';
 import {
   listAccountsForAdmin, getAccount, createAccount, updateAccount, setAccountEnabled, AccountValidationError, accountIdsForAdmin, grantAccountAccess, type WhatsappAccount,
@@ -342,6 +344,7 @@ export function createDashboardRouter(): Router {
   registerInboxRoutes(router);
   registerCustomerRoutes(router);
   registerBrandingRoutes(router);
+  registerRealEstateRoutes(router);
 
   // ---- WhatsApp accounts (businesses) ----------------------------------------
   function accountView(account: WhatsappAccount) {
@@ -358,6 +361,10 @@ export function createDashboardRouter(): Router {
       phoneNumber: account.phoneNumber,
       displayName: account.displayName,
       phase,
+      /** Logo for the selected-account identity (this account's own; a neutral tile is drawn when null). */
+      logoUrl: accountLogoUrl(account.id),
+      /** Add-on sections this business has (the sidebar shows the real estate pages only when true; the server enforces it on every route). */
+      features: { realEstate: accountHasFeature(account.id, FEATURES.REAL_ESTATE) },
       /** Coarse state for the sidebar: connected | connecting | qr_required | disconnected | disabled | error. */
       uiStatus: accountUiStatus(account, phase),
       connectedAt: account.connectedAt,

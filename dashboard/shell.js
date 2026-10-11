@@ -94,9 +94,22 @@ const ROUTE_ACCESS = {
   '#/project-sync': { cap: 'configuration' },
   '#/users': { cap: 'users' },
   '#/logs': 'activity',
+  // real estate section: the same permissions as the data behind each page (the add-on itself is checked below and, authoritatively, by the server)
+  '#/re-overview': 'requests',
+  '#/re-leads': 'requests',
+  '#/re-projects': 'business',
+  '#/re-followups': 'requests',
+  '#/re-documents': 'customers',
 };
 
+/** True when the SELECTED account has the real estate add-on (from the server's accounts list). Every other business never sees these pages. */
+function realEstateEnabled() {
+  const account = typeof currentAccount === 'function' ? currentAccount() : null;
+  return Boolean(account && account.features && account.features.realEstate);
+}
+
 function routeAllowed(topKey) {
+  if (topKey.startsWith('#/re-') && !realEstateEnabled()) return false;
   const need = ROUTE_ACCESS[topKey];
   if (need === undefined) return Boolean(me && me.superAdmin);
   if (need === 'any') return Boolean(me);
@@ -143,6 +156,11 @@ const ICONS = {
   '#/project-sync': 'M23 4v6h-6M1 20v-6h6M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15',
   '#/users': 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M22 11h-6',
   '#/accounts': 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20',
+  '#/re-overview': 'M3 10.5 12 3l9 7.5V21H3zM9 21v-6h6v6',
+  '#/re-leads': 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  '#/re-projects': 'M3 21h18M6 21V8l6-4 6 4v13M9 11h2M13 11h2M9 15h2M13 15h2',
+  '#/re-followups': 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 15l2 2 4-4',
+  '#/re-documents': 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h4',
   add: 'M12 5v14M5 12h14',
 };
 
@@ -158,7 +176,8 @@ function decorateNav() {
   });
 }
 
-function applyAccessToShell() {
+/** Which sidebar links the signed-in user may use on the SELECTED account (permissions + the account's add-ons); empty groups disappear. */
+function applyNavVisibility() {
   if (!me) return;
   document.querySelectorAll('#nav a[data-route]').forEach((a) => {
     a.hidden = !routeAllowed(a.dataset.route);
@@ -177,6 +196,11 @@ function applyAccessToShell() {
     }
     flush();
   }
+}
+
+function applyAccessToShell() {
+  if (!me) return;
+  applyNavVisibility();
   renderProfile();
   if (typeof applyBranding === 'function') applyBranding(); // whose interface this is: the server's decision in me.branding
   const settingsBtn = document.querySelector('#settings-btn');

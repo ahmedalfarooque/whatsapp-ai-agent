@@ -367,7 +367,7 @@ select.input,.field select{width:100%;height:42px;padding:0 12px;border-radius:1
   .kpis .kpi:last-child:nth-child(odd){grid-column:1/-1}
   .dash-grid{grid-template-columns:1fr}
   .form-cols{grid-template-columns:1fr}
-  .topbar-mark{display:none}
+  .topbar-mark,body:not(.route-home) .topbar-mark{width:38px;height:38px}  /* the account logo stays visible on narrow screens */
 }
 @media (max-width:700px){
   .dash-grid{grid-template-columns:1fr}

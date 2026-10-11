@@ -243,8 +243,9 @@
 [data-theme="dark"] .dot.green{background:var(--color-success)}[data-theme="dark"] .dot.amber{background:var(--color-warning)}[data-theme="dark"] .dot.red{background:var(--color-danger)}
 /* ---- company-branded workspace (dark): navy sidebar, white logo tile, teal rule under the brand ---- */
 [data-theme="dark"] .brand-initial{background:var(--syn-raised);border:1px solid var(--syn-line-strong);color:var(--syn-teal)}
-[data-theme="dark"] .topbar-mark.has-brand{background:var(--syn-canvas);border-color:var(--syn-line-strong)}
-[data-theme="dark"] .topbar-mark .brand-initial.sm{background:transparent;border:0}
+[data-theme="dark"] .topbar-mark.acct-mark{border-color:var(--syn-line-strong)}
+[data-theme="dark"] .account-item .list-av{border-color:var(--syn-line-strong)}
+[data-theme="dark"] .acct-av.acct-av-initial{background:var(--syn-raised);color:var(--syn-teal)}
 [data-theme="dark"] .wm .wm-light{display:none}
 [data-theme="dark"] .wm .wm-dark{display:block}
 [data-theme="dark"] body[data-brand="company"] .brand{padding-bottom:16px;border-bottom:1px solid var(--syn-line)}

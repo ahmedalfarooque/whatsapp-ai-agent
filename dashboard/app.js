@@ -224,20 +224,21 @@ function renderAccountList() {
   host.innerHTML = knownAccounts.map((a) => {
     const info = accountStatusInfo(a.uiStatus);
     const active = a.id === selectedAccountId;
+    const identity = accountIdentityModel(a, (window.I18N && window.I18N.lang) || 'en', info.label);
     return `<button type="button" class="account-item ${active ? 'active' : ''} ${a.enabled ? '' : 'off'}" data-account="${a.id}" title="${esc(a.name)} · ${esc(info.label)}" aria-pressed="${active}">
-      <span class="dot ${info.dot}"></span>
+      ${identity ? accountAvatarHtml(identity, 'list-av') : ''}<span class="dot ${info.dot}"></span>
       <span class="account-text"><span class="account-name" dir="auto">${esc(a.name)}</span><small>${esc(a.phoneNumber || info.label)}</small></span>
     </button>`;
   }).join('');
   host.querySelectorAll('[data-account]').forEach((btn) => btn.addEventListener('click', () => selectAccount(Number(btn.dataset.account))));
+  armAvatarFallback(host);
   const chip = document.querySelector('#account-chip');
   const current = currentAccount();
   if (chip) {
     chip.hidden = !current;
     if (current) document.querySelector('#account-chip-name').textContent = current.name;
   }
-  const eyebrow = document.querySelector('#page-eyebrow');
-  if (eyebrow && current) eyebrow.textContent = current.name;
+  if (typeof renderAccountIdentity === 'function') renderAccountIdentity(); // top-bar logo + name line (one shared component, see branding.js)
 }
 
 /** Loads the accounts the signed-in admin may see and settles the selection (remembered id when still valid, else the server default). */

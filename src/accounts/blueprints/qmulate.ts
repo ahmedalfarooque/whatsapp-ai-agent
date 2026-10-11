@@ -26,26 +26,12 @@ const CONSULT = (id: string): MenuItem => ({ id, kind: 'appointment', labelEn: '
 export const QMULATE_MENU: MenuConfig = {
   version: 1,
   items: [
+    // Real estate journeys (the add-on): the assistant guides the customer; "0" returns to this menu.
+    { id: 'buy', kind: 'realestate', labelEn: '🏠 Buy a Property', labelAr: '🏠 شراء عقار' },
+    { id: 'sell', kind: 'realestate', labelEn: '🏷️ Sell a Property', labelAr: '🏷️ بيع عقار' },
+    { id: 'projects', kind: 'realestate', labelEn: '🏗️ Explore Our Projects', labelAr: '🏗️ استكشف مشاريعنا' },
     {
-      id: 'ownership', kind: 'submenu', labelEn: '🏛️ Ownership Structuring & Governance', labelAr: '🏛️ هيكلة الملكية والحوكمة',
-      children: [
-        { id: 'ownercorp', kind: 'info', labelEn: '🏢 Corporates', labelAr: '🏢 الشركات' },
-        { id: 'ownerfam', kind: 'info', labelEn: '👪 Individuals & Families', labelAr: '👪 الأفراد والأسر' },
-        { id: 'ownerend', kind: 'info', labelEn: '📜 Endowments', labelAr: '📜 الأوقاف' },
-        CONSULT('ownerconsult'),
-      ],
-    },
-    {
-      id: 'assets', kind: 'submenu', labelEn: '🏢 Real Estate Asset Management', labelAr: '🏢 إدارة الأصول العقارية',
-      children: [
-        { id: 'assetcorp', kind: 'info', labelEn: '🏢 Corporates', labelAr: '🏢 الشركات' },
-        { id: 'assetfam', kind: 'info', labelEn: '👪 Individuals & Families', labelAr: '👪 الأفراد والأسر' },
-        { id: 'assetend', kind: 'info', labelEn: '📜 Endowments', labelAr: '📜 الأوقاف' },
-        CONSULT('assetconsult'),
-      ],
-    },
-    {
-      id: 'invest', kind: 'submenu', labelEn: '📈 Development & Investment', labelAr: '📈 التطوير والاستثمار',
+      id: 'invest', kind: 'submenu', labelEn: '📈 Property Development & Investment', labelAr: '📈 التطوير والاستثمار العقاري',
       children: [
         { id: 'investcorp', kind: 'info', labelEn: '🏢 Corporates', labelAr: '🏢 الشركات' },
         { id: 'investfam', kind: 'info', labelEn: '👪 Individuals & Families', labelAr: '👪 الأفراد والأسر' },
@@ -54,26 +40,26 @@ export const QMULATE_MENU: MenuConfig = {
       ],
     },
     {
-      id: 'advisory', kind: 'submenu', labelEn: '🤝 Consultancy & Brokerage', labelAr: '🤝 الاستشارات والوساطة العقارية',
+      id: 'advisory', kind: 'submenu', labelEn: '🤝 Real Estate Consultancy', labelAr: '🤝 الاستشارات العقارية',
       children: [
-        { id: 'advisoryinfo', kind: 'info', labelEn: '🤝 What we cover', labelAr: '🤝 ما نقدمه' },
+        { id: 'advisoryinfo', kind: 'info', labelEn: '🤝 Consultancy & Brokerage', labelAr: '🤝 الاستشارات والوساطة' },
+        { id: 'ownershipinfo', kind: 'info', labelEn: '🏛️ Ownership Structuring & Governance', labelAr: '🏛️ هيكلة الملكية والحوكمة' },
         { id: 'advisoryinquiry', kind: 'quotation', labelEn: '📋 Send an inquiry', labelAr: '📋 إرسال استفسار' },
         CONSULT('advisoryconsult'),
       ],
     },
     {
-      id: 'clients', kind: 'submenu', labelEn: '👥 Services by Client Type', labelAr: '👥 الخدمات حسب نوع العميل',
+      id: 'assets', kind: 'submenu', labelEn: '🏢 Property & Asset Management', labelAr: '🏢 إدارة الأملاك والأصول العقارية',
       children: [
-        { id: 'clientfam', kind: 'info', labelEn: '👪 Individuals & Families', labelAr: '👪 الأفراد والأسر' },
-        { id: 'clientend', kind: 'info', labelEn: '📜 Endowments', labelAr: '📜 الأوقاف' },
-        { id: 'clientcorp', kind: 'info', labelEn: '🏢 Corporates', labelAr: '🏢 الشركات' },
-        CONSULT('clientconsult'),
+        { id: 'assetcorp', kind: 'info', labelEn: '🏢 Corporates', labelAr: '🏢 الشركات' },
+        { id: 'assetfam', kind: 'info', labelEn: '👪 Individuals & Families', labelAr: '👪 الأفراد والأسر' },
+        { id: 'assetend', kind: 'info', labelEn: '📜 Endowments', labelAr: '📜 الأوقاف' },
+        CONSULT('assetconsult'),
       ],
     },
-    { id: 'about', kind: 'info', labelEn: 'ℹ️ About QMULATE & Licensing', labelAr: 'ℹ️ عن QMULATE والتراخيص' },
-    { id: 'contact', kind: 'info', labelEn: '📍 Contact & Address', labelAr: '📍 التواصل والعنوان' },
-    { id: 'consult', kind: 'appointment', labelEn: '📅 Request a Consultation', labelAr: '📅 طلب استشارة' },
-    { id: 'staff', kind: 'handoff', labelEn: '💬 Talk to Our Team', labelAr: '💬 التحدث مع فريقنا' },
+    { id: 'consult', kind: 'appointment', labelEn: '📅 Book a Consultation', labelAr: '📅 حجز استشارة' },
+    { id: 'staff', kind: 'handoff', labelEn: '💬 Speak to an Advisor', labelAr: '💬 التحدث مع مستشار' },
+    { id: 'about', kind: 'info', labelEn: 'ℹ️ About QMULATE & Contact', labelAr: 'ℹ️ عن QMULATE والتواصل' },
   ],
 };
 
@@ -115,21 +101,6 @@ const MAIN_MENU: BlueprintTemplate = {
 const TEMPLATES: BlueprintTemplate[] = [
   MAIN_MENU,
 
-  // ---- Ownership Structuring & Governance
-  submenuList(item('ownership'), 'We help organise who owns, who decides and how ownership is sustained. Choose the client type that fits you:', 'نساعد في تنظيم من يملك ومن يقرر وكيف تستمر الملكية. اختر نوع العميل المناسب لك:'),
-  subPage('menu_ownership_ownercorp', '🏢 Ownership Structuring & Governance — Corporates', '🏢 هيكلة الملكية والحوكمة — الشركات',
-    'We structure ownership and the relationships between shareholders, partners and investors, so that authority is clear, decisions are supported and the business can be sustained.',
-    'نهيكل الملكية والعلاقات بين المساهمين والشركاء والمستثمرين، بما يحدد الصلاحيات بوضوح، ويدعم اتخاذ القرارات، ويحافظ على استدامة الأعمال.',
-    CONSULT_CTA_EN, CONSULT_CTA_AR),
-  subPage('menu_ownership_ownerfam', '👪 Ownership Structuring & Governance — Individuals & Families', '👪 هيكلة الملكية والحوكمة — الأفراد والأسر',
-    'We organise personal assets and investments within a framework that supports governance, informed decisions and long-term planning.',
-    'ننظّم الأصول والاستثمارات الشخصية ضمن إطار يدعم الحوكمة واتخاذ القرارات المستنيرة والتخطيط طويل الأمد.',
-    CONSULT_CTA_EN, CONSULT_CTA_AR),
-  subPage('menu_ownership_ownerend', '📜 Ownership Structuring & Governance — Endowments', '📜 هيكلة الملكية والحوكمة — الأوقاف',
-    'We build governance frameworks that support the endowment’s objectives, its oversight and its continuity across generations.',
-    'نبني أطر حوكمة تدعم أهداف الوقف والرقابة عليه واستمراريته عبر الأجيال.',
-    CONSULT_CTA_EN, CONSULT_CTA_AR),
-
   // ---- Real Estate Asset Management
   submenuList(item('assets'), 'Leasing, operations, maintenance and collections — managed for owners. Choose the client type that fits you:', 'التأجير والتشغيل والصيانة والتحصيل — تُدار نيابةً عن المالك. اختر نوع العميل المناسب لك:'),
   subPage('menu_assets_assetcorp', '🏢 Real Estate Asset Management — Corporates', '🏢 إدارة الأصول العقارية — الشركات',
@@ -160,39 +131,23 @@ const TEMPLATES: BlueprintTemplate[] = [
     'نقيّم أصول الأوقاف ونطوّرها عبر استثمارات مستدامة.',
     CONSULT_CTA_EN, CONSULT_CTA_AR),
 
-  // ---- Consultancy & Brokerage
+  // ---- Real Estate Consultancy
   submenuList(item('advisory'), 'Real estate consultancy and brokerage, with property management behind it. Choose an option:', 'الاستشارات العقارية والوساطة العقارية، تدعمها إدارة الأملاك. اختر أحد الخيارات:'),
   subPage('menu_advisory_advisoryinfo', '🤝 Consultancy & Brokerage', '🤝 الاستشارات والوساطة العقارية',
     `QMULATE is a real estate consultancy, brokerage and property management platform. Our consultancy and brokerage support acquisitions, sales, development, retention or exit decisions.\n\nPlease do not share confidential documents in this chat — our team will contact you to discuss next steps. ${RESPONSE_EN}`,
     `QMULATE منصة عقارية تقدم خدمات الاستشارات العقارية والوساطة العقارية وإدارة الأملاك. وتدعم استشاراتنا ووساطتنا قرارات الشراء والبيع والتطوير والاحتفاظ أو الخروج.\n\nيرجى عدم إرسال مستندات سرية في هذه المحادثة، وسيتواصل معك فريقنا لمناقشة الخطوات التالية. ${RESPONSE_AR}`,
-    `Reply ${keycap(2)} to send an inquiry, or ${keycap(3)} to request a consultation.`,
-    `أرسل ${keycap(2)} لإرسال استفسار، أو ${keycap(3)} لطلب استشارة.`),
-
-  // ---- Services by client type
-  submenuList(item('clients'), 'See what we offer each type of client, across ownership structuring, asset management and investment:', 'اطّلع على ما نقدمه لكل نوع من العملاء في هيكلة الملكية وإدارة الأصول والاستثمار:'),
-  subPage('menu_clients_clientfam', '👪 Individuals & Families', '👪 الأفراد والأسر',
-    '• Ownership structuring & governance: organising personal assets and investments within a framework for governance, informed decisions and long-term planning.\n• Asset management: managing personal and investment properties, with visibility of performance and protection of the asset.\n• Development & investment: assessing opportunities, with consultancy and brokerage for acquisitions, sales, development, retention or exit decisions.',
-    '• هيكلة الملكية والحوكمة: تنظيم الأصول والاستثمارات الشخصية ضمن إطار للحوكمة والقرارات المستنيرة والتخطيط طويل الأمد.\n• إدارة الأصول: إدارة العقارات الشخصية والاستثمارية مع وضوح في متابعة الأداء وحماية للأصل.\n• التطوير والاستثمار: تقييم الفرص مع الاستشارات والوساطة في قرارات الشراء والبيع والتطوير والاحتفاظ أو الخروج.',
-    CONSULT_CTA_EN, CONSULT_CTA_AR),
-  subPage('menu_clients_clientend', '📜 Endowments', '📜 الأوقاف',
-    '• Ownership structuring & governance: governance frameworks that support the endowment’s objectives, oversight and continuity across generations.\n• Asset management: operating endowment assets to maximise their benefit and sustainability, in line with the endowment’s objectives.\n• Development & investment: evaluating and developing endowment assets through sustainable investments.',
-    '• هيكلة الملكية والحوكمة: أطر حوكمة تدعم أهداف الوقف والرقابة عليه واستمراريته عبر الأجيال.\n• إدارة الأصول: تشغيل أصول الأوقاف بما يعظّم نفعها واستدامتها بما يتوافق مع أهداف الوقف.\n• التطوير والاستثمار: تقييم أصول الأوقاف وتطويرها عبر استثمارات مستدامة.',
-    CONSULT_CTA_EN, CONSULT_CTA_AR),
-  subPage('menu_clients_clientcorp', '🏢 Corporates', '🏢 الشركات',
-    '• Ownership structuring & governance: structuring ownership and the relationships between shareholders, partners and investors, so authority is clear and decisions are supported.\n• Asset management: portfolio management that protects asset value and improves performance.\n• Development & investment: opportunities for expansion, development and repositioning.',
-    '• هيكلة الملكية والحوكمة: هيكلة الملكية والعلاقات بين المساهمين والشركاء والمستثمرين، بما يحدد الصلاحيات ويدعم القرارات.\n• إدارة الأصول: إدارة المحافظ العقارية بما يحمي قيمة الأصول ويحسّن أداءها.\n• التطوير والاستثمار: فرص التوسع والتطوير وإعادة التموضع.',
+    `Reply ${keycap(3)} to send an inquiry, or ${keycap(4)} to request a consultation.`,
+    `أرسل ${keycap(3)} لإرسال استفسار، أو ${keycap(4)} لطلب استشارة.`),
+  subPage('menu_advisory_ownershipinfo', '🏛️ Ownership Structuring & Governance', '🏛️ هيكلة الملكية والحوكمة',
+    '• Corporates: we structure ownership and the relationships between shareholders, partners and investors, so that authority is clear, decisions are supported and the business can be sustained.\n• Individuals & Families: we organise personal assets and investments within a framework that supports governance, informed decisions and long-term planning.\n• Endowments: we build governance frameworks that support the endowment’s objectives, its oversight and its continuity across generations.',
+    '• الشركات: نهيكل الملكية والعلاقات بين المساهمين والشركاء والمستثمرين، بما يحدد الصلاحيات بوضوح، ويدعم اتخاذ القرارات، ويحافظ على استدامة الأعمال.\n• الأفراد والأسر: ننظّم الأصول والاستثمارات الشخصية ضمن إطار يدعم الحوكمة واتخاذ القرارات المستنيرة والتخطيط طويل الأمد.\n• الأوقاف: نبني أطر حوكمة تدعم أهداف الوقف والرقابة عليه واستمراريته عبر الأجيال.',
     CONSULT_CTA_EN, CONSULT_CTA_AR),
 
-  // ---- About & contact (top-level pages: the customer is on the main menu, so 8 and 9 work directly)
+  // ---- About & contact (one top-level page: the customer is on the main menu, so 7 and 8 work directly)
   {
     key: 'menu_about',
-    en: `ℹ️ About QMULATE\n\nQMULATE is a Saudi real estate consultancy, brokerage and property management platform. “${TAGLINE_EN}”\n\nWe serve property owners, families, individuals, businesses and endowments in three areas: Ownership Structuring & Governance, Real Estate Asset Management, and Development & Investment. We work through four stages: Discovery, Structuring, Management and Growth.\n\n📜 Licensing: ${LICENCE_EN}\n\nReply ${keycap(8)} to request a consultation, or write *menu* for the main menu.`,
-    ar: `ℹ️ عن QMULATE\n\nQMULATE منصة عقارية سعودية متكاملة تقدم خدمات الاستشارات العقارية والوساطة العقارية وإدارة الأملاك. «${TAGLINE_AR}»\n\nنخدم ملاك العقارات والأسر والأفراد والشركات والأوقاف في ثلاثة مجالات: هيكلة الملكية والحوكمة، وإدارة الأصول العقارية، والتطوير والاستثمار. ونعمل عبر أربع مراحل: الاكتشاف، والهيكلة، والإدارة، والنمو.\n\n📜 التراخيص: ${LICENCE_AR}\n\nأرسل ${keycap(8)} لطلب استشارة، أو اكتب «القائمة» للعودة إلى القائمة الرئيسية.`,
-  },
-  {
-    key: 'menu_contact',
-    en: `📍 Contact & Address\n\n{business}\n\nAddress: {address}\nPhone: {phone}\nEmail: {email}\nWebsite: {website}\n\n${RESPONSE_EN}\n\nReply ${keycap(8)} to request a consultation or ${keycap(9)} to talk to our team, or write *menu* for the main menu.`,
-    ar: `📍 التواصل والعنوان\n\n{business}\n\nالعنوان: {address}\nالهاتف: {phone}\nالبريد الإلكتروني: {email}\nالموقع الإلكتروني: {website}\nالنسخة العربية: ${SITE_AR}\n\n${RESPONSE_AR}\n\nأرسل ${keycap(8)} لطلب استشارة أو ${keycap(9)} للتحدث مع فريقنا، أو اكتب «القائمة» للعودة إلى القائمة الرئيسية.`,
+    en: `ℹ️ About QMULATE\n\nQMULATE is a Saudi real estate consultancy, brokerage and property management platform. “${TAGLINE_EN}”\n\nWe serve property owners, families, individuals, businesses and endowments in three areas: Ownership Structuring & Governance, Real Estate Asset Management, and Development & Investment. We work through four stages: Discovery, Structuring, Management and Growth.\n\n📜 Licensing: ${LICENCE_EN}\n\n📍 Contact\nAddress: {address}\nPhone: {phone}\nEmail: {email}\nWebsite: {website}\n\n${RESPONSE_EN}\n\nReply ${keycap(7)} to book a consultation or ${keycap(8)} to speak to an advisor, or write *menu* for the main menu.`,
+    ar: `ℹ️ عن QMULATE\n\nQMULATE منصة عقارية سعودية متكاملة تقدم خدمات الاستشارات العقارية والوساطة العقارية وإدارة الأملاك. «${TAGLINE_AR}»\n\nنخدم ملاك العقارات والأسر والأفراد والشركات والأوقاف في ثلاثة مجالات: هيكلة الملكية والحوكمة، وإدارة الأصول العقارية، والتطوير والاستثمار. ونعمل عبر أربع مراحل: الاكتشاف، والهيكلة، والإدارة، والنمو.\n\n📜 التراخيص: ${LICENCE_AR}\n\n📍 التواصل\nالعنوان: {address}\nالهاتف: {phone}\nالبريد الإلكتروني: {email}\nالموقع الإلكتروني: {website}\nالنسخة العربية: ${SITE_AR}\n\n${RESPONSE_AR}\n\nأرسل ${keycap(7)} لحجز استشارة أو ${keycap(8)} للتحدث مع مستشار، أو اكتب «القائمة» للعودة إلى القائمة الرئيسية.`,
   },
 
   // ---- Consultation request (the platform's appointment flow: name, topic, date, time, notes)
@@ -304,9 +259,11 @@ Leasing, operations, maintenance and collections.
 Real estate consultancy and brokerage support acquisitions, sales, development, retention or exit decisions.
 
 ## How a customer takes the next step
-- Main menu option 8: request a consultation (name, area, date, time and contact preference, language and notes).
-- Main menu option 4, then 2: send a consultancy or brokerage inquiry.
-- Main menu option 9, or writing "agent": talk to the team.
+- Main menu options 1 and 2: buy or sell a property (the assistant asks a few short questions; the team reviews every enquiry).
+- Main menu option 3: explore our projects (only projects the team has published; if none, the team reviews the customer's requirements).
+- Main menu option 7: book a consultation (name, area, date, time and contact preference, language and notes). It is a request until the team confirms it.
+- Main menu option 5, then 3: send a consultancy or brokerage inquiry.
+- Main menu option 8, or writing "agent": speak to an advisor.
 `;
 
 const FAQ_MD = `# Frequently asked questions
@@ -319,17 +276,17 @@ const FAQ_MD = `# Frequently asked questions
 
 **Where are you?** King Abdulaziz Rd, Albasatin Dist., P.O. Box 23718, Jeddah 9351, Kingdom of Saudi Arabia.
 
-**How can I contact you?** Email ceo@qmulate.com, phone +966 53 333 9052, or the website ${SITE_EN}. Or use this chat: choose option 8 to request a consultation or option 9 to talk to the team.
+**How can I contact you?** Email ceo@qmulate.com, phone +966 53 333 9052, or the website ${SITE_EN}. Or use this chat: choose option 7 to book a consultation or option 8 to speak to an advisor.
 
 **How fast do you reply?** ${RESPONSE_EN}
 
 **Is my information confidential?** Every introduction is treated with complete discretion. Please do not send confidential documents, identity documents or bank details in this chat.
 
-**How do I request a consultation?** Choose option 8 from the main menu (or option 4 inside any service menu) and answer a few short questions. The consultation is not confirmed until the team confirms it.
+**How do I request a consultation?** Choose option 7 from the main menu (or option 4 inside the service menus) and answer a few short questions. The consultation is not confirmed until the team confirms it.
 
 **What are your fees?** No fee information is available in this chat. Our team can discuss it after understanding the situation.
 
-**Do you have properties for sale or rent?** No property list is available in this chat. Our team can discuss acquisitions, sales and other real estate decisions: send an inquiry (main menu option 4, then 2) or request a consultation.
+**Do you have properties for sale or rent?** Only projects our team has published appear in this chat (main menu option 3); no other property is listed. If you want to buy or sell, choose option 1 or 2 and tell us your requirements: our team will review them and follow up. You can also book a consultation (option 7).
 
 **What are your opening hours?** Opening hours are not published. The team typically responds within one business day.
 `;
@@ -341,14 +298,14 @@ You are the WhatsApp assistant of ${NAME_EN}. Be professional, discreet, calm an
 ## Do
 - Answer only from this knowledge and the business profile. If something is not stated, say that our team will confirm it.
 - Ask one clarifying question at a time when it helps the team: who is asking (an individual or family, a corporate, or an endowment), what kind of property and how many, and what they want to achieve.
-- Point to the right next step: option 8 (request a consultation), option 4 then 2 (send an inquiry), or option 9 / "agent" (talk to the team).
+- Point to the right next step: option 1 or 2 (buy or sell a property), option 3 (our projects), option 7 (book a consultation), option 5 then 3 (send an inquiry), or option 8 / "agent" (speak to an advisor).
 - Hand over to the team for anything complex, sensitive, urgent or a complaint, and for any request the menu cannot handle.
 - Say clearly when something needs the team's confirmation. A consultation request is not a confirmed appointment.
 - Describe the licence exactly as written in the business profile.
 
 ## Never
 - Give or estimate prices, fees, commissions, rents, yields, returns or valuations, and never promise results or timelines other than "we typically respond within one business day".
-- List, describe or invent properties, listings, projects, clients or case studies.
+- List, describe or invent properties, listings, projects, units, clients or case studies. The only projects you may mention are the ones staff have published (they are supplied to you separately, with their recorded details).
 - Give legal, regulatory, tax, financial or Sharia advice, or claim any licence, certification, approval or partnership that is not written in the business profile.
 - Ask for or accept confidential documents, identity documents or bank details in the chat.
 - Share one customer's information with another.
@@ -385,13 +342,14 @@ export const QMULATE_BLUEPRINT: BusinessBlueprint = {
     contactPhone: '+966 53 333 9052',
     contactEmail: 'ceo@qmulate.com',
     supportedLanguages: 'ar,en',
-    humanEscalationInfo: 'Complex, sensitive or urgent matters are handled by the QMULATE team. The customer can choose option 9 (Talk to Our Team) or write "agent". The team typically responds within one business day.',
-    fallbackMessage: 'Thank you for contacting QMULATE. Please choose an option from the menu (write "menu"), or write "agent" to reach our team.',
+    humanEscalationInfo: 'Complex, sensitive or urgent matters are handled by the QMULATE team. The customer can choose option 8 (Speak to an Advisor) or write "agent". The team typically responds within one business day.',
+    fallbackMessage: 'Thank you for contacting QMULATE. Please choose an option from the menu (write "menu"), or write "agent" to reach an advisor.',
   },
   links: [
     { url: SITE_EN, kind: 'website', label: 'QMULATE website' },
     { url: SITE_AR, kind: 'other', label: 'QMULATE website (Arabic)' },
   ],
+  features: ['real_estate'],
   menu: QMULATE_MENU,
   templates: TEMPLATES,
   knowledge: {

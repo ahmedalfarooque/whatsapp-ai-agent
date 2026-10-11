@@ -5,6 +5,9 @@ export const TOOL_NAMES = {
   SEARCH_CATALOGUES: 'search_catalogues',
   WEB_SEARCH: 'web_search',
   REQUEST_HUMAN_HANDOFF: 'request_human_handoff',
+  SAVE_REAL_ESTATE_LEAD: 'save_real_estate_lead',
+  SEARCH_REAL_ESTATE_PROJECTS: 'search_real_estate_projects',
+  SEND_PROJECT_BROCHURE: 'send_project_brochure',
 } as const;
 
 export const CONVERSATION_STATUS = {

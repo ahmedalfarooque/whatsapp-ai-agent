@@ -11,6 +11,8 @@ vi.mock('../../../src/whatsapp/client', async (importOriginal) => {
 vi.mock('../../../src/llm/agentLoop', () => ({ runAgentLoop: vi.fn().mockResolvedValue({ finalText: 'AI reply', generatedMessages: [] }) }));
 
 import { sendTextMessage, sendImageMessage, sendDocumentMessage } from '../../../src/whatsapp/client';
+import { runAgentLoop } from '../../../src/llm/agentLoop';
+import { accountHasFeature, FEATURES } from '../../../src/accounts/accountFeatures';
 import { processInboundMessage } from '../../../src/pipeline/processInboundMessage';
 import { getDb } from '../../../src/memory/db';
 import { createAccount, getAccount, listAccounts, authDirFor } from '../../../src/accounts/accountRepo';
@@ -95,6 +97,7 @@ beforeAll(() => {
 afterAll(() => fs.rmSync(logoFile, { force: true }));
 
 beforeEach(() => {
+  vi.mocked(runAgentLoop).mockClear();
   vi.mocked(sendTextMessage).mockReset().mockImplementation(async (_to, body) => { sent.push(String(body)); return { messaging_product: 'whatsapp', contacts: [], messages: [{ id: 't' }] }; });
   vi.mocked(sendImageMessage).mockReset().mockResolvedValue({ messaging_product: 'whatsapp', contacts: [], messages: [{ id: 'i' }] });
   vi.mocked(sendDocumentMessage).mockReset().mockResolvedValue({ messaging_product: 'whatsapp', contacts: [], messages: [{ id: 'd' }] });
@@ -168,8 +171,8 @@ describe('provisioning the QMULATE account', () => {
     const { config } = getMenuConfig(Q);
     expect(config.items).toHaveLength(9);
     expect(config.items.length).toBeLessThanOrEqual(MAX_MENU_ITEMS);
-    expect(config.items.map((i) => i.kind)).toEqual(['submenu', 'submenu', 'submenu', 'submenu', 'submenu', 'info', 'info', 'appointment', 'handoff']);
-    expect(config.items.map((i) => i.id)).toEqual(['ownership', 'assets', 'invest', 'advisory', 'clients', 'about', 'contact', 'consult', 'staff']);
+    expect(config.items.map((i) => i.kind)).toEqual(['realestate', 'realestate', 'realestate', 'submenu', 'submenu', 'submenu', 'appointment', 'handoff', 'info']);
+    expect(config.items.map((i) => i.id)).toEqual(['buy', 'sell', 'projects', 'invest', 'advisory', 'assets', 'consult', 'staff', 'about']);
     for (const i of config.items) {
       expect(i.labelEn.length).toBeLessThanOrEqual(60);
       expect(i.labelAr.length).toBeLessThanOrEqual(60);
@@ -214,16 +217,26 @@ describe('provisioning the QMULATE account', () => {
     });
   });
 
-  it('the contact page fills address, phone, email and website from this business\'s own profile', () => {
+  it('the About & Contact page fills address, phone, email and website from this business\'s own profile', () => {
     runWithAccount(Q, () => {
-      const en = resolveTemplate('menu_contact', 'en');
+      const en = resolveTemplate('menu_about', 'en');
       expect(en).toContain('King Abdulaziz Rd');
       expect(en).toContain('+966 53 333 9052');
       expect(en).toContain('ceo@qmulate.com');
       expect(en).toContain('https://www.qmulate.ai/');
       expect(en).toContain('typically respond within one business day');
-      expect(resolveTemplate('menu_contact', 'ar')).toContain('طريق الملك عبدالعزيز');
+      expect(resolveTemplate('menu_about', 'ar')).toContain('طريق الملك عبدالعزيز');
     });
+  });
+
+  it('switches the real estate add-on on for this business only, and its entries have their own customer texts', () => {
+    expect(runWithAccount(Q, () => accountHasFeature(Q, FEATURES.REAL_ESTATE))).toBe(true);
+    expect(accountHasFeature(ACC1, FEATURES.REAL_ESTATE)).toBe(false);
+    expect(accountHasFeature(ACC2, FEATURES.REAL_ESTATE)).toBe(false);
+    runWithAccount(Q, () => {
+      for (const key of ['re_buy', 're_sell', 're_projects', 're_projects_none']) expect(listTemplates().some((t) => t.key === key), key).toBe(true);
+    });
+    for (const acc of [ACC1, ACC2]) runWithAccount(acc, () => expect(listTemplates().some((t) => t.key.startsWith('re_'))).toBe(false));
   });
 });
 
@@ -235,33 +248,33 @@ describe('the customer conversation on the QMULATE number', () => {
     expect(welcome.join('\n')).not.toMatch(FOREIGN);
     const en = (await say(waId, '2')).join('\n');
     expect(en).toContain('Welcome to QMULATE Real Estate Consultancy');
-    expect(en).toContain('1️⃣ 🏛️ Ownership Structuring & Governance');
-    expect(en).toContain('9️⃣ 💬 Talk to Our Team');
+    expect(en).toContain('1️⃣ 🏠 Buy a Property');
+    expect(en).toContain('2️⃣ 🏷️ Sell a Property');
+    expect(en).toContain('3️⃣ 🏗️ Explore Our Projects');
+    expect(en).toContain('7️⃣ 📅 Book a Consultation');
+    expect(en).toContain('8️⃣ 💬 Speak to an Advisor');
+    expect(en).toContain('9️⃣ ℹ️ About QMULATE & Contact');
     const ar = newCustomer();
     await say(ar, 'hello');
     const arMenu = (await say(ar, '1')).join('\n');
     expect(arMenu).toContain('أهلاً بك في QMULATE للاستشارات العقارية');
-    expect(arMenu).toContain('1️⃣ 🏛️ هيكلة الملكية والحوكمة');
+    expect(arMenu).toContain('1️⃣ 🏠 شراء عقار');
+    expect(arMenu).toContain('8️⃣ 💬 التحدث مع مستشار');
   });
 
   it.each([
-    ['en', '1', '1', ['shareholders, partners and investors']],
-    ['en', '1', '2', ['personal assets and investments within a framework']],
-    ['en', '1', '3', ['across generations']],
-    ['en', '2', '1', ['Portfolio management that protects asset value']],
-    ['en', '2', '2', ['personal and investment properties']],
-    ['en', '2', '3', ['maximise their benefit and sustainability']],
-    ['en', '3', '1', ['expansion, development and repositioning']],
-    ['en', '3', '2', ['acquisitions, sales, development, retention or exit']],
-    ['en', '3', '3', ['sustainable investments']],
-    ['en', '4', '1', ['brokerage', 'confidential documents']],
-    ['en', '5', '1', ['Ownership structuring & governance', 'Asset management', 'Development & investment']],
-    ['en', '5', '2', ['Endowments']],
-    ['en', '5', '3', ['Corporates']],
-    ['ar', '1', '1', ['المساهمين والشركاء والمستثمرين']],
-    ['ar', '2', '2', ['العقارات الشخصية والاستثمارية']],
-    ['ar', '3', '3', ['استثمارات مستدامة']],
-    ['ar', '4', '1', ['الوساطة العقارية']],
+    ['en', '4', '1', ['expansion, development and repositioning']],
+    ['en', '4', '2', ['acquisitions, sales, development, retention or exit']],
+    ['en', '4', '3', ['sustainable investments']],
+    ['en', '5', '1', ['brokerage', 'confidential documents']],
+    ['en', '5', '2', ['shareholders, partners and investors', 'personal assets and investments within a framework', 'across generations']],
+    ['en', '6', '1', ['Portfolio management that protects asset value']],
+    ['en', '6', '2', ['personal and investment properties']],
+    ['en', '6', '3', ['maximise their benefit and sustainability']],
+    ['ar', '4', '1', ['فرص التوسع والتطوير وإعادة التموضع']],
+    ['ar', '5', '2', ['المساهمين والشركاء والمستثمرين']],
+    ['ar', '6', '2', ['العقارات الشخصية والاستثمارية']],
+    ['ar', '5', '1', ['الوساطة العقارية']],
   ] as const)('%s: main option %s, then entry %s shows the right page', async (language, option, entry, expected) => {
     const waId = await onMainMenu(language);
     const list = (await say(waId, option)).join('\n');
@@ -271,14 +284,14 @@ describe('the customer conversation on the QMULATE number', () => {
     expect(page).not.toMatch(FOREIGN);
     expect(page).not.toMatch(/\{[a-z_]+\}/);
   });
-  it('About shows the licence; Contact shows the website\'s contact details; neither goes to the AI', async () => {
+  it('About & Contact shows the licence and the website\'s contact details and does not go to the AI', async () => {
     const waId = await onMainMenu('en');
-    const about = (await say(waId, '6')).join('\n');
+    const about = (await say(waId, '9')).join('\n');
     expect(about).toContain('REGA');
     expect(about).toContain('Discovery, Structuring, Management and Growth');
-    const contact = (await say(waId, '7')).join('\n');
-    expect(contact).toContain('ceo@qmulate.com');
-    expect(contact).toContain('Jeddah 9351');
+    expect(about).toContain('ceo@qmulate.com');
+    expect(about).toContain('Jeddah 9351');
+    expect(runAgentLoop).not.toHaveBeenCalled();
   });
 
   it('option 0 on the main menu changes the language; the whole menu then switches (and back)', async () => {
@@ -293,17 +306,17 @@ describe('the customer conversation on the QMULATE number', () => {
 
   it('"0" inside a sub-menu or in the middle of a request goes back to the main menu', async () => {
     const waId = await onMainMenu('en');
-    await say(waId, '2');
+    await say(waId, '5');
     expect((await say(waId, '0')).join('\n')).toContain('How can we help you today?');
-    await say(waId, '8');
+    await say(waId, '7');
     await say(waId, 'Sara');
     expect((await say(waId, '0')).join('\n')).toContain('How can we help you today?');
     expect(getDb().prepare('SELECT COUNT(*) AS n FROM customer_requests WHERE wa_id = ?').get(waId)).toEqual({ n: 0 });
   });
 
-  it('a consultation request (main option 8) collects the details and files ONE request on QMULATE\'s account only', async () => {
+  it('a consultation request (main option 7) collects the details and files ONE request on QMULATE\'s account only', async () => {
     const waId = await onMainMenu('en');
-    expect((await say(waId, '8')).join('\n')).toContain('What is your full name?');
+    expect((await say(waId, '7')).join('\n')).toContain('What is your full name?');
     expect((await say(waId, 'Layla Hassan')).join('\n')).toContain('Which area would you like to discuss?');
     expect((await say(waId, 'Ownership structuring for our family')).join('\n')).toContain('What date would suit you best');
     expect((await say(waId, 'Next Sunday')).join('\n')).toContain('how should we reach you');
@@ -319,14 +332,14 @@ describe('the customer conversation on the QMULATE number', () => {
     expect(getDb().prepare('SELECT COUNT(*) AS n FROM customer_requests WHERE whatsapp_account_id IN (?, ?) AND wa_id = ?').get(ACC1, ACC2, waId)).toEqual({ n: 0 });
   });
 
-  it('the consultation request is also offered inside every service sub-menu (option 4) and in Arabic', async () => {
-    for (const option of ['1', '2', '3', '5']) {
+  it('the consultation request is also offered inside every service sub-menu (entry 4) and in Arabic', async () => {
+    for (const option of ['4', '5', '6']) {
       const waId = await onMainMenu('ar');
       await say(waId, option);
       expect((await say(waId, '4')).join('\n')).toContain('طلب استشارة');
     }
     const waId = await onMainMenu('ar');
-    await say(waId, '8');
+    await say(waId, '7');
     await say(waId, 'سارة');
     await say(waId, 'إدارة الأصول');
     await say(waId, 'الأحد');
@@ -336,10 +349,10 @@ describe('the customer conversation on the QMULATE number', () => {
     expect(confirm).toContain('غير مؤكدة حتى يصلك تأكيد');
   });
 
-  it('a consultancy/brokerage inquiry (option 4 → 2) files a quotation-type request and never quotes a price', async () => {
+  it('a consultancy/brokerage inquiry (option 5 → 3) files a quotation-type request and never quotes a price', async () => {
     const waId = await onMainMenu('en');
-    await say(waId, '4');
-    expect((await say(waId, '2')).join('\n')).toContain('What is your full name?');
+    await say(waId, '5');
+    expect((await say(waId, '3')).join('\n')).toContain('What is your full name?');
     await say(waId, 'Omar');
     await say(waId, 'Selling a building');
     const confirm = (await say(waId, 'One commercial building in Jeddah, want to sell')).join('\n');
@@ -349,9 +362,9 @@ describe('the customer conversation on the QMULATE number', () => {
     expect(row).toEqual({ a: Q, kind: 'quotation' });
   });
 
-  it('"Talk to Our Team" (option 9) hands over to a person and creates no request', async () => {
+  it('"Speak to an Advisor" (option 8) hands over to a person and creates no request', async () => {
     const waId = await onMainMenu('en');
-    const reply = (await say(waId, '9')).join('\n');
+    const reply = (await say(waId, '8')).join('\n');
     expect(reply.length).toBeGreaterThan(10);
     expect(reply).not.toMatch(FOREIGN);
     expect(getDb().prepare('SELECT COUNT(*) AS n FROM customer_requests WHERE wa_id = ?').get(waId)).toEqual({ n: 0 });
@@ -376,6 +389,8 @@ describe('isolation of knowledge and content', () => {
     expect(prompt).toContain('Never');
     expect(prompt).toContain('Opening hours: Not provided');
     expect(prompt).toContain('CURRENT OFFERS: none');
+    expect(prompt).toContain('REAL ESTATE ASSISTANT'); // the add-on's rules and its own (empty) project list
+    expect(prompt).toContain('PUBLISHED PROJECTS: none');
     expect(prompt).not.toMatch(FOREIGN);
     expect(prompt).not.toContain('Jotun fixture');
   });
@@ -383,7 +398,8 @@ describe('isolation of knowledge and content', () => {
   it('QMULATE\'s knowledge lives in its own folder; no other account\'s knowledge or content mentions QMULATE', () => {
     expect(knowledgeDirForAccount(Q)).toContain(`${path.sep}${Q}`);
     expect(fs.readdirSync(knowledgeDirForAccount(Q)).filter((f) => f.endsWith('.md')).sort()).toEqual(['ai-knowledge.md', 'business.md', 'faq.md', 'policies.md', 'services.md']);
-    expect(promptFor(ACC1)).not.toMatch(/qmulate/i);
+    expect(promptFor(ACC1)).not.toMatch(/qmulate|REAL ESTATE ASSISTANT/i);
+    expect(promptFor(ACC2)).not.toContain('REAL ESTATE ASSISTANT');
     expect(promptFor(ACC2)).not.toMatch(/qmulate/i);
     expect(promptFor(ACC2)).toContain('Jotun fixture knowledge');
     for (const acc of [ACC1, ACC2]) {

@@ -22,6 +22,7 @@ import { createCustomerRequest } from '../memory/customerRequestRepo';
 import { notifyBusinessNewRequest } from '../requests/requestService';
 import { isRestartCommand } from '../restart/isRestartCommand';
 import { buildSystemPrompt } from '../llm/buildSystemPrompt';
+import { renderPublishedProjects } from '../realestate/realEstateRepo';
 import { runAgentLoop } from '../llm/agentLoop';
 import fs from 'node:fs';
 import { sendTextMessage, sendDocumentMessage, sendImageMessage, ImageDeliveryUnsupportedError, DocumentDeliveryUnsupportedError } from '../whatsapp/client';
@@ -263,7 +264,7 @@ async function processInboundMessageUnlocked(msg: InboundMessage, deps: ProcessD
   // The model's memory of this customer in this business: this conversation only, the latest N messages, and nothing older than
   // CONVERSATION_MEMORY_HOURS (docs/AI_ASSISTANT.md). The stored conversation is untouched.
   const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS);
-  const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined);
+  const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id });
 
   let finalText = '';
   let kind: 'ai' | 'error' = 'ai';
@@ -548,6 +549,13 @@ async function replyOutOfHours(ctx: ReplyContext): Promise<void> {
 export function resolveDataDrivenKey(key: string, language: CustomerLanguage, vars: TemplateVars): string {
   const rule = DATA_DRIVEN_FALLBACKS[key];
   if (!rule) return key;
+  if (rule.placeholder === 'projects') {
+    // the published projects of THIS business; with none, the "no project published" page (never an invented list)
+    const projects = vars.projects ?? renderPublishedProjects(language);
+    if (!projects.trim()) return rule.fallback;
+    vars.projects = projects;
+    return key;
+  }
   const offers = vars.offers ?? renderCustomerOffers(language);
   if (!offers.trim()) return rule.fallback;
   vars.offers = offers;

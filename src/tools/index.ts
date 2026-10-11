@@ -5,6 +5,7 @@ import { bookAppointmentSchema, bookAppointmentHandler } from './bookAppointment
 import { searchCataloguesSchema, searchCataloguesHandler } from './searchCatalogues';
 import { webSearchSchema, webSearchHandler } from './webSearch';
 import { requestHumanHandoffSchema, requestHumanHandoffHandler } from './requestHumanHandoff';
+import { saveRealEstateLeadSchema, saveRealEstateLeadHandler, searchRealEstateProjectsSchema, searchRealEstateProjectsHandler, sendProjectBrochureSchema, sendProjectBrochureHandler } from './realEstate';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { env } from '../config/env';
 
@@ -46,6 +47,9 @@ export const toolRegistry: Record<string, ToolDefinition> = {
     schema: requestHumanHandoffSchema,
     handler: requestHumanHandoffHandler,
   },
+  [TOOL_NAMES.SAVE_REAL_ESTATE_LEAD]: { schema: saveRealEstateLeadSchema, handler: saveRealEstateLeadHandler },
+  [TOOL_NAMES.SEARCH_REAL_ESTATE_PROJECTS]: { schema: searchRealEstateProjectsSchema, handler: searchRealEstateProjectsHandler },
+  [TOOL_NAMES.SEND_PROJECT_BROCHURE]: { schema: sendProjectBrochureSchema, handler: sendProjectBrochureHandler },
 };
 
 /** The original business's tools: the two calendar tools, exactly as before the catalogue library existed. */
@@ -73,6 +77,8 @@ export function toolSchemasForAccount(accountId: number): ToolDefinition['schema
   const tools: ToolDefinition['schema'][] = [];
   if (accountHasCalendar(accountId)) tools.push(...toolSchemas);
   if (accountHasFeature(accountId, FEATURES.CATALOGUES)) tools.push(searchCataloguesSchema);
+  // A business with the real estate add-on (QMULATE): lead capture and its OWN published projects. Never offered to any other business.
+  if (accountHasFeature(accountId, FEATURES.REAL_ESTATE)) tools.push(saveRealEstateLeadSchema, searchRealEstateProjectsSchema, sendProjectBrochureSchema);
   if (env.WEB_SEARCH_ENABLED) tools.push(webSearchSchema);
   tools.push(requestHumanHandoffSchema);
   return tools;

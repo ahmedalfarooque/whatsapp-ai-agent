@@ -77,6 +77,15 @@ Sharing one logo merges nothing: each business keeps its own account id, WhatsAp
 each can read only its own logo route (tests: `tests/integration/branding.e2e.test.ts`, "share the same company logo"). A missing, archived, oversized or unreadable logo falls back to the
 initial tile; a logo that fails to load in the browser is replaced by the tile.
 
+### Selected-account identity (top bar, title line, account list)
+Independently of the sidebar branding above, every page shows the identity of the **selected WhatsApp account**: its logo in the top bar, and above the page title its name
+(Arabic name in the Arabic interface), the masked number (last four digits) and the connection status. The only source is the server's access-filtered accounts list
+(`GET /api/dashboard/accounts` → `logoUrl`, `nameAr`, `uiStatus`), never the URL, a header or browser storage. `logoUrl` is `/api/dashboard/accounts/<id>/logo?v=<version>`; the route runs
+the same account-access check as every account route, so a user who is not assigned the account gets 403 (and 404 when the account has no logo). Account 1 with no logo document
+keeps the bundled artwork URL. The identity is redrawn on every account switch, status change and language change (`workspace:accounts`, `workspace:account-changed`,
+`workspace:lang`), and a logo that fails to load becomes the neutral initial tile, so a stale or foreign logo cannot remain. Tests: `tests/integration/branding.e2e.test.ts`,
+`tests/unit/dashboard/branding.test.ts`.
+
 ## Developer branding
 
 * The developer is shown as **SYNRTECHS**. The artwork is taken **as drawn from the supplied brand guide** (`Synrtechs_DESIGN 1.pdf`): the lockup (S mark + lettering) is vector

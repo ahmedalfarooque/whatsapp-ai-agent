@@ -8,6 +8,7 @@ import { accountHasCalendar } from '../tools';
 import { currentAccountId, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 import type { KnowledgeBase } from '../knowledge/loader';
 import { resolveTemplate } from '../templates/templateRepo';
+import { realEstateSection } from '../realestate/promptSection';
 
 const LANGUAGE_NAMES: Record<string, string> = {
   en: 'English',
@@ -98,7 +99,7 @@ export function currentDateTimeIn(timezone: string, now: Date = new Date()): str
   }
 }
 
-export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string, now: Date = new Date()): string {
+export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string, now: Date = new Date(), context: { customerId?: number } = {}): string {
   const languageInstruction = language && LANGUAGE_NAMES[language]
     ? `Always reply in ${LANGUAGE_NAMES[language]}, regardless of the language the customer writes in.`
     : null;
@@ -154,13 +155,15 @@ export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string, n
 
   // A business with a catalogue library answers product/colour questions from ITS OWN catalogues and linked official pages.
   const catalogueSection = accountHasFeature(accountId, FEATURES.CATALOGUES) ? CATALOGUE_RULES : '';
+  // The real estate business (add-on) works from ITS OWN open enquiries and published projects; no other business gets this section.
+  const realEstate = accountHasFeature(accountId, FEATURES.REAL_ESTATE) ? realEstateSection(accountId, context.customerId) : '';
 
   return `You are the WhatsApp customer assistant for ${settings.businessName}.
 
 BUSINESS PROFILE (published by staff — authoritative):
 ${profileLines}
 
-${offersSection}${documentsSection}${catalogueSection}
+${offersSection}${documentsSection}${catalogueSection}${realEstate}
 ${INTENT_RULES}${STYLE_RULES}${env.WEB_SEARCH_ENABLED ? WEB_RULES : ''}${menuReference()}
 
 SCOPE AND HONESTY RULES (never break these):

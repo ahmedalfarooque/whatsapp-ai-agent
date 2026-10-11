@@ -17,6 +17,8 @@ export const MENU_STATES = {
   SUBMENU_PRICES: 'SUBMENU_PRICES',
   /** The customer is looking at a numbered list of catalogues (businesses with the catalogue library only). */
   CATALOGUE_SELECT: 'CATALOGUE_SELECT',
+  /** The customer is in a guided real estate conversation (buying, selling, projects): replies go to the assistant, "0" returns to the main menu (real estate businesses only). */
+  REAL_ESTATE_CHAT: 'REAL_ESTATE_CHAT',
 } as const;
 
 export interface MenuOption {
@@ -32,6 +34,8 @@ export interface MenuOption {
   catalogues?: boolean;
   /** Opens the Inquiry Cart (the platform-wide cart every business has in its main menu). */
   cart?: boolean;
+  /** A real estate entry ("buy", "sell", "projects"): shows its page and keeps the customer in the assistant conversation (businesses with the real estate add-on only). */
+  realEstate?: 'buy' | 'sell' | 'projects';
 }
 
 export interface SubmenuDef {

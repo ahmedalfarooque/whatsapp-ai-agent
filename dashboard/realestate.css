@@ -1,0 +1,15 @@
+/* Real estate section (pages-realestate.js): only what the shared styles do not already provide. Applies to the pages of that section only. */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.stat-grid .stat-box{text-decoration:none;color:inherit;border:1px solid var(--color-border);transition:border-color .15s ease,transform .15s ease}
+.stat-grid .stat-box:hover{border-color:var(--color-primary);transform:translateY(-1px)}
+.stat-grid .stat-box b{font-size:26px;line-height:1.1;color:var(--color-text)}
+.stat-grid .stat-box span{font-size:13px;color:var(--color-text-muted)}
+.stat-grid .stat-box.amber b{color:var(--color-warning)}
+.stat-grid .stat-box.red b{color:var(--color-danger)}
+.stat-grid .stat-box.green b{color:var(--color-success)}
+.field input[type=datetime-local],.field input[type=date]{width:100%;height:42px;padding:0 12px;border-radius:11px;border:1px solid var(--color-border-strong);background:var(--color-field);color:var(--color-text);font:inherit}
+.field input[type=datetime-local]:focus{outline:none;border-color:var(--color-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--color-primary) 24%,transparent)}
+.field textarea{width:100%}
+.timeline{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.timeline li{padding:8px 12px;border-inline-start:3px solid var(--color-border-strong);background:var(--color-surface-raised);border-radius:8px}
+.notice{padding:10px 12px;border-radius:10px;background:var(--color-warning-soft);color:var(--color-text);margin:10px 0}

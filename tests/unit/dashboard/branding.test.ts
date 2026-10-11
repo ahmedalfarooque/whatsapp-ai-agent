@@ -7,7 +7,8 @@ const DASH = path.resolve(__dirname, '../../../dashboard');
 const read = (file: string): string => fs.readFileSync(path.join(DASH, file), 'utf8');
 
 interface Model { mode: string; name: string; initial: string; logoUrl: string | null; accountId: number | null; nameEn: string; nameAr: string | null }
-interface Sandbox { brandModel: (me: unknown, lang: string) => Model; brandInitial: (name: string) => string; registerAccountNames: (accounts: unknown) => void; window: { I18N_AR: Record<string, string> } }
+interface Identity { accountId: number; name: string; initial: string; logoUrl: string | null; number: string; status: string; statusDot: string }
+interface Sandbox { accountIdentityModel: (account: unknown, lang: string, status?: string) => Identity | null; maskAccountNumber: (v: unknown) => string; brandModel: (me: unknown, lang: string) => Model; brandInitial: (name: string) => string; registerAccountNames: (accounts: unknown) => void; window: { I18N_AR: Record<string, string> } }
 
 /** Loads dashboard/branding.js the way the browser does, without a page: it only needs `document`, `window` and `esc`. */
 function load(): Sandbox {
@@ -49,6 +50,39 @@ describe('branding model: what the page draws for the server\'s decision', () =>
     expect(b.brandInitial('  (QMULATE)')).toBe('Q');
     expect(b.brandInitial('جوتن رواد الفا')).toBe('ج');
     expect(b.brandInitial('')).toBe('•');
+  });
+
+  it('the selected-account identity is built from the server\'s accounts list: own name, own logo, masked number, status', () => {
+    const rowad = { id: 1, name: 'Rowad Alfa Auto Care', nameAr: 'شركة رواد ألفا للعناية بالسيارات', phoneNumber: '966550000545', uiStatus: 'connected', logoUrl: '/dashboard/assets/logo.webp' };
+    const jotun = { id: 2, name: 'JOTUN Rowad Alfa', nameAr: 'جوتن رواد الفا', phoneNumber: '+966 55 000 7115', uiStatus: 'connected', logoUrl: '/api/dashboard/accounts/2/logo?v=7-20261011121340' };
+    const q = { id: 3, name: 'QMULATE Real Estate Consultancy', nameAr: null, phoneNumber: null, uiStatus: 'qr_required', logoUrl: '/api/dashboard/accounts/3/logo?v=6-20261010115649' };
+    expect(b.accountIdentityModel(rowad, 'en', 'Connected')).toMatchObject({ accountId: 1, name: 'Rowad Alfa Auto Care', logoUrl: '/dashboard/assets/logo.webp', number: '••••0545', status: 'Connected' });
+    expect(b.accountIdentityModel(jotun, 'ar', 'متصل')).toMatchObject({ accountId: 2, name: 'جوتن رواد الفا', number: '••••7115', initial: 'ج' });
+    expect(b.accountIdentityModel(q, 'ar')).toMatchObject({ accountId: 3, name: 'QMULATE Real Estate Consultancy', number: '', statusDot: 'qr_required' });
+    // each account carries its own logo URL (no shared constant); accounts 1 and 2 show the same artwork under different names
+    expect(new Set([rowad, jotun, q].map((a) => b.accountIdentityModel(a, 'en')!.logoUrl)).size).toBe(3);
+    expect(b.accountIdentityModel(jotun, 'en')!.name).not.toBe(b.accountIdentityModel(rowad, 'en')!.name);
+  });
+
+  it('the identity never draws a logo from outside the application or a blank account', () => {
+    for (const hostile of ['https://evil.example/x.png', '//evil.example/x.png', 'javascript:alert(1)', '/api/dashboard/customers/directory', '/api/dashboard/accounts/2/logo', '/api/dashboard/accounts/2/logo?v=1&x=<script>', null, 7]) {
+      expect(b.accountIdentityModel({ id: 2, name: 'JOTUN Rowad Alfa', logoUrl: hostile }, 'en')!.logoUrl, String(hostile)).toBeNull();
+    }
+    for (const blank of [null, undefined, {}, { id: 1, name: '   ' }, { id: 1, name: 42 }]) expect(b.accountIdentityModel(blank, 'en')).toBeNull();
+    expect(b.maskAccountNumber('966550000545')).toBe('••••0545');
+    expect(b.maskAccountNumber('0545')).toBe('0545');
+    expect(b.maskAccountNumber(null)).toBe('');
+  });
+
+  it('is wired to every place the selection changes: list load, account switch, language change and branding', () => {
+    const branding = read('branding.js');
+    const app = read('app.js');
+    expect(branding).toMatch(/document\.addEventListener\('workspace:accounts', \(\) => \{ renderAccountIdentity\(\);/);
+    expect(branding).toMatch(/document\.addEventListener\('workspace:account-changed', \(\) => \{ renderAccountIdentity\(\);/);
+    expect(branding).toContain("appliedIdentityKey = ''; applyBranding()"); // a language change redraws it
+    expect(app).toContain('renderAccountIdentity()');
+    expect(app).toContain('accountAvatarHtml(identity');
+    expect(read('ui.css')).toMatch(/\.topbar-mark,body:not\(\.route-home\) \.topbar-mark\{width:38px;height:38px\}/); // stays visible on phones
   });
 
   it('Arabic company names are registered for the interface without overwriting existing translations', () => {
@@ -95,7 +129,7 @@ describe('company-branded workspace: styling and identity rules', () => {
 
   it('every company rule is scoped to the company experience or to the new brand elements, so the default look cannot change', () => {
     // body:not([data-brand="company"]) = the developer-mode brand block (SYNRTECHS lockup above the "AI WORKSPACE" line), nothing else
-    const allowed = /^(\.brand\[data-pending\]|\.brand-wm|\.brand-initial|\.topbar-mark|body\[data-brand="company"\]|body:not\(\[data-brand="company"\]\) (\.brand|#brand-name small)|:root\[dir="rtl"\] body:not\(\[data-brand="company"\]\) #brand-name small|\[data-theme="light"\] body\[data-brand="company"\])/;
+    const allowed = /^(\.brand\[data-pending\]|\.brand-wm|\.brand-initial|\.topbar-mark|body\[data-brand="company"\]|body:not\(\[data-brand="company"\]\) (\.brand|#brand-name small)|:root\[dir="rtl"\] body:not\(\[data-brand="company"\]\) #brand-name small|@media \(max-width:640px\)|\.acct-(av|line)|\.account-item \.list-av|\.topbar \.crumb\.acct-line|\[data-theme="light"\] body\[data-brand="company"\])/;
     const offenders = selectorsOf(css).filter((s) => s.split(',').some((p) => !allowed.test(p.trim())));
     expect(offenders).toEqual([]);
   });

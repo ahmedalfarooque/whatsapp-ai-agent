@@ -57,6 +57,7 @@ const RULES: readonly Rule[] = [
   { test: /^\/accounts$/, methods: ['GET'], spec: { t: 'any' } },
   { test: /^\/accounts$/, methods: ['POST'], spec: { t: 'connection' } },
   { test: /^\/accounts\/\d+$/, methods: ['GET'], spec: { t: 'account' } },
+  { test: /^\/accounts\/\d+\/logo$/, methods: ['GET'], spec: { t: 'account' } }, // the logo of an account the user may open (the route checks again)
   { test: /^\/accounts\/\d+$/, methods: ['PUT', 'DELETE'], spec: { t: 'connection' } },
   { test: /^\/accounts\/\d+\/(enable|disable)$/, spec: { t: 'connection' } },
   { test: /^\/accounts\/\d+\/qr(\/|$)/, spec: { t: 'connection' } },
@@ -77,6 +78,10 @@ const RULES: readonly Rule[] = [
   { test: /^\/users(\/|$)/, spec: { t: 'users' } },
   { test: /^\/(overview|summary|status|ai-status)$/, spec: F('dashboard') },
   { test: /^\/(conversations|conversations-recent)(\/|$)/, spec: F('conversations') },
+  // real estate section (a business with the add-on only: the routes 404 for every other business). Reads need view, changes need edit.
+  { test: /^\/realestate\/projects(\/|$)/, spec: F('business') },
+  { test: /^\/realestate\/documents(\/|$)/, spec: F('customers') },
+  { test: /^\/realestate\/(overview|leads|followups)(\/|$)/, spec: F('requests') },
   { test: /^\/customers\/\d+\/(pause|resume|take-over)$/, spec: F('support', 'edit') },
   { test: /^\/handoffs(\/|$)/, spec: F('support') },
   { test: /^\/inbox(\/|$)/, spec: F('conversations') },

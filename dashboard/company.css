@@ -11,9 +11,19 @@ body:not([data-brand="company"]) #brand-name small{font-family:"Space Mono","Gei
 :root[dir="rtl"] body:not([data-brand="company"]) #brand-name small{font-family:inherit;letter-spacing:0;font-size:12px}
 .brand-initial{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;flex:none;background:#071740;color:#fff;font-weight:700;font-size:20px;line-height:1}
 .brand-initial.sm{width:36px;height:36px;border-radius:50%;font-size:16px}
-.topbar-mark.has-brand{background:#fff;border-color:rgba(255,255,255,.55);overflow:hidden}
-.topbar-mark .topbar-logo{width:100%;height:100%;object-fit:contain;padding:4px;border-radius:50%;background:#fff}
-.topbar-mark .brand-initial.sm{width:100%;height:100%}
+/* selected-account identity: the logo tile in the top bar, the small tiles in the account list, the name / masked number / status line above the title */
+.topbar-mark.acct-mark{border-radius:14px;background:#fff;border:1px solid rgba(255,255,255,.55);overflow:hidden;display:block;padding:0}
+.acct-av{display:block;width:100%;height:100%;object-fit:contain;padding:5px;background:#fff;border-radius:inherit}
+.acct-av.acct-av-initial{display:grid;place-items:center;padding:0;background:#071740;color:#fff;font-weight:700;font-size:20px;line-height:1}
+.account-item .list-av{width:30px;height:30px;flex:none;border-radius:9px;padding:3px;border:1px solid var(--color-border)}
+.account-item .list-av.acct-av-initial{font-size:14px;padding:0}
+.topbar .crumb.acct-line{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;opacity:1;font-size:13px;font-weight:600;margin-bottom:3px}
+.acct-line .acct-name{font-size:14.5px;font-weight:700;letter-spacing:-.005em}
+.acct-line .acct-num{font-family:"Space Mono","Geist Mono",ui-monospace,monospace;font-size:12px;opacity:.92}
+.acct-line .acct-st{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.acct-line .acct-st .dot{box-shadow:0 0 0 2px rgba(255,255,255,.55)}
+.acct-line .acct-sep{opacity:.6}
+@media (max-width:640px){.acct-line .acct-num,.acct-line .acct-sep{display:none}.acct-line .acct-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .topbar-mark img.mk{height:24px;width:auto;display:block}  /* the official S mark (white variant: the top bar is a coloured / navy surface in both appearances) */
 
 /* a single-account user needs no account switcher, and sees no other business */

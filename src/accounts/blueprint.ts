@@ -5,7 +5,9 @@ import { getDb } from '../memory/db';
 import { createAccount, listAccounts } from './accountRepo';
 import { runWithAccount } from './accountContext';
 import { saveMenuConfig, type MenuConfig } from '../automation/menuConfig';
-import { listTemplates, publishTemplate } from '../templates/templateRepo';
+import { getTemplate, listTemplates, publishTemplate } from '../templates/templateRepo';
+import { setAccountFeature, type AccountFeature } from './accountFeatures';
+import { getBusinessSettings } from '../config/businessSettings';
 import type { z } from 'zod';
 import { updateBusinessSettings, type businessSettingsInputSchema } from '../config/businessSettings';
 import { createLink, listLinks, type LinkKind } from '../setup/linksRepo';
@@ -39,6 +41,8 @@ export interface BusinessBlueprint {
   /** Business profile fields (validated by the same schema as the dashboard). Never the WhatsApp number or a staff number. */
   profile: BlueprintProfile;
   links: { url: string; kind: LinkKind; label: string }[];
+  /** Add-on features this business has (switched on before its menu is saved, because the menu may use them). */
+  features?: AccountFeature[];
   menu: MenuConfig;
   /** Customised customer-facing texts, published live. Every key must exist for this menu. */
   templates: BlueprintTemplate[];
@@ -85,6 +89,7 @@ export function provisionBlueprint(blueprint: BusinessBlueprint, options: Provis
     const account = createAccount({ name: blueprint.name, nameAr: blueprint.nameAr, businessCategory: blueprint.businessCategory, connectionMethod: 'qr' }, db);
     steps.push(`account ${account.id} created (QR connection, status ${account.status}, no phone number)`);
     runWithAccount(account.id, () => {
+      for (const feature of blueprint.features ?? []) setAccountFeature(account.id, feature, true, db);
       saveMenuConfig(account.id, blueprint.menu, 'manual', db);
       steps.push(`menu saved: ${blueprint.menu.items.length} main options`);
 
@@ -115,6 +120,69 @@ export function provisionBlueprint(blueprint: BusinessBlueprint, options: Provis
 
   steps.push(...writeMissingKnowledge(blueprint, accountId));
   return { accountId, created: true, steps };
+}
+
+export interface UpgradeOptions {
+  actor: string;
+  db?: Database.Database;
+  /** Rewrite knowledge files that already exist (each is backed up first by the knowledge editor). Missing ones are always written. */
+  overwriteKnowledge?: boolean;
+  /** Template authors whose text may be replaced: the first provisioning and the seeded defaults. Anything a person edited is left alone. */
+  replaceableAuthors?: string[];
+  /** Business-profile fields to refresh, each only while its current value still equals one of the listed old values (i.e. nobody changed it). */
+  refreshProfile?: Partial<Record<'humanEscalationInfo' | 'fallbackMessage', string[]>>;
+}
+
+/**
+ * Brings an EXISTING business up to its current blueprint (new menu, new customer texts, add-on features, knowledge) without touching what staff
+ * have edited: a template is replaced only while it still carries its original author, a profile field only while it still has its old value.
+ * Everything database-related is one transaction. Returns what was done and what was deliberately left alone.
+ */
+export function upgradeBlueprint(blueprint: BusinessBlueprint, options: UpgradeOptions): ProvisionResult {
+  const db = options.db ?? getDb();
+  const steps: string[] = [];
+  const existing = listAccounts(db).filter((a) => a.name === blueprint.name);
+  if (existing.length !== 1) throw new Error(`expected exactly one account named "${blueprint.name}", found ${existing.length}`);
+  const accountId = existing[0]!.id;
+  const replaceable = new Set(options.replaceableAuthors ?? ['provision script', 'system']);
+
+  db.transaction(() => {
+    runWithAccount(accountId, () => {
+      for (const feature of blueprint.features ?? []) { setAccountFeature(accountId, feature, true, db); steps.push(`feature "${feature}" enabled`); }
+      saveMenuConfig(accountId, blueprint.menu, 'manual', db);
+      steps.push(`menu saved: ${blueprint.menu.items.length} main options`);
+      listTemplates(db, accountId); // seeds the template set for the new menu (and the add-on's own texts) without touching existing rows
+      let published = 0;
+      for (const t of blueprint.templates) {
+        const current = getTemplate(t.key, db, accountId);
+        if (!current) throw new Error(`template ${t.key} does not exist for this menu`);
+        if (current.updatedBy && !replaceable.has(current.updatedBy)) { steps.push(`template ${t.key}: edited by "${current.updatedBy}" — left as it is`); continue; }
+        publishTemplate(t.key, { ar: t.ar, en: t.en }, options.actor, db, accountId);
+        published += 1;
+      }
+      steps.push(`${published} reply template(s) published`);
+      const settings = getBusinessSettings(accountId);
+      const patch: BlueprintProfile = {};
+      for (const [field, oldValues] of Object.entries(options.refreshProfile ?? {}) as ['humanEscalationInfo' | 'fallbackMessage', string[]][]) {
+        const now = settings[field] ?? '';
+        const next = blueprint.profile[field];
+        if (next && now !== next && (oldValues.includes(now) || !now)) { (patch as Record<string, unknown>)[field] = next; steps.push(`profile ${field} refreshed`); }
+        else if (next && now !== next) steps.push(`profile ${field}: changed by staff — left as it is`);
+      }
+      if (Object.keys(patch).length > 0) updateBusinessSettings(patch, accountId);
+    });
+  })();
+
+  const dir = knowledgeDirForAccount(accountId);
+  for (const name of EDITABLE_KNOWLEDGE_FILES) {
+    const content = blueprint.knowledge[name];
+    if (content === undefined) continue;
+    const present = fs.existsSync(path.join(dir, name));
+    if (present && !options.overwriteKnowledge) { steps.push(`knowledge/${name} exists — kept (overwrite not requested)`); continue; }
+    const { backedUpAs } = writeKnowledgeFile(name, content, accountId);
+    steps.push(`knowledge/${name} ${present ? `rewritten (previous copy: ${backedUpAs ?? 'none'})` : 'written'}`);
+  }
+  return { accountId, created: false, steps };
 }
 
 function readLogo(file: string): Buffer {

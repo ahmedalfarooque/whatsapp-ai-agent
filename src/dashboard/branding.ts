@@ -6,6 +6,7 @@ import { getAccount } from '../accounts/accountRepo';
 import { getBusinessSettings } from '../config/businessSettings';
 import { documentPath, getDocument } from '../documents/documentStore';
 import { accessibleAccountIds, isSuperAdmin, type AuthUser } from './permissions';
+import { assertAccountAccess } from './accountMiddleware';
 
 /**
  * Who is the interface "for"?  Decided here, on the server, from the authenticated user's real account assignments, and nowhere else.
@@ -81,6 +82,28 @@ export function resolveBranding(user: AuthUser | null | undefined, db: Database.
   };
 }
 
+/**
+ * Where the browser loads the logo of ONE account from, for the selected-account identity (top bar, headers, account list). It is only ever
+ * handed out inside the accounts the signed-in user may open (the accounts list is already filtered), and the route behind it checks access again.
+ * null = no verified logo: the page draws a neutral initial tile, never another company's logo.
+ */
+export function accountLogoUrl(accountId: number, db: Database.Database = getDb()): string | null {
+  const logo = storedLogo(accountId, db);
+  if (logo) return `/api/dashboard/accounts/${accountId}/logo?v=${logo.version}`;
+  return accountId === LEGACY_ACCOUNT_ID ? BUNDLED_LEGACY_LOGO_URL : null;
+}
+
+function sendLogo(res: Response, logo: StoredLogo, versioned = false): void {
+  res.setHeader('Content-Type', logo.mime);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; sandbox");
+  // The account list polls every few seconds and its URLs carry the document version, so the signed-in user's own browser may keep the
+  // file briefly (private: never shared); the unversioned company route is always revalidated.
+  res.setHeader('Cache-Control', versioned ? 'private, max-age=300' : 'private, no-cache');
+  res.setHeader('Content-Disposition', 'inline');
+  fs.createReadStream(logo.path).on('error', () => { if (!res.headersSent) res.status(404).end(); else res.destroy(); }).pipe(res);
+}
+
 /** The logo file of the signed-in user's own company (the one resolveBranding names). Anything else is null. */
 export function companyLogoFor(user: AuthUser | null | undefined, db: Database.Database = getDb()): StoredLogo | null {
   const branding = resolveBranding(user, db);
@@ -95,11 +118,18 @@ export function registerBrandingRoutes(router: Router): void {
       res.status(404).json({ error: 'No logo' });
       return;
     }
-    res.setHeader('Content-Type', logo.mime);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; sandbox");
-    res.setHeader('Cache-Control', 'private, no-cache');
-    res.setHeader('Content-Disposition', 'inline');
-    fs.createReadStream(logo.path).on('error', () => { if (!res.headersSent) res.status(404).end(); else res.destroy(); }).pipe(res);
+    sendLogo(res, logo);
+  });
+  // The logo of one account the user may open (selected-account identity). The id comes from the path, is checked against the user's real
+  // access, and the lookup is scoped to that account: a document that belongs to another business is simply not found.
+  router.get('/api/dashboard/accounts/:id/logo', (req: Request, res: Response) => {
+    const id = Number.parseInt(String(req.params.id), 10);
+    if (!assertAccountAccess(req, res, id)) return;
+    const logo = storedLogo(id, getDb());
+    if (!logo) {
+      res.status(404).json({ error: 'No logo' });
+      return;
+    }
+    sendLogo(res, logo, true);
   });
 }

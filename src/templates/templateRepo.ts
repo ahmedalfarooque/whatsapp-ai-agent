@@ -11,6 +11,7 @@ import { currentAccountId, LEGACY_ACCOUNT_ID } from '../accounts/accountContext'
 import { TEMPLATE_DEFAULTS, RETIRED_TEMPLATE_KEYS } from './defaults';
 import { genericTemplateDefaults } from './genericDefaults';
 import { listLinks } from '../setup/linksRepo';
+import { renderPublishedProjects } from '../realestate/realEstateRepo';
 
 // Every template operation is scoped to one WhatsApp account (business): the
 // same keys exist per account, each with its own default/draft/live text.
@@ -205,6 +206,8 @@ export interface TemplateVars {
   offers?: string;
   /** The numbered catalogue list ({catalogues}); defaults to the live list of the current business. */
   catalogues?: string;
+  /** The numbered list of PUBLISHED real estate projects ({projects}); defaults to the live list of the current business. */
+  projects?: string;
   /** The title of the catalogue being sent ({catalogue}). */
   catalogue?: string;
   /** The template being rendered. Only used to add the permanent "Change language" line to the main menu. */
@@ -233,10 +236,10 @@ export const PREVIEW_VARS: TemplateVars = {
 };
 
 /** Placeholders whose value comes from live data rather than the template text. */
-export const DATA_PLACEHOLDERS = ['business', 'business_en', 'business_ar', 'maps', 'hours', 'address', 'notes', 'offers', 'description', 'phone', 'email', 'website', 'catalogues'] as const;
+export const DATA_PLACEHOLDERS = ['business', 'business_en', 'business_ar', 'maps', 'hours', 'address', 'notes', 'offers', 'description', 'phone', 'email', 'website', 'catalogues', 'projects'] as const;
 
 export function templateSourceType(text: string): 'static' | 'data-driven' {
-  return /\{(maps|hours|address|notes|offers|catalogues|business|business_en|business_ar|description|phone|email|website)\}/.test(text) ? 'data-driven' : 'static';
+  return /\{(maps|hours|address|notes|offers|catalogues|projects|business|business_en|business_ar|description|phone|email|website)\}/.test(text) ? 'data-driven' : 'static';
 }
 
 /** The first website link of the account (a business's own page), for the {website} placeholder. */
@@ -288,12 +291,13 @@ function renderTemplateBody(text: string, vars: TemplateVars): string {
     notes: vars.notes ?? ((language === 'ar' ? settings.locationNotesAr ?? settings.locationNotesEn : settings.locationNotesEn ?? settings.locationNotesAr) ?? ''),
     offers: vars.offers ?? (/\{offers\}/.test(text) ? renderCustomerOffers(language) : ''),
     catalogues: vars.catalogues ?? (/\{catalogues\}/.test(text) ? renderCustomerCatalogues(language) : ''),
+    projects: vars.projects ?? (/\{projects\}/.test(text) ? renderPublishedProjects(language) : ''),
     catalogue: vars.catalogue ?? '',
     service: vars.service ?? '', date: vars.date ?? '', time: vars.time ?? '', vehicle: vars.vehicle ?? '', details: vars.details ?? '',
     customer: vars.customer ?? '', status: vars.status ?? '', kind: vars.kind ?? '', actor: vars.actor ?? '',
   };
   return text
-    .replace(/\{(name|business|business_en|business_ar|maps|hours|address|notes|reference|offers|catalogues|catalogue|service|date|time|vehicle|details|customer|status|kind|actor|description|phone|email|website)\}/g, (_, k: string) => values[k] || EMPTY_MARK)
+    .replace(/\{(name|business|business_en|business_ar|maps|hours|address|notes|reference|offers|catalogues|projects|catalogue|service|date|time|vehicle|details|customer|status|kind|actor|description|phone|email|website)\}/g, (_, k: string) => values[k] || EMPTY_MARK)
     // A line whose only content was an empty placeholder ("Location: ", "🅿️ ") is dropped so
     // customers never see dangling labels. Lines with real text keep their text.
     .split('\n')

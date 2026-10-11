@@ -143,3 +143,66 @@ window.I18N_AR_PATTERNS.push(
   [/^(dashboard|system) \((.+)\)$/, function (who, name) { return (window.I18N.lookup(who) || who) + ' (' + (window.I18N.lookup(name) || name) + ')'; }],  [/^(.+?) ·$/, function (a) { var ar = window.I18N.lookup(a); return ar ? ar + ' ·' : null; }],
   [/^· (.+)$/, function (title) { var ar = window.I18N.lookup(title); return ar ? '· ' + ar : null; }]
 );
+
+// Real estate section (pages-realestate.js): navigation, titles, labels, statuses and messages.
+Object.assign(window.I18N_AR, {
+  'REAL ESTATE': 'العقارات',
+  'Real Estate Overview': 'نظرة عامة على العقارات', 'Real Estate Leads': 'العملاء المحتملون (عقارات)', 'Projects & Properties': 'المشاريع والعقارات',
+  'Consultations & Follow-ups': 'الاستشارات والمتابعات', 'Real Estate Documents': 'مستندات العقارات',
+  'Enquiries, follow-ups, consultation requests and the verified projects of this business.': 'الاستفسارات والمتابعات وطلبات الاستشارة والمشاريع الموثّقة لهذا النشاط.',
+  'Buyer, seller and investor enquiries from WhatsApp, with what each customer still has to tell us.': 'استفسارات المشترين والبائعين والمستثمرين من واتساب، مع ما لا يزال على كل عميل إخبارنا به.',
+  'Enquiry': 'استفسار', 'Requirements, documents and follow-up for one customer.': 'المتطلبات والمستندات والمتابعة لعميل واحد.',
+  'The verified projects customers can be told about. Nothing appears to customers until you publish it.': 'المشاريع الموثّقة التي يمكن إخبار العملاء بها. لا يظهر شيء للعملاء حتى تنشره.',
+  'Enquiries that need a person, follow-ups that are due and consultation requests waiting for confirmation.': 'استفسارات تحتاج إلى موظف، ومتابعات مستحقة، وطلبات استشارة بانتظار التأكيد.',
+  'Files customers with an enquiry have sent, with the review status of their enquiry. Only this business can open them.': 'ملفات أرسلها عملاء لديهم استفسار، مع حالة مراجعة استفسارهم. لا يفتحها إلا هذا النشاط.',
+  // statuses, types, stages
+  'New': 'جديد', 'Qualified': 'مؤهَّل', 'Awaiting information': 'بانتظار المعلومات', 'Assigned': 'مُسنَد', 'Follow-up required': 'تلزم المتابعة', 'Closed': 'مغلق',
+  'Buyer': 'مشترٍ', 'Seller': 'بائع', 'Investor': 'مستثمر', 'General': 'عام', 'Priority': 'أولوية', 'High': 'عالية', 'Normal': 'عادية',
+  'Not requested': 'لم تُطلب', 'Requested': 'مطلوبة', 'Reviewed by staff': 'راجعها الموظفون',
+  'Upcoming': 'قريباً', 'Under construction': 'قيد الإنشاء', 'Completed': 'مكتمل', 'Sold out': 'نفدت الوحدات', 'See details': 'التفاصيل', 'Not stated': 'غير محدد',
+  'Draft': 'مسودة', 'Published': 'منشور', 'Archived': 'مؤرشف', 'Brochure': 'كتيّب', 'Needs a person': 'يحتاج إلى موظف', 'Awaiting confirmation': 'بانتظار التأكيد',
+  // overview
+  'New today': 'جديدة اليوم', 'Open enquiries': 'استفسارات مفتوحة', 'Qualified, not assigned': 'مؤهَّلة وغير مُسنَدة', 'Need a person': 'تحتاج إلى موظف', 'Follow-ups due': 'متابعات مستحقة',
+  'Consultation requests awaiting confirmation': 'طلبات استشارة بانتظار التأكيد', 'Published projects': 'المشاريع المنشورة', 'Enquiries by status': 'الاستفسارات حسب الحالة', 'Open enquiries by type': 'الاستفسارات المفتوحة حسب النوع',
+  'No project has been entered yet. Customers are told that the team will review their requirements until you publish verified projects.': 'لم تُدخَل أي مشاريع بعد. يُخبَر العملاء بأن الفريق سيراجع متطلباتهم إلى أن تنشر مشاريع موثّقة.',
+  // list
+  'All': 'الكل', 'Buyers': 'المشترون', 'Sellers': 'البائعون', 'Investors': 'المستثمرون', 'Search reference, name, number or answers…': 'ابحث بالرقم المرجعي أو الاسم أو الرقم أو الإجابات…',
+  'Open enquiries ': 'استفسارات مفتوحة', 'All statuses': 'كل الحالات', 'Follow-up due': 'المتابعة مستحقة', 'Customer': 'العميل', 'Type': 'النوع', 'Status': 'الحالة',
+  'What they want': 'ما يريدونه', 'Staff': 'الموظف', 'Search enquiries': 'البحث في الاستفسارات',
+  'No enquiries match these filters. Enquiries appear here when customers describe what they want to buy or sell on WhatsApp.': 'لا توجد استفسارات مطابقة. تظهر الاستفسارات هنا عندما يصف العملاء على واتساب ما يريدون شراءه أو بيعه.',
+  // detail
+  '← All enquiries': '← كل الاستفسارات', 'Customer profile': 'ملف العميل', 'Documents': 'المستندات', 'Next action': 'الإجراء التالي',
+  'Add a note (kept in the history)': 'أضف ملاحظة (تُحفظ في السجل)', 'Save changes': 'حفظ التغييرات', 'Assign to me': 'إسناد إليّ', 'Unassign me': 'إلغاء إسنادي',
+  'You can view this enquiry but not change it.': 'يمكنك عرض هذا الاستفسار دون تعديله.', 'What the customer told us': 'ما أخبرنا به العميل', 'Nothing yet.': 'لا شيء بعد.',
+  'The assistant never asks for identity documents or bank details in the chat, and nothing here is verified by the system.': 'لا يطلب المساعد وثائق الهوية أو البيانات البنكية في المحادثة، ولا يتحقق النظام من أي شيء هنا.',
+  'Interested projects': 'المشاريع المهتم بها', 'None recorded.': 'لا شيء مسجّل.', 'Documents from this customer': 'مستندات من هذا العميل', 'File': 'الملف', 'Size': 'الحجم', 'Open': 'فتح',
+  'Not available': 'غير متاح', 'No documents received.': 'لم تُستلم أي مستندات.', 'History': 'السجل', 'No history.': 'لا يوجد سجل.',
+  'The customer asked for a person or the assistant flagged this enquiry for staff.': 'طلب العميل التحدث مع موظف أو أحال المساعد هذا الاستفسار إلى الموظفين.',
+  'Enquiry saved.': 'تم حفظ الاستفسار.',
+  // projects
+  'Projects': 'المشاريع', 'Add project': 'إضافة مشروع', 'Edit project': 'تعديل المشروع', 'Add a project': 'إضافة مشروع', 'Project': 'المشروع', 'Location': 'الموقع', 'Stage': 'المرحلة',
+  'No projects have been entered. Customers who ask are told that the team will review their requirements; nothing is invented.': 'لم تُدخَل أي مشاريع. يُخبَر العملاء الذين يسألون بأن الفريق سيراجع متطلباتهم؛ ولا يُختلق أي شيء.',
+  'Enter only facts you have verified. Customers see a project only while it is published; a draft or archived project is never shown or mentioned.': 'أدخل الحقائق التي تحققت منها فقط. لا يرى العملاء المشروع إلا وهو منشور؛ ولا تُعرض المسودة أو المشروع المؤرشف ولا يُذكران.',
+  'Name (English)': 'الاسم (بالإنجليزية)', 'Name (Arabic)': 'الاسم (بالعربية)', 'City': 'المدينة', 'District / area': 'الحي / المنطقة', 'Property type': 'نوع العقار',
+  'Summary (English)': 'الملخص (بالإنجليزية)', 'Summary (Arabic)': 'الملخص (بالعربية)', 'Brochure (a customer-visible document)': 'الكتيّب (مستند مرئي للعملاء)', 'None': 'لا شيء',
+  'Published (customers can see and ask about it)': 'منشور (يمكن للعملاء رؤيته والسؤال عنه)', 'Save project': 'حفظ المشروع', 'Cancel': 'إلغاء', 'Restore': 'استعادة', 'Archive': 'أرشفة',
+  'Project saved.': 'تم حفظ المشروع.', 'Project updated.': 'تم تحديث المشروع.',
+  // follow-ups and documents
+  'Enquiries to follow up': 'استفسارات للمتابعة', 'Nothing needs a person right now.': 'لا شيء يحتاج إلى موظف الآن.', 'Consultation requests': 'طلبات الاستشارة', 'No consultation requests.': 'لا توجد طلبات استشارة.',
+  'A consultation is only a request until a member of the team confirms it with the customer (use Appointments to change its status).': 'الاستشارة مجرد طلب إلى أن يؤكدها أحد أعضاء الفريق مع العميل (استخدم «المواعيد» لتغيير حالتها).',
+  'Topic': 'الموضوع', 'Preferred day and contact': 'اليوم المفضل وطريقة التواصل',
+  'Receiving a file does not verify it. Please ask customers to send sensitive documents only through the secure process your advisors explain.': 'استلام الملف لا يعني التحقق منه. يرجى أن تطلب من العملاء إرسال المستندات الحساسة فقط عبر العملية الآمنة التي يشرحها مستشاروكم.',
+  'Document status': 'حالة المستند',
+  'No documents have been received from customers with an enquiry.': 'لم تُستلم مستندات من عملاء لديهم استفسار.', 'Nothing needs a person right now. ': 'لا شيء يحتاج إلى موظف الآن.',
+  // what an enquiry records (field names) and its history events
+  'Purpose (own use / rental / investment)': 'الغرض (سكن / تأجير / استثمار)', 'Budget': 'الميزانية', 'Currency': 'العملة', 'Bedrooms': 'عدد الغرف', 'Completed or off-plan': 'جاهز أو على الخارطة',
+  'Payment / financing': 'الدفع / التمويل', 'Timeframe': 'الإطار الزمني', 'Ownership status': 'حالة الملكية', 'Authorised to sell': 'مخوَّل بالبيع', 'Expected asking price': 'السعر المتوقع',
+  'Occupancy / completion': 'الإشغال / الإنجاز', 'Wants (valuation / marketing / brokerage)': 'يرغب في (تقييم / تسويق / وساطة)', 'Preferred callback time': 'وقت الاتصال المفضل',
+  'Preferred contact method': 'طريقة التواصل المفضلة', 'Notes': 'ملاحظات', 'Name': 'الاسم',
+  'created': 'إنشاء', 'updated': 'تحديث', 'status': 'الحالة', 'assigned': 'إسناد', 'documents': 'المستندات', 'note': 'ملاحظة',
+});
+window.I18N_AR_PATTERNS.push(
+  [/^(\d+) enquir(?:y|ies)$/, function (n) { return n + ' استفسار'; }],
+  [/^Missing: (.+)$/, function (list) { return 'ناقص: ' + list.split(', ').map(function (x) { return window.I18N.lookup(x) || x; }).join('، '); }],
+  [/^Still to ask: (.+)$/, function (list) { return 'ما يزال مطلوباً: ' + list.split(', ').map(function (x) { return window.I18N.lookup(x) || x; }).join('، '); }]
+);

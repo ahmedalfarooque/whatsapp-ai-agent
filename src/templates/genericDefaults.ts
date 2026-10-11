@@ -3,6 +3,7 @@ import { TEMPLATE_DEFAULTS } from './defaults';
 import { getMenuConfig, menuTemplateKeys, renderMainMenuText, renderSubmenuText, keycap, type MenuItem } from '../automation/menuConfig';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { CART_TEMPLATES } from './cartDefaults';
+import { realEstateTemplateDefaults } from '../realestate/templates';
 
 /**
  * Reply templates for every business EXCEPT the original one.
@@ -187,5 +188,7 @@ export function genericTemplateDefaults(accountId: number): TemplateDefault[] {
       },
     );
   }
+  // The real estate entries (Buy / Sell / Explore Projects) exist only for a business with the real estate add-on.
+  if (accountHasFeature(accountId, FEATURES.REAL_ESTATE)) out.push(...realEstateTemplateDefaults());
   return out;
 }
