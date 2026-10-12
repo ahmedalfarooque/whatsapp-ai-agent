@@ -22,9 +22,10 @@ describe('shell', () => {
     expect(ui).toMatch(/\.main\{[^}]*--gutter:max\(28px,calc\(\(100% - 1480px\) \/ 2\)\)/);
   });
 
-  it('the page description stays for assistive technology but is not drawn, and phones put the header in the flow', () => {
+  it('the page description stays for assistive technology but is not drawn, and phones anchor the header, so the account menu spans the screen', () => {
     expect(ui).toMatch(/\.topbar #page-subtitle\{position:absolute;width:1px;height:1px/);
-    expect(ui).toMatch(/@media \(max-width:700px\)\{\.topbar\{position:static\}\}/);
+    expect(ui).toMatch(/@media \(max-width:700px\)\{\.topbar\{position:relative\}\}/);
+    expect(ui).toMatch(/\.profile\{position:static\}[^}]*\}?\s*\.profile-panel\{left:14px;right:14px/);
   });
 
   it('labels use the body face, navigation has no coloured side rail, and radii come from the scale', () => {

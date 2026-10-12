@@ -16,7 +16,7 @@ set -Eeuo pipefail
 : "${DEPLOY_SERVICE:=whatsapp-ai-agent}"
 : "${DEPLOY_SPACE_FACTOR:=3}"
 : "${DEPLOY_ORIGIN_RE:=github\.com[:/]ahmedalfarooque/whatsapp-ai-agent(\.git)?$}"
-SCOPE_RE='^(dashboard/|docs/|tests/|scripts/deploy-static-ui\.(sh|ps1)$)'
+SCOPE_RE='^(dashboard/|docs/|tests/|(AGENTS\.md|\.gitignore|\.project-sync/(PROJECT|COWORK)\.md|scripts/(deploy-static-ui\.(sh|ps1)|env-report\.cjs))$)'
 
 BASE=""; TARGET=""; CHECK_ONLY=0
 while [ $# -gt 0 ]; do

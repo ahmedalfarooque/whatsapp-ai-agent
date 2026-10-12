@@ -1,6 +1,6 @@
 # Cowork folder instruction — ready to bind to this project
 
-For the local folder C:\Websites\WhatsApp AI Agent, read AGENTS.md,
+For the local folder D:\PROJECTS\WhatsApp AI Agent, read AGENTS.md,
 .project-sync/PROTOCOL.md and .project-sync/PROJECT.md before every task.
 Run node scripts/project-sync.cjs check in the live folder; read the latest handoff.
 Before writing acquire a writer lock as Claude-Cowork with a unique session ID.

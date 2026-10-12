@@ -141,6 +141,13 @@ d('deploy-static-ui.sh preconditions (check-only, disposable repositories)', () 
     expect(r.out).toContain('src/a.ts'); expect(r.out).toContain('package.json');
   });
 
+  it('accepts the read-only developer tool scripts/env-report.cjs (never loaded by the app) but no other script', () => {
+    const ok = makeEnv('envtool', { target: (w) => { put(w, 'scripts/env-report.cjs', '// tool'); } });
+    expect(run(ok, ['--base', ok.base, '--target', ok.target, '--check-only']).out).toContain('CHECK-ONLY OK');
+    const bad = makeEnv('othertool', { target: (w) => { put(w, 'scripts/other.cjs', '// not allowed'); } });
+    expect(run(bad, ['--base', bad.base, '--target', bad.target, '--check-only']).out).toMatch(/ABORT\[release-scope\].*scripts\/other\.cjs/);
+  });
+
   it('refuses a release that lacks tokens.css or whose index references a missing asset', () => {
     const missing = makeEnv('notokens', { target: (w) => { rmSync(path.join(w, 'dashboard/tokens.css')); } });
     expect(run(missing, ['--base', missing.base, '--target', missing.target, '--check-only']).out).toMatch(/ABORT\[release-assets\].*tokens\.css/);

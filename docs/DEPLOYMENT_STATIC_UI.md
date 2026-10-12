@@ -31,7 +31,7 @@ byte-identical to the copy committed in `-Target`.
 
 ## What the server script checks before the first write (`ABORT[step]` on any failure)
 port guard (never 3005; app port 3000; service `whatsapp-ai-agent`) · absolute, non-symlink repository root that is the git toplevel with the expected origin and branch `master` ·
-live HEAD == `--base` and no tracked changes · `origin/master` == `--target` and a fast-forward · every changed file inside `dashboard/`, `docs/`, `tests/` (or the two `scripts/deploy-static-ui.*` files themselves) ·
+live HEAD == `--base` and no tracked changes · `origin/master` == `--target` and a fast-forward · every changed file inside `dashboard/`, `docs/`, `tests/` or one of a short list of text and tool files (`AGENTS.md`, `.gitignore`, `.project-sync/PROJECT.md` and `COWORK.md`, `scripts/deploy-static-ui.*`, `scripts/env-report.cjs`; none of them is loaded by the app) ·
 `dashboard/index.html` and `tokens.css` exist in the target and every `/dashboard/*.css|js` referenced by `index.html` exists in the target, none of them removed ·
 backup root exists, has space for 3x the data being copied, and is writable directly or via non-interactive sudo.
 
@@ -51,3 +51,5 @@ The backup (`/home/ubuntu/whatsapp-backups/pre-ui-redesign-<timestamp>/`) holds 
 `tests/unit/deploy/staticUiDeploy.test.ts` runs the script against disposable local git repositories (no production access): correct release, wrong live commit, wrong target, dirty checkout,
 wrong repository/origin/relative or missing path, port 3005 / other port / other service, out-of-scope files, missing `tokens.css`, dangling asset reference, invalid backup root or data path,
 insufficient space, plus the apply path with stubbed server tools (verified backup, fast-forward, asset proof, and automatic rollback when a check fails). Needs Git Bash or bash on PATH.
+
+See also `docs/ENVIRONMENTS_AND_RELEASES.md` for what is (and must not be) shared between a developer machine, production and GitHub.

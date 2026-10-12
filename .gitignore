@@ -63,3 +63,7 @@ data/baileys-version.json
 data/baileys-auth*.json
 
 data/baileys-auth*.json
+
+# local-only files that must never be committed
+/Open Router.docx
+.project-sync/qr-stopped-report.*

@@ -1,6 +1,8 @@
 # Current project context
 
-Canonical root: C:\Websites\WhatsApp AI Agent.
+Canonical root: D:\PROJECTS\WhatsApp AI Agent (the former C:\Websites\WhatsApp AI Agent no longer exists; older handoffs may still name it). GitHub `master` is the
+source of truth for code. Production runs on the Oracle server with its own database and WhatsApp sessions; this machine's `data/` is a separate development
+environment (see docs/ENVIRONMENTS_AND_RELEASES.md).
 Backend: Node.js/TypeScript, Express, SQLite migrations and persistent conversation memory.
 Integrations: Meta WhatsApp webhook/outbound messages, OpenRouter tool calling,
 Google Calendar availability/booking. Markdown/JSON business knowledge. Docker/Caddy deployment.
