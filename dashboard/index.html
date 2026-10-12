@@ -20,6 +20,7 @@
   <a class="skip-link" href="#view">Skip to content</a>
   <aside class="sidebar" id="sidebar">
     <div class="brand" data-pending><span class="wm brand-wm"><img class="wm-light" src="/dashboard/assets/developer/synrtechs-logo.svg" alt="SYNRTECHS" width="132" height="24"><img class="wm-dark" src="/dashboard/assets/developer/synrtechs-logo-white.svg" alt="SYNRTECHS" width="132" height="24"></span><span id="brand-name"><small>AI WORKSPACE</small></span></div>
+    <button type="button" class="palette-trigger" data-open-palette aria-label="Quick search" aria-keyshortcuts="Control+K Meta+K"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3"/></svg><span>Search…</span><kbd>Ctrl K</kbd></button>
     <nav id="nav" aria-label="Main">
       <div class="nav-group">WHATSAPP ACCOUNTS</div>
       <div id="account-list" class="account-list" aria-label="WhatsApp accounts"><span class="muted">Loading…</span></div>
@@ -66,6 +67,7 @@
   </aside>
   <button type="button" class="nav-scrim" id="nav-scrim" aria-label="Close navigation" tabindex="-1"></button>
   <main class="main">
+    <div id="env-banner" class="env-banner" role="status" hidden></div>
     <header class="topbar" id="topbar">
       <button type="button" class="icon-btn nav-toggle" id="nav-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <span class="topbar-mark" aria-hidden="true"><img class="mk" src="/dashboard/assets/developer/synrtechs-mark-white.svg" alt="" width="20" height="24"></span>
@@ -98,7 +100,7 @@
     </div>
     <div id="toast-host"></div>
     <div id="view" tabindex="-1">Loading…</div>
-    <footer><span id="footer-brand" translate="no">SYNRTECHS · AI Workspace</span> · Live application database · <a href="/health">Health</a> · <a href="/readiness">Readiness</a><span class="dev-credit" id="dev-credit" hidden> · <span class="dev-label">Developed by</span> <img class="dev-light" src="/dashboard/assets/developer/synrtechs-logo.svg" alt="SYNRTECHS" width="97" height="18"><img class="dev-dark" src="/dashboard/assets/developer/synrtechs-logo-white.svg" alt="SYNRTECHS" width="97" height="18"></span></footer>
+    <footer><span id="footer-brand" translate="no">SYNRTECHS · AI Workspace</span> · <span id="build-info" class="build-info" translate="no"></span> · Live application database · <a href="/health">Health</a> · <a href="/readiness">Readiness</a><span class="dev-credit" id="dev-credit" hidden> · <span class="dev-label">Developed by</span> <img class="dev-light" src="/dashboard/assets/developer/synrtechs-logo.svg" alt="SYNRTECHS" width="97" height="18"><img class="dev-dark" src="/dashboard/assets/developer/synrtechs-logo-white.svg" alt="SYNRTECHS" width="97" height="18"></span></footer>
   </main>
   <script src="/dashboard/i18n-ar.js"></script>
   <script src="/dashboard/i18n-ar-2.js"></script>
@@ -107,9 +109,11 @@
   <script src="/dashboard/i18n-ar-5.js"></script>
   <script src="/dashboard/i18n-ar-6.js"></script>
   <script src="/dashboard/i18n.js"></script>
+  <script src="/dashboard/ui-kit.js"></script>
   <script src="/dashboard/shell.js"></script>
   <script src="/dashboard/branding.js"></script>
   <script src="/dashboard/app.js"></script>
+  <script src="/dashboard/palette.js"></script>
   <script src="/dashboard/pages-automation.js"></script>
 <script src="/dashboard/inbox-core.js"></script>
 <script src="/dashboard/pages-inbox.js"></script>

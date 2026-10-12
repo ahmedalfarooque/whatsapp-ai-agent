@@ -67,3 +67,6 @@ data/baileys-auth*.json
 # local-only files that must never be committed
 /Open Router.docx
 .project-sync/qr-stopped-report.*
+
+# written on the server by the release script (which commit is running)
+dashboard/build-info.json

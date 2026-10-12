@@ -148,6 +148,15 @@ d('deploy-static-ui.sh preconditions (check-only, disposable repositories)', () 
     expect(run(bad, ['--base', bad.base, '--target', bad.target, '--check-only']).out).toMatch(/ABORT\[release-scope\].*scripts\/other\.cjs/);
   });
 
+  it('accepts the developer proxy and the two release scripts (none is loaded by the app) but still refuses backend, data and other tooling', () => {
+    const ok = makeEnv('devtools', { target: (w) => { put(w, 'scripts/dev-proxy.cjs', '// tool'); put(w, 'scripts/build-info.cjs', '// tool'); put(w, 'scripts/release.ps1', '# tool'); put(w, 'scripts/release-status.ps1', '# tool'); } });
+    expect(run(ok, ['--base', ok.base, '--target', ok.target, '--check-only']).out).toContain('CHECK-ONLY OK');
+    for (const file of ['src/index.ts', 'package.json', 'data/app.db', 'scripts/project-sync.cjs', 'scripts/release.sh', 'scripts/dev-proxy.js']) {
+      const bad = makeEnv('reject-' + file.replace(/\W/g, '-'), { target: (w) => { put(w, file, 'x'); } });
+      expect(run(bad, ['--base', bad.base, '--target', bad.target, '--check-only']).out, file).toMatch(/ABORT\[release-scope\]/);
+    }
+  });
+
   it('refuses a release that lacks tokens.css or whose index references a missing asset', () => {
     const missing = makeEnv('notokens', { target: (w) => { rmSync(path.join(w, 'dashboard/tokens.css')); } });
     expect(run(missing, ['--base', missing.base, '--target', missing.target, '--check-only']).out).toMatch(/ABORT\[release-assets\].*tokens\.css/);
@@ -184,6 +193,7 @@ esac`);
       '    /dashboard/*) f="${p#/dashboard/}"; if [ "$f" = "${STUB_BREAK:-}" ] || [ ! -f "$DEPLOY_REPO/dashboard/$f" ]; then printf 404; else printf 200; fi;;',
       '    *) printf 404;;',
       '  esac',
+      'elif [ "$p" = /dashboard/build-info.json ]; then cat "$DEPLOY_REPO/dashboard/build-info.json" 2>/dev/null',
       'else cat "$DEPLOY_REPO/dashboard/index.html"; fi'].join('\n'));
     mkdirSync(path.join(env.data, 'baileys-auth'), { recursive: true }); writeFileSync(path.join(env.data, 'baileys-auth', 'creds.json'), '{}');
     mkdirSync(path.join(env.data, 'uploads'), { recursive: true }); writeFileSync(path.join(env.data, 'uploads', 'f.pdf'), 'p');
@@ -205,6 +215,10 @@ esac`);
     expect(readFileSync(path.join(e.backups, made[0], 'dashboard/index.html'), 'utf8')).toBe(INDEX_OLD); // the backup holds the previous release
     expect(r.out).toMatch(/\/dashboard\/tokens\.css local=200 public=200/);
     expect(r.out).toMatch(/removed \/dashboard\/theme-dark\.css -> 404/);
+    const stamp = JSON.parse(readFileSync(path.join(e.live, 'dashboard/build-info.json'), 'utf8')); // the release stamp names the exact commit now running
+    expect(stamp.fullCommit).toBe(git(e.live, 'rev-parse', 'HEAD'));
+    expect(stamp).toMatchObject({ environment: 'production', branch: 'master' });
+    expect(r.out).toContain('release stamp:');
     expect(r.out).toContain(`git checkout --detach`);
   });
 
@@ -217,6 +231,7 @@ esac`);
     expect(r.out).toMatch(/rolled back/);
     expect(git(e.live, 'rev-parse', '--short', 'HEAD')).toBe(e.base);
     expect(readFileSync(path.join(e.live, 'dashboard/index.html'), 'utf8')).toBe(INDEX_OLD);
+    expect(JSON.parse(readFileSync(path.join(e.live, 'dashboard/build-info.json'), 'utf8')).fullCommit).toBe(git(e.live, 'rev-parse', 'HEAD')); // the stamp is rolled back with the code
     expect(readdirSync(e.backups)).toHaveLength(1);
   });
 

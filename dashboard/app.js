@@ -225,9 +225,9 @@ function renderAccountList() {
     const info = accountStatusInfo(a.uiStatus);
     const active = a.id === selectedAccountId;
     const identity = accountIdentityModel(a, (window.I18N && window.I18N.lang) || 'en', info.label);
-    return `<button type="button" class="account-item ${active ? 'active' : ''} ${a.enabled ? '' : 'off'}" data-account="${a.id}" title="${esc(a.name)} · ${esc(info.label)}" aria-pressed="${active}">
+    return `<button type="button" class="account-item ${active ? 'active' : ''} ${a.enabled ? '' : 'off'}" data-account="${a.id}" data-status="${esc(a.uiStatus || '')}" title="${esc(a.name)} · ${esc(info.label)}" aria-pressed="${active}">
       ${identity ? accountAvatarHtml(identity, 'list-av') : ''}<span class="dot ${info.dot}"></span>
-      <span class="account-text"><span class="account-name" dir="auto">${esc(a.name)}</span><small>${esc(a.phoneNumber || info.label)}</small></span>
+      <span class="account-text"><span class="account-name" dir="auto">${esc(a.name)}</span><small>${a.phoneNumber ? `<span class="acct-num" dir="ltr">${esc(a.phoneNumber)}</span>` : ''}<span class="acct-state ${info.dot}">${esc(info.label)}</span></small></span>
     </button>`;
   }).join('');
   host.querySelectorAll('[data-account]').forEach((btn) => btn.addEventListener('click', () => selectAccount(Number(btn.dataset.account))));

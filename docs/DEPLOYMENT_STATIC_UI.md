@@ -25,13 +25,17 @@ pwsh scripts/deploy-static-ui.ps1 -Base 277499d -Target <commit> -CheckOnly
 # 2. the release
 pwsh scripts/deploy-static-ui.ps1 -Base 277499d -Target <commit>
 ```
+`pwsh scripts/release.ps1 [-Apply]` wraps this launcher (validation, base read from production, typecheck/lint/tests/build, check-only, release, independent verification, failure report);
+`pwsh scripts/release-status.ps1` is the read-only three-way commit report. See `docs/ENVIRONMENTS_AND_RELEASES.md`.
+After the fast-forward the server script writes `dashboard/build-info.json` (`commit`, `fullCommit`, `branch`, `releasedAt`, `environment: "production"`; ignored by Git, never part of a release
+diff) and the post-release proof reads it back through the public URL; rollback rewrites it for the restored commit. The dashboard footer shows it as `Build <commit> · Production`.
 `-DryRun` only validates the local side. The launcher resolves the repository from its own location (never the current directory),
 requires branch `master`, local `master` == `origin/master` == `-Target`, exactly one copy of the script, and that the script on disk is
 byte-identical to the copy committed in `-Target`.
 
 ## What the server script checks before the first write (`ABORT[step]` on any failure)
 port guard (never 3005; app port 3000; service `whatsapp-ai-agent`) · absolute, non-symlink repository root that is the git toplevel with the expected origin and branch `master` ·
-live HEAD == `--base` and no tracked changes · `origin/master` == `--target` and a fast-forward · every changed file inside `dashboard/`, `docs/`, `tests/` or one of a short list of text and tool files (`AGENTS.md`, `.gitignore`, `.project-sync/PROJECT.md` and `COWORK.md`, `scripts/deploy-static-ui.*`, `scripts/env-report.cjs`; none of them is loaded by the app) ·
+live HEAD == `--base` and no tracked changes · `origin/master` == `--target` and a fast-forward · every changed file inside `dashboard/`, `docs/`, `tests/` or one of a short list of text and tool files (`AGENTS.md`, `.gitignore`, `.project-sync/PROJECT.md` and `COWORK.md`, `scripts/deploy-static-ui.*`, `scripts/env-report.cjs`, `scripts/build-info.cjs`, `scripts/dev-proxy.cjs`, `scripts/release.ps1`, `scripts/release-status.ps1`; none of them is loaded by the app) ·
 `dashboard/index.html` and `tokens.css` exist in the target and every `/dashboard/*.css|js` referenced by `index.html` exists in the target, none of them removed ·
 backup root exists, has space for 3x the data being copied, and is writable directly or via non-interactive sudo.
 
@@ -50,6 +54,6 @@ The backup (`/home/ubuntu/whatsapp-backups/pre-ui-redesign-<timestamp>/`) holds 
 ## Tests
 `tests/unit/deploy/staticUiDeploy.test.ts` runs the script against disposable local git repositories (no production access): correct release, wrong live commit, wrong target, dirty checkout,
 wrong repository/origin/relative or missing path, port 3005 / other port / other service, out-of-scope files, missing `tokens.css`, dangling asset reference, invalid backup root or data path,
-insufficient space, plus the apply path with stubbed server tools (verified backup, fast-forward, asset proof, and automatic rollback when a check fails). Needs Git Bash or bash on PATH.
+insufficient space, the new tool scripts being accepted while backend/data/other scripts are refused, the build stamp, plus the apply path with stubbed server tools (verified backup, fast-forward, asset proof, and automatic rollback when a check fails). Needs Git Bash or bash on PATH.
 
 See also `docs/ENVIRONMENTS_AND_RELEASES.md` for what is (and must not be) shared between a developer machine, production and GitHub.

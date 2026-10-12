@@ -244,8 +244,36 @@ function renderProfile() {
   const button = document.querySelector('#profile-btn');
   const panel = document.querySelector('#profile-panel');
   if (!profile || !button || !panel) return;
+  // Account menu: the WAI-ARIA "menu button" contract. Enter / Space / ArrowDown open it and focus the first item (ArrowUp the last), arrows / Home / End move,
+  // a letter jumps to the next item starting with it, Escape closes and returns focus to the button, Tab closes, a click outside closes.
+  button.setAttribute('aria-haspopup', 'menu');
+  const items = () => [...panel.querySelectorAll('[role="menuitem"]')].filter((el) => el.offsetParent !== null);
+  const focusAt = (i) => { const list = items(); if (list[i]) list[i].focus(); };
   const set = (open) => { panel.hidden = !open; button.setAttribute('aria-expanded', String(open)); };
-  button.addEventListener('click', (e) => { e.stopPropagation(); set(panel.hidden); });
+  button.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = panel.hidden;
+    set(open);
+    if (open && e.detail === 0) requestAnimationFrame(() => focusAt(0)); // keyboard activation (Enter / Space) lands on the first item
+  });
+  button.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    set(true);
+    requestAnimationFrame(() => focusAt(e.key === 'ArrowDown' ? 0 : items().length - 1));
+  });
+  panel.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); set(false); button.focus(); return; }
+    if (e.key === 'Tab') { set(false); return; }
+    const list = items();
+    const at = list.indexOf(document.activeElement);
+    const next = UiKit.menuNavIndex(e.key, at, list.length);
+    if (next !== null) { e.preventDefault(); list[next].focus(); return; }
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const hit = UiKit.menuTypeAhead(e.key, at, list.map((el) => el.textContent));
+      if (hit >= 0) { e.preventDefault(); list[hit].focus(); }
+    }
+  });
   document.addEventListener('click', (e) => { if (!profile.contains(e.target)) set(false); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) { set(false); button.focus(); } });
   panel.addEventListener('click', (e) => { if (e.target.closest('a, button')) set(false); });
@@ -256,6 +284,43 @@ function renderProfile() {
     toggle.addEventListener('click', () => setTheme(currentTheme() === 'dark' ? 'light' : 'dark'));
   }
 })();
+
+// ---------------------------------------------------------------------
+// Which release is this? (GET /dashboard/build-info.json)
+// Production: written by the release script after every deployment (the exact commit that is running). A local window on production data: written by
+// scripts/dev-proxy.cjs (the commit of YOUR checkout, plus where the data comes from). The footer always says which one this page is, and a banner appears
+// whenever the page is NOT production itself, so a local window can never be mistaken for the live system.
+// ---------------------------------------------------------------------
+async function renderBuildInfo() {
+  const footer = document.querySelector('#build-info');
+  const banner = document.querySelector('#env-banner');
+  let info = null;
+  try {
+    const res = await fetch('/dashboard/build-info.json', { cache: 'no-store' });
+    if (res.ok) info = await res.json();
+  } catch { /* offline or old release without a stamp */ }
+  if (!info || typeof info.commit !== 'string' || !/^[0-9a-zA-Z]{4,40}$/.test(info.commit)) {
+    if (footer) footer.textContent = 'Build: not stamped';
+    return;
+  }
+  const env = info.environment || 'unknown';
+  const label = env === 'production' ? 'Production' : env === 'local-ui' ? 'Local window' : env === 'local-isolated' ? 'Isolated local environment' : env;
+  if (footer) {
+    footer.textContent = `Build ${info.commit} · ${label}`;
+    footer.title = [info.fullCommit, info.branch && `branch ${info.branch}`, info.releasedAt && `released ${info.releasedAt}`, info.dataSource && `data: ${info.dataSource}`].filter(Boolean).join(' · ');
+  }
+  document.body.dataset.environment = env;
+  if (banner) {
+    if (env === 'production') { banner.hidden = true; return; }
+    const parts = [`${label}`, `UI from commit ${info.commit}${info.branch ? ` (${info.branch})` : ''}${info.uncommittedChanges ? ' + uncommitted changes' : ''}`];
+    if (env === 'local-ui') parts.push(info.mode === 'business-data' ? 'Data: PRODUCTION (live), business content editable' : 'Data: PRODUCTION (live), read-only');
+    else parts.push('Own local database, not production data');
+    banner.className = `env-banner ${env === 'local-ui' ? (info.mode === 'business-data' ? 'write' : 'read') : 'isolated'}`;
+    banner.textContent = parts.join(' · ');
+    banner.hidden = false;
+  }
+}
+document.addEventListener('DOMContentLoaded', () => { renderBuildInfo(); });
 
 // Date range for the dashboard's figures (remembered per browser).
 const RANGE_KEY = 'workspace.range';

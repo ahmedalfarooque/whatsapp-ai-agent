@@ -40,15 +40,25 @@ function inboxRow(item, selectedId) {
     </span></a></li>`;
 }
 
-function inboxBubble(m) {
+// Who sent it, as a small badge beside the last bubble of a group: the customer's initials, the sparkle of the AI, the bolt of an automatic reply, the staff member's initials.
+const INBOX_SENDER_ICON = { ai: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z', auto: 'M13 2 3 14h9l-1 8 10-12h-9z' };
+function inboxSenderBadge(m, customerName) {
+  const icon = INBOX_SENDER_ICON[m.kind];
+  if (icon) return `<span class="msg-av ${m.kind}" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="${icon}"/></svg></span>`;
+  const name = m.kind === 'customer' ? customerName : (InboxCore.messageLabel(m) || '');
+  return `<span class="msg-av ${m.kind}" aria-hidden="true">${esc(InboxCore.initials(name || ''))}</span>`;
+}
+
+/** One message. `flags` (from UiKit.groupFlags): the sender label shows on the first message of a group, the time and the sender badge on the last. */
+function inboxBubble(m, flags = { first: true, last: true }, customerName = '') {
   const split = InboxCore.splitMedia(m);
   const delivery = InboxCore.deliveryLabel(m);
   const cls = m.kind === 'customer' ? 'in' : `out ${m.kind}`;
-  return `<div class="bubble ${cls}" data-id="${m.id}">
-    <div class="bubble-role">${esc(InboxCore.messageLabel(m))}</div>
+  return `<div class="msg-row ${m.kind === 'customer' ? 'in' : 'out'} ${m.kind} ${flags.first ? 'first' : ''} ${flags.last ? 'last' : ''}">${flags.last ? inboxSenderBadge(m, customerName) : '<span class="msg-av gap" aria-hidden="true"></span>'}<div class="bubble ${cls}" data-id="${m.id}">
+    ${flags.first ? `<div class="bubble-role">${esc(InboxCore.messageLabel(m))}</div>` : ''}
     ${split.media ? `<div class="bubble-media">${esc(split.media)}</div>` : ''}
     ${split.text ? `<div class="bubble-text" dir="auto">${esc(split.text)}</div>` : ''}
-    <div class="bubble-time">${esc(formatDate(m.at))}${delivery ? ` · ${esc(delivery)}` : ''}</div></div>`;
+    ${flags.last ? `<div class="bubble-time">${esc(formatDate(m.at))}${delivery ? ` · ${esc(delivery)}` : ''}</div>` : ''}</div></div>`;
 }
 
 // Day separators in the transcript: "Today", "Yesterday", then the date. Purely presentational; the messages and their order are untouched.
@@ -65,14 +75,15 @@ function inboxDayLabel(date) {
   if (diff === 1) return 'Yesterday';
   return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 }
-function inboxThreadHtml(messages) {
+function inboxThreadHtml(messages, customerName = '') {
   let lastDay = '';
-  return messages.map((m) => {
+  const flags = UiKit.groupFlags(messages);
+  return messages.map((m, i) => {
     const day = inboxDayOf(m.at);
     const key = day ? day.toDateString() : '';
     const sep = key && key !== lastDay ? `<div class="day-sep" role="separator">${esc(inboxDayLabel(day))}</div>` : '';
     if (key) lastDay = key;
-    return sep + inboxBubble(m);
+    return sep + inboxBubble(m, sep ? { ...flags[i], first: true } : flags[i], customerName);
   }).join('');
 }
 route('#/conversations', 'Conversations', 'Every conversation of this business — handled by the assistant, waiting for staff, with a staff member or resolved.', (view) => renderInbox(view, null));
@@ -252,12 +263,14 @@ async function renderInbox(view, selectedId) {
       ${act.note ? `<p class="muted thread-note">${esc(act.note)}</p>` : ''}
       <div class="transcript" id="ib-transcript" tabindex="0" aria-label="Messages">
         ${t.hasMore ? '<button class="btn small" id="ib-earlier">Load earlier messages</button>' : ''}
-        ${t.messages.length ? inboxThreadHtml(t.messages) : emptyView('No messages yet.')}
+        ${t.messages.length ? inboxThreadHtml(t.messages, customerName) : emptyView('No messages yet.')}
       </div>
-      ${act.composer ? `<form id="ib-form" class="reply-form" autocomplete="off">
+      ${act.composer ? `<form id="ib-form" class="reply-form composer" autocomplete="off">
         <label class="sr-only" for="ib-text">Reply to the customer</label>
-        <textarea id="ib-text" rows="3" maxlength="4000" dir="auto" placeholder="Write your reply… (Ctrl+Enter to send)">${esc(draft)}</textarea>
-        <div class="actions"><span class="muted">Sent through this business's WhatsApp number. WhatsApp delivery receipts are not tracked.</span><button class="btn primary" id="ib-send" type="submit">Send</button></div>
+        <div class="composer-box">
+          <textarea id="ib-text" rows="2" maxlength="4000" dir="auto" placeholder="Write your reply… (Ctrl+Enter to send)">${esc(draft)}</textarea>
+          <div class="composer-bar"><span class="muted composer-hint">Sent through this business's WhatsApp number. WhatsApp delivery receipts are not tracked.</span><span class="composer-count" id="ib-count" aria-hidden="true">${draft.length}/4000</span><button class="btn primary" id="ib-send" type="submit">Send <kbd>Ctrl ↵</kbd></button></div>
+        </div>
       </form>` : ''}`;
     const transcript = $('#ib-transcript');
     if (transcript && atBottom) transcript.scrollTop = transcript.scrollHeight;
@@ -269,7 +282,8 @@ async function renderInbox(view, selectedId) {
     const form = $('#ib-form');
     if (form) {
       const box = $('#ib-text');
-      box.addEventListener('input', () => { draft = box.value; });
+      const count = $('#ib-count');
+      box.addEventListener('input', () => { draft = box.value; if (count) count.textContent = `${box.value.length}/4000`; });
       box.addEventListener('keydown', (event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); form.requestSubmit(); } });
       form.addEventListener('submit', sendReply);
     }

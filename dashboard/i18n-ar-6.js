@@ -224,3 +224,50 @@ window.I18N_AR_PATTERNS.push(
   [/^Missing: (.+)$/, function (list) { return 'ناقص: ' + list.split(', ').map(function (x) { return window.I18N.lookup(x) || x; }).join('، '); }],
   [/^Still to ask: (.+)$/, function (list) { return 'ما يزال مطلوباً: ' + list.split(', ').map(function (x) { return window.I18N.lookup(x) || x; }).join('، '); }]
 );
+
+// Workspace redesign (v3): quick search, home hero and charts, build identifier, environment banner and the conversation composer.
+Object.assign(window.I18N_AR, {
+  'Search…': 'بحث…', 'Quick search': 'بحث سريع', 'Search pages, accounts and actions…': 'ابحث في الصفحات والحسابات والإجراءات…',
+  'Results': 'النتائج', 'Pages': 'الصفحات', 'Actions': 'الإجراءات',
+  'navigate': 'تنقّل', 'select': 'اختيار', 'close': 'إغلاق',
+  'Switch to dark appearance': 'التبديل إلى المظهر الداكن', 'Switch to light appearance': 'التبديل إلى المظهر الفاتح',
+  'Switch to Arabic': 'التبديل إلى العربية', 'Switch to English': 'التبديل إلى الإنجليزية', 'No results for': 'لا توجد نتائج لـ',
+  'All clear': 'كل شيء على ما يرام', 'System': 'النظام', 'System status': 'حالة النظام',
+  'Connections': 'الاتصالات', 'AI & automation': 'الذكاء الاصطناعي والأتمتة', 'View': 'عرض',
+  'All accounts connected': 'جميع الحسابات متصلة',
+  'Staff queue': 'قائمة انتظار الموظفين',
+  'live from the database': 'مباشر من قاعدة البيانات',
+  'Open inbox': 'فتح صندوق المحادثات', 'Reply activity': 'نشاط الردود', 'Live': 'مباشر',
+  'Activity period': 'فترة النشاط', 'Replies by kind': 'الردود حسب النوع', 'Automatic replies': 'الردود التلقائية', 'Menu': 'القائمة', 'Conversations by handling': 'المحادثات حسب المعالجة',
+  'same as yesterday': 'مثل الأمس', 'Replies sent': 'الردود المرسلة',
+  'View all activity': 'عرض كل النشاط', 'Pending now': 'قيد الانتظار الآن', 'To staff': 'إلى الموظفين',
+  'No replies yet': 'لا توجد ردود بعد',
+  'AI active': 'الذكاء الاصطناعي نشط', 'Handled': 'تمت معالجتها',
+  'Live application database': 'قاعدة بيانات التطبيق المباشرة',
+  'Build: not stamped': 'الإصدار: غير موسوم',
+  'Local window': 'نافذة محلية', 'Isolated local environment': 'بيئة محلية معزولة',
+  'Data: PRODUCTION (live), read-only': 'البيانات: الإنتاج (مباشرة)، للقراءة فقط',
+  'Data: PRODUCTION (live), business content editable': 'البيانات: الإنتاج (مباشرة)، ويمكن تعديل محتوى النشاط',
+  'Own local database, not production data': 'قاعدة بيانات محلية خاصة، وليست بيانات الإنتاج',
+  'Today': 'اليوم', 'Yesterday': 'أمس'
+});
+window.I18N_AR_PATTERNS.push(
+  [/^(\d+) things? need attention$/, function (n) { return Number(n) === 1 ? 'أمر واحد يحتاج إلى انتباه' : n + ' أمور تحتاج إلى انتباه'; }],
+  [/^(\d+) customer requests? waiting$/, function (n) { return n + ' طلب عميل بانتظار المعالجة'; }],
+  [/^(\d+) of (\d+) WhatsApp accounts? (?:connected|online)$/, function (a, b) { return a + ' من ' + b + ' حساب واتساب متصل'; }],
+  [/^\+(\d+) more$/, function (n) { return '+' + n + ' أخرى'; }],
+  [/^(\d+)\/(\d+) connected$/, function (a, b) { return a + '/' + b + ' متصل'; }],
+  [/^(\d+) waiting$/, function (n) { return n + ' بانتظار'; }],
+  [/^([+\u2212])(\d+) vs yesterday$/, function (s, n) { return s + n + ' مقارنةً بالأمس'; }],
+  [/^With (.+)$/, function (who) { return 'مع ' + who; }],
+  [/^Build ([0-9a-zA-Z]{4,40})$/, function (c) { return 'الإصدار ' + c; }],
+  [/^UI from commit (\S+)(?: \((.+)\))?( \+ uncommitted changes)?$/, function (c, b, u) { return 'الواجهة من الإصدار ' + c + (b ? ' (' + b + ')' : '') + (u ? ' + تغييرات غير مُثبَّتة' : ''); }],
+  [/^Replies (today|yesterday|weekly)$/, function (k) { return { today: 'ردود اليوم', yesterday: 'ردود الأمس', weekly: 'ردود الأسبوع' }[k]; }],
+  [/^(\d+)% of automatic replies came from the AI$/, function (n) { return n + '% من الردود التلقائية جاءت من الذكاء الاصطناعي'; }],
+  [/^(Conversations by handling|Requests|Automatic replies): (.+)$/, function (head, body) {
+    var L = window.I18N.lookup;
+    var parts = body.split(', ').map(function (seg) { var m = /^(.+) (\d+)$/.exec(seg); return m ? (L(m[1]) || m[1]) + ' ' + m[2] : seg; });
+    return (L(head) || head) + ': ' + parts.join('، ');
+  }],
+  [/^(.+): (QR code needed|Connected|Connecting|Disconnected|Connection error|Disabled)$/, function (name, state) { return name + ': ' + (window.I18N.lookup(state) || state); }],  [/^(.+): (\d+)$/, function (what, n) { var ar = window.I18N.lookup(what); return ar && ar !== what ? ar + ': ' + n : null; }]
+);

@@ -16,7 +16,7 @@ set -Eeuo pipefail
 : "${DEPLOY_SERVICE:=whatsapp-ai-agent}"
 : "${DEPLOY_SPACE_FACTOR:=3}"
 : "${DEPLOY_ORIGIN_RE:=github\.com[:/]ahmedalfarooque/whatsapp-ai-agent(\.git)?$}"
-SCOPE_RE='^(dashboard/|docs/|tests/|(AGENTS\.md|\.gitignore|\.project-sync/(PROJECT|COWORK)\.md|scripts/(deploy-static-ui\.(sh|ps1)|env-report\.cjs))$)'
+SCOPE_RE='^(dashboard/|docs/|tests/|(AGENTS\.md|\.gitignore|\.project-sync/(PROJECT|COWORK)\.md|scripts/(deploy-static-ui\.(sh|ps1)|env-report\.cjs|build-info\.cjs|dev-proxy\.cjs|release(-status)?\.ps1))$)'
 
 BASE=""; TARGET=""; CHECK_ONLY=0
 while [ $# -gt 0 ]; do
@@ -155,12 +155,18 @@ cp -a "$DEPLOY_REPO/knowledge" "$B/knowledge"
 diff -r "$DEPLOY_REPO/dashboard" "$B/dashboard" >/dev/null || abort "backup copy of dashboard differs from the live directory"
 log "BACKUP=$B integrity=ok dashboard-copy=identical db=$(du -k "$B/app.db" | cut -f1)KB"
 
+# The release stamp: which commit this server is running, readable by anyone at /dashboard/build-info.json (commit hashes only; the file is git-ignored).
+write_build_info() {
+  local full="$1" short; short="$(git rev-parse --short "$full")"
+  printf '{"commit":"%s","fullCommit":"%s","branch":"master","environment":"production","releasedAt":"%s","writtenBy":"scripts/deploy-static-ui.sh"}\n' "$short" "$full" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$DEPLOY_REPO/dashboard/build-info.json"
+}
 # ---------------------------------------------------------------- 6. release (fast-forward only)
 STEP="release"
 git merge --ff-only "$TARGET_FULL" >/dev/null || abort "fast-forward failed"
 [ "$(git rev-parse HEAD)" = "$TARGET_FULL" ] || abort "live HEAD is not the target after the fast-forward"
 [ "$(git status --porcelain --untracked-files=no | wc -l)" = "0" ] || abort "live checkout is dirty after the fast-forward"
-log "live commit now $(git rev-parse --short HEAD)"
+write_build_info "$TARGET_FULL"
+log "live commit now $(git rev-parse --short HEAD); release stamp written"
 
 # ---------------------------------------------------------------- 7. post-release proof (served assets, health, ports, untouched state)
 FAILS=()
@@ -177,6 +183,8 @@ done <<< "$ASSETS"
 if [ -n "$REMOVED" ]; then
   while IFS= read -r r; do check code_is local_code "/dashboard/$r" 404; done <<< "$REMOVED"
 fi
+LIVE_STAMP="$(curl -s --max-time 15 "$DEPLOY_PUBLIC_URL/dashboard/build-info.json" || true)"
+printf '%s' "$LIVE_STAMP" | grep -q "\"fullCommit\":\"$TARGET_FULL\"" || FAILS+=("public build-info.json does not name the target commit")
 LIVE_INDEX="$(curl -s --max-time 15 "$DEPLOY_PUBLIC_URL/dashboard/" || true)"
 while IFS= read -r a; do
   printf '%s' "$LIVE_INDEX" | grep -q "/dashboard/$a" || FAILS+=("public index does not reference $a")
@@ -191,6 +199,7 @@ if [ "${#FAILS[@]}" -gt 0 ]; then
   echo "VERIFY FAILED:"; printf '  - %s\n' "${FAILS[@]}"
   echo "Applying the documented rollback (non-destructive, static files only): git checkout --detach $BASE_FULL"
   git checkout --quiet --detach "$BASE_FULL"
+  write_build_info "$BASE_FULL"
   log "rolled back to $(git rev-parse --short HEAD); health=$(local_code /health) old stylesheet=$(local_code /dashboard/ui.css). Backup kept at $B"
   STEP="verify"; abort "post-release checks failed; rolled back to $BASE"
 fi
@@ -202,4 +211,5 @@ while IFS= read -r a; do echo "   /dashboard/$a local=$(local_code "/dashboard/$
 echo "== state fingerprints unchanged (accounts, sessions, uploads, credentials, knowledge, code, pid)"
 echo "$FP_AFTER" | sed 's/^/   /'
 echo "ROLLBACK (if ever needed): cd $DEPLOY_REPO && git checkout --detach $BASE_FULL   # static files only, no restart; 'git checkout master' returns to the release"
+echo "   release stamp: $(curl -s "$DEPLOY_PUBLIC_URL/dashboard/build-info.json")"
 echo "DEPLOY OK: $(git rev-parse --short HEAD)  backup=$B"

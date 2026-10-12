@@ -72,8 +72,8 @@
   --color-danger:#c0342f;--color-danger-soft:rgba(214,58,50,.09);--color-danger-line:rgba(192,52,47,.32);
   --color-info:#0b6a96;--color-info-soft:rgba(11,106,150,.1);--color-info-line:rgba(11,106,150,.3);
   /* depth: a crisp contact shadow plus a soft ambient one, never a coloured glow */
-  --elev-1:0 1px 2px rgba(15,23,42,.07),0 1px 1px rgba(15,23,42,.04);
-  --elev-2:0 6px 16px -4px rgba(15,23,42,.12),0 2px 4px rgba(15,23,42,.05);
+  --elev-1:0 1px 2px rgba(20,28,70,.06),0 6px 16px -10px rgba(20,28,70,.18);
+  --elev-2:0 2px 4px rgba(20,28,70,.06),0 14px 28px -12px rgba(20,28,70,.24);
   --shadow-overlay:0 24px 56px -16px rgba(15,23,42,.34),0 4px 12px rgba(15,23,42,.08);
   --scrim:rgba(11,18,38,.42);
   /* glass (see section 7) */
@@ -85,7 +85,11 @@
   --wash:radial-gradient(900px 300px at 100% -8%,rgba(105,65,226,.06),transparent 70%);
   /* chart / status series */
   --chart-1:#0aa58f;--chart-2:#6941e2;--chart-3:#2f6fd0;--chart-track:#e3e7f1;
-  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23566285' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  /* v3: hero lighting, a faint sheen on raised surfaces and the chart palette (every chart value is also written as text, colour never carries meaning alone) */
+  --hero-bg:radial-gradient(120% 160% at 0% 0%,rgba(39,230,197,.16),transparent 52%),radial-gradient(110% 150% at 100% 0%,rgba(105,65,226,.13),transparent 58%),linear-gradient(180deg,#ffffff,#f9faff);
+  --hero-bg-warn:radial-gradient(120% 160% at 0% 0%,rgba(255,107,107,.14),transparent 52%),radial-gradient(110% 150% at 100% 0%,rgba(105,65,226,.12),transparent 58%),linear-gradient(180deg,#ffffff,#fbf9fb);
+  --sheen:linear-gradient(180deg,rgba(255,255,255,.9),rgba(255,255,255,0) 42%);
+  --c-ai:#6941e2;--c-menu:#0aa58f;--c-wait:#d98a0b;--c-staff:#2f6fd0;--c-done:#a4aec6;  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23566285' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 /* ============ 4. DARK ============
@@ -131,7 +135,10 @@
   --glass-edge:rgba(255,255,255,.05);
   --wash:radial-gradient(900px 420px at 100% -12%,rgba(105,65,226,.16),transparent 66%),radial-gradient(700px 380px at 0% -14%,rgba(39,230,197,.05),transparent 64%);
   --chart-1:#27e6c5;--chart-2:#9a82f0;--chart-3:#7db5ff;--chart-track:#1e2535;
-  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca8c6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --hero-bg:radial-gradient(120% 170% at 0% 0%,rgba(39,230,197,.13),transparent 52%),radial-gradient(110% 160% at 100% 0%,rgba(105,65,226,.24),transparent 58%),linear-gradient(180deg,#171d2c,#141925);
+  --hero-bg-warn:radial-gradient(120% 170% at 0% 0%,rgba(255,107,107,.15),transparent 52%),radial-gradient(110% 160% at 100% 0%,rgba(105,65,226,.22),transparent 58%),linear-gradient(180deg,#1b1c2c,#141925);
+  --sheen:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 46%);
+  --c-ai:#9a82f0;--c-menu:#27e6c5;--c-wait:#f2b84b;--c-staff:#7db5ff;--c-done:#566285;  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca8c6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 :root[data-theme="dark"][dir="rtl"],:root[dir="rtl"]{--font-sans:"Cairo","Segoe UI",Tahoma,"Noto Sans Arabic",Arial,sans-serif}
 
