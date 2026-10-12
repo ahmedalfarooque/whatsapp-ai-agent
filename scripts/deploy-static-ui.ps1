@@ -48,7 +48,7 @@ $localMaster = (& git -C $Root rev-parse master)
 $originMaster = (& git -C $Root rev-parse origin/master)
 if ($originMaster -ne $tFull) { Stop-Deploy 'git' "origin/master ($($originMaster.Substring(0,7))) is not the intended target $Target; push or reconcile first" }
 if ($localMaster -ne $tFull) { Stop-Deploy 'git' "local master ($($localMaster.Substring(0,7))) differs from target $Target" }
-if (& git -C $Root status --porcelain --untracked-files=no) { Stop-Deploy 'git' 'tracked files have uncommitted changes' }
+if (& git -C $Root status --porcelain --untracked-files=no -- . ':!.project-sync') { Stop-Deploy 'git' 'tracked files have uncommitted changes' }
 
 # stale / edited script protection: bytes on disk must equal the committed blob in the target
 $blob = (& git -C $Root show "$tFull`:scripts/deploy-static-ui.sh") -join "`n"
