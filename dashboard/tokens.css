@@ -27,33 +27,35 @@
   --text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px;--text-lg:18px;--text-xl:22px;--text-2xl:28px;
 
   --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;--space-10:40px;
-  --radius-sm:8px;--radius-md:10px;--radius-lg:14px;--radius-xl:18px;--radius-2xl:22px;--radius-pill:999px;
-  --control-h:40px;--control-h-sm:32px;--sidebar-w:264px;
+  /* radii: 6 (chips, small controls) · 8 (controls) · 10 (menus, rows) · 12 (cards, panels) · 14 (dialogs) */
+  --radius-sm:6px;--radius-md:8px;--radius-lg:10px;--radius-xl:12px;--radius-2xl:14px;--radius-pill:999px;
+  --control-h:38px;--control-h-sm:30px;--sidebar-w:260px;
 
   --ease:cubic-bezier(.2,.7,.2,1);--dur-fast:.12s;--dur:.2s;--dur-slow:.35s;
   --blur:14px;--blur-strong:22px;
 }
 
-/* ============ 3. LIGHT ============ */
+/* ============ 3. LIGHT ============
+   A cool slate canvas with white cards: the canvas is the darkest neutral, so every panel is outlined by a hairline AND a tiny crisp shadow
+   (the two together are what keep white-on-grey readable). The sidebar and header are white, framing the work area. */
 :root,:root[data-theme="light"]{
   color-scheme:light;
-  /* surfaces: a cool off-white canvas, white panels, one raised and one hover step; fields stay white so they read as inputs */
-  --color-canvas:#f2f4fa;
-  --color-sidebar:#fbfcfe;
+  --color-canvas:#eef0f5;
+  --color-sidebar:#fafbfd;
   --color-surface:#ffffff;
-  --color-surface-raised:#f6f8fc;
-  --color-surface-hover:#edf1f9;
+  --color-surface-raised:#f5f6fa;
+  --color-surface-hover:#ebeef5;
   --color-field:#ffffff;
-  --color-border:#e1e6f2;            /* hairline (decorative) */
+  --color-border:#d9dee9;            /* hairline (decorative) */
   --color-border-strong:#7a88ae;     /* control edge: 3:1 on white and on the raised surface, as WCAG 1.4.11 asks */
-  --color-divider:#eaeef7;
+  --color-divider:#e6e9f1;
   /* text */
-  --color-text:#0a1330;
-  --color-text-2:#2b3659;
-  --color-text-muted:#566285;
-  --color-text-subtle:#5b6789;
+  --color-text:#0b1226;
+  --color-text-2:#2a3350;
+  --color-text-muted:#4f5b7a;
+  --color-text-subtle:#5a6585;
   --color-link:#08796e;
-  /* action: teal fill with a navy label; secondary emphasis: purple */
+  /* action: teal fill with a navy label; selection and secondary emphasis: purple */
   --color-primary:#27e6c5;
   --color-primary-hover:#1fd2b3;
   --color-primary-soft:rgba(39,230,197,.16);
@@ -63,73 +65,73 @@
   --color-secondary-text:#5a33d0;
   --color-secondary-soft:rgba(105,65,226,.09);
   --focus-ring:#6941e2;
-  --focus-glow:rgba(105,65,226,.28);
+  --focus-glow:rgba(105,65,226,.24);
   /* semantic */
   --color-success:#0b7a55;--color-success-soft:rgba(11,122,85,.1);--color-success-line:rgba(11,122,85,.3);--color-success-strong:#0b7a55;
   --color-warning:#8f5600;--color-warning-soft:rgba(224,150,20,.15);--color-warning-line:rgba(180,110,0,.35);
   --color-danger:#c0342f;--color-danger-soft:rgba(214,58,50,.09);--color-danger-line:rgba(192,52,47,.32);
   --color-info:#0b6a96;--color-info-soft:rgba(11,106,150,.1);--color-info-line:rgba(11,106,150,.3);
-  /* depth */
-  --elev-1:0 1px 2px rgba(10,19,48,.04),0 6px 18px -10px rgba(10,19,48,.12);
-  --elev-2:0 2px 4px rgba(10,19,48,.05),0 18px 40px -18px rgba(10,19,48,.24);
-  --shadow-overlay:0 24px 60px -20px rgba(10,19,48,.35);
-  --scrim:rgba(10,19,48,.42);
+  /* depth: a crisp contact shadow plus a soft ambient one, never a coloured glow */
+  --elev-1:0 1px 2px rgba(15,23,42,.07),0 1px 1px rgba(15,23,42,.04);
+  --elev-2:0 6px 16px -4px rgba(15,23,42,.12),0 2px 4px rgba(15,23,42,.05);
+  --shadow-overlay:0 24px 56px -16px rgba(15,23,42,.34),0 4px 12px rgba(15,23,42,.08);
+  --scrim:rgba(11,18,38,.42);
   /* glass (see section 7) */
-  --glass-bg:rgba(255,255,255,.74);
-  --glass-bg-strong:rgba(255,255,255,.97);
-  --glass-border:rgba(10,19,48,.09);
-  --glass-edge:rgba(255,255,255,.85);
-  /* the soft light the canvas sits on */
-  --wash:radial-gradient(900px 460px at 6% -10%,rgba(39,230,197,.17),transparent 62%),radial-gradient(820px 460px at 100% -12%,rgba(105,65,226,.12),transparent 62%);
+  --glass-bg:rgba(255,255,255,.8);
+  --glass-bg-strong:rgba(255,255,255,.96);
+  --glass-border:rgba(15,23,42,.1);
+  --glass-edge:rgba(255,255,255,.9);
+  /* the soft light the canvas sits on: nearly flat in light */
+  --wash:radial-gradient(900px 300px at 100% -8%,rgba(105,65,226,.06),transparent 70%);
   /* chart / status series */
-  --chart-1:#0aa58f;--chart-2:#6941e2;--chart-3:#2f6fd0;--chart-track:#e6eaf4;
+  --chart-1:#0aa58f;--chart-2:#6941e2;--chart-3:#2f6fd0;--chart-track:#e3e7f1;
   --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23566285' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 /* ============ 4. DARK ============
-   A deliberate hierarchy, not one flat navy: canvas (deepest) < sidebar < card < raised row < hover/selected. Cards are separated by surface step and a
-   hairline, never by a glowing outline. Text is an off-white (not pure white) with two quieter steps. */
+   Ink-charcoal with a faint blue cast, stepped by lightness: canvas (deepest) < sidebar < card < raised < hover/selected. Cards are separated by their surface step and a
+   low-alpha hairline, never a glowing outline. Brand navy lives in the logo tile and the sign-in panel; teal appears only for the primary action, the live state and links. */
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --color-canvas:#050b1f;
-  --color-sidebar:#081029;
-  --color-surface:#0c1737;
-  --color-surface-raised:#121f47;
-  --color-surface-hover:#182858;
-  --color-field:#060d26;
-  --color-border:#1e2d5e;
-  --color-border-strong:#6577b5;
-  --color-divider:#16244f;
-  --color-text:#eef2ff;
-  --color-text-2:#d0d8f2;
-  --color-text-muted:#a3b0d6;
-  --color-text-subtle:#8e9cc7;
+  --color-canvas:#0a0d14;
+  --color-sidebar:#0e121b;
+  --color-surface:#141925;
+  --color-surface-raised:#1b2131;
+  --color-surface-hover:#242c40;
+  --color-field:#0b0f18;
+  --color-border:#272f43;
+  --color-border-strong:#6b78a0;
+  --color-divider:#1e2535;
+  --color-text:#eceff7;
+  --color-text-2:#ccd3e6;
+  --color-text-muted:#9ca8c6;
+  --color-text-subtle:#8e9aba;
   --color-link:#27e6c5;
   --color-primary:#27e6c5;
   --color-primary-hover:#52f0d6;
-  --color-primary-soft:rgba(39,230,197,.13);
+  --color-primary-soft:rgba(39,230,197,.12);
   --color-on-primary:#04122e;
   --color-accent:#27e6c5;
   --color-secondary:#6941e2;
   --color-secondary-text:#b8a6f7;
-  --color-secondary-soft:rgba(105,65,226,.24);
+  --color-secondary-soft:rgba(130,100,240,.2);
   --focus-ring:#27e6c5;
-  --focus-glow:rgba(39,230,197,.3);
-  --color-success:#5fd6a4;--color-success-soft:rgba(95,214,164,.14);--color-success-line:rgba(95,214,164,.38);--color-success-strong:#1f9e70;
-  --color-warning:#f2b84b;--color-warning-soft:rgba(242,184,75,.15);--color-warning-line:rgba(242,184,75,.4);
-  --color-danger:#ff6b6b;--color-danger-soft:rgba(255,107,107,.14);--color-danger-line:rgba(255,107,107,.42);
-  --color-info:#7db5ff;--color-info-soft:rgba(125,181,255,.14);--color-info-line:rgba(125,181,255,.4);
-  --elev-1:0 1px 0 rgba(255,255,255,.03) inset,0 8px 22px -14px rgba(0,0,0,.7);
-  --elev-2:0 1px 0 rgba(255,255,255,.04) inset,0 22px 48px -22px rgba(0,0,0,.85);
-  --shadow-overlay:0 28px 70px -20px rgba(0,0,0,.8);
-  --scrim:rgba(2,6,20,.66);
-  --glass-bg:rgba(14,26,62,.62);
-  --glass-bg-strong:rgba(12,23,55,.97);
-  --glass-border:rgba(150,172,255,.16);
-  --glass-edge:rgba(255,255,255,.06);
-  --wash:radial-gradient(900px 480px at 4% -12%,rgba(39,230,197,.1),transparent 62%),radial-gradient(900px 520px at 100% -14%,rgba(105,65,226,.26),transparent 64%);
-  --chart-1:#27e6c5;--chart-2:#9a82f0;--chart-3:#7db5ff;--chart-track:#16244f;
-  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a3b0d6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --focus-glow:rgba(39,230,197,.26);
+  --color-success:#5fd6a4;--color-success-soft:rgba(95,214,164,.13);--color-success-line:rgba(95,214,164,.36);--color-success-strong:#1f9e70;
+  --color-warning:#f2b84b;--color-warning-soft:rgba(242,184,75,.14);--color-warning-line:rgba(242,184,75,.4);
+  --color-danger:#ff6b6b;--color-danger-soft:rgba(255,107,107,.13);--color-danger-line:rgba(255,107,107,.42);
+  --color-info:#7db5ff;--color-info-soft:rgba(125,181,255,.13);--color-info-line:rgba(125,181,255,.4);
+  --elev-1:0 1px 0 rgba(255,255,255,.04) inset,0 1px 2px rgba(0,0,0,.45);
+  --elev-2:0 1px 0 rgba(255,255,255,.05) inset,0 12px 28px -10px rgba(0,0,0,.7);
+  --shadow-overlay:0 28px 70px -16px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.04);
+  --scrim:rgba(3,5,10,.66);
+  --glass-bg:rgba(20,25,37,.72);
+  --glass-bg-strong:rgba(20,25,37,.96);
+  --glass-border:rgba(255,255,255,.09);
+  --glass-edge:rgba(255,255,255,.05);
+  --wash:radial-gradient(900px 420px at 100% -12%,rgba(105,65,226,.16),transparent 66%),radial-gradient(700px 380px at 0% -14%,rgba(39,230,197,.05),transparent 64%);
+  --chart-1:#27e6c5;--chart-2:#9a82f0;--chart-3:#7db5ff;--chart-track:#1e2535;
+  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca8c6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 :root[data-theme="dark"][dir="rtl"],:root[dir="rtl"]{--font-sans:"Cairo","Segoe UI",Tahoma,"Noto Sans Arabic",Arial,sans-serif}
 

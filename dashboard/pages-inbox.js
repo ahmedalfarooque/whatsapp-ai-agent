@@ -51,6 +51,30 @@ function inboxBubble(m) {
     <div class="bubble-time">${esc(formatDate(m.at))}${delivery ? ` · ${esc(delivery)}` : ''}</div></div>`;
 }
 
+// Day separators in the transcript: "Today", "Yesterday", then the date. Purely presentational; the messages and their order are untouched.
+function inboxDayOf(value) {
+  if (!value) return null;
+  const iso = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T');
+  const date = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function inboxDayLabel(date) {
+  const start = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((start(new Date()) - start(date)) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+}
+function inboxThreadHtml(messages) {
+  let lastDay = '';
+  return messages.map((m) => {
+    const day = inboxDayOf(m.at);
+    const key = day ? day.toDateString() : '';
+    const sep = key && key !== lastDay ? `<div class="day-sep" role="separator">${esc(inboxDayLabel(day))}</div>` : '';
+    if (key) lastDay = key;
+    return sep + inboxBubble(m);
+  }).join('');
+}
 route('#/conversations', 'Conversations', 'Every conversation of this business — handled by the assistant, waiting for staff, with a staff member or resolved.', (view) => renderInbox(view, null));
 route(/^#\/conversations\/customer\/(?<id>\d+)$/, 'Conversations', 'Every conversation of this business — handled by the assistant, waiting for staff, with a staff member or resolved.', (view, params) => renderInbox(view, Number.parseInt(params.id, 10)));
 
@@ -218,6 +242,7 @@ async function renderInbox(view, selectedId) {
     el.innerHTML = `
       <div class="thread-head">
         <a class="btn small thread-back" href="#/conversations">← Conversations</a>
+        <span class="inbox-avatar" aria-hidden="true">${esc(InboxCore.initials(t.customer.name || ''))}</span>
         <div class="thread-title"><h3 dir="auto">${esc(customerName)}</h3>
           <p class="muted">${esc(t.customer.waId || t.customer.waIdMasked)}${t.customer.language ? ` · ${esc(t.customer.language.toUpperCase())}` : ''} · ${esc(t.account.name)}</p></div>
         <div class="thread-state">${badge(info.label, info.tone)}</div>
@@ -227,7 +252,7 @@ async function renderInbox(view, selectedId) {
       ${act.note ? `<p class="muted thread-note">${esc(act.note)}</p>` : ''}
       <div class="transcript" id="ib-transcript" tabindex="0" aria-label="Messages">
         ${t.hasMore ? '<button class="btn small" id="ib-earlier">Load earlier messages</button>' : ''}
-        ${t.messages.length ? t.messages.map(inboxBubble).join('') : emptyView('No messages yet.')}
+        ${t.messages.length ? inboxThreadHtml(t.messages) : emptyView('No messages yet.')}
       </div>
       ${act.composer ? `<form id="ib-form" class="reply-form" autocomplete="off">
         <label class="sr-only" for="ib-text">Reply to the customer</label>

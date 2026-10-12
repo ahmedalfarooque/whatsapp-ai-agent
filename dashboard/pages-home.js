@@ -100,7 +100,6 @@
 
   function alertHtml(card, i) {
     return `<article class="alert-card ${card.tone}" data-alert="${i}">
-      <div class="alert-icon">${icon(card.icon)}</div>
       <div class="alert-head"><h3>${esc(card.title)}</h3><span class="count-pill">${card.count}</span>
         <span class="alert-nav"><button type="button" data-dir="-1" aria-label="Previous ${esc(card.title)} item">${icon('left')}</button><button type="button" data-dir="1" aria-label="Next ${esc(card.title)} item">${icon('right')}</button></span></div>
       <p class="alert-main" data-main></p><p class="alert-sub" data-sub></p>
@@ -156,9 +155,6 @@
   const kpiHtml = (c) => `<a class="kpi ${c.k}" href="${c.href}"><div class="kpi-top"><span class="kpi-label">${esc(c.label)}</span><span class="kpi-icon">${icon(c.icon)}</span></div><div class="kpi-value">${esc(c.value)}</div><div class="kpi-foot">${c.foot}</div></a>`;
 
   // ---------------------------------------------------------------- content panels
-  // A calm automation mark (rings and a speech bubble in the accent colour), not a mascot.
-  const ROBOT = `<svg viewBox="0 0 96 96" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="48" cy="48" r="40" opacity=".22"/><circle cx="48" cy="48" r="29" opacity=".4"/><path d="M33 36h30a6 6 0 0 1 6 6v14a6 6 0 0 1-6 6H48l-9 8v-8h-6a6 6 0 0 1-6-6V42a6 6 0 0 1 6-6z"/><path d="M40 49h.01M48 49h.01M56 49h.01" stroke-width="4.2"/></svg>`;
-
   function activityPanel(d, state) {
     const a = d.activity;
     if (!a) return '';
@@ -172,7 +168,6 @@
     ];
     return `<section class="dpanel" aria-labelledby="dp-activity"><div class="dpanel-head"><span class="glyph">${icon('bolt')}</span><h3 id="dp-activity">Activity Log</h3><span class="live-chip">${SVG('M3 12h4l3-8 4 16 3-8h4', 'style="width:14px;height:14px"')}Live</span></div>
       <div class="activity-body">
-        <div class="mascot">${ROBOT}<div class="mascot-card"><b>${a.windows.today.replies.toLocaleString()}</b>replies today<br>automation is running</div></div>
         <div><div class="seg" role="tablist" aria-label="Activity period">${tabs.map(([k, l]) => `<button type="button" role="tab" data-tab="${k}" aria-selected="${state.tab === k}">${l}</button>`).join('')}</div>
           <div class="act-list">${rows.map(([cls, ic, label, n, href]) => `<a class="act-item ${cls}" href="${href}">${icon(ic)}<span class="t">${label}</span><b>${n.toLocaleString()}</b>${icon('right')}</a>`).join('')}</div></div>
       </div>
@@ -229,7 +224,7 @@
     let timer;
     let last = null;
 
-    const skeleton = () => `<div class="dash" aria-busy="true"><div class="alerts">${'<div class="dskel" style="height:116px"></div>'.repeat(3)}</div><div class="kpis">${'<div class="dskel" style="height:128px"></div>'.repeat(5)}</div><div class="dash-grid">${'<div class="dskel" style="height:340px"></div>'.repeat(4)}</div></div>`;
+    const skeleton = () => `<div class="dash" aria-busy="true"><div class="dskel" style="height:92px"></div><div class="dskel" style="height:104px"></div><div class="dash-main"><div class="dash-col"><div class="dskel" style="height:300px"></div><div class="dskel" style="height:240px"></div></div><div class="dash-col"><div class="dskel" style="height:210px"></div><div class="dskel" style="height:330px"></div></div></div></div>`;
 
     function heading(d) {
       const account = d ? d.account.name : (currentAccount() || {}).name;
@@ -244,9 +239,12 @@
       const alerts = buildAlerts(d, range);
       const kpis = buildKpis(d, range);
       view.innerHTML = `<div class="dash">
-        <div class="alerts" style="--n:${alerts.length}">${alerts.map(alertHtml).join('')}</div>
+        <div class="attn" style="--n:${alerts.length}" role="region" aria-label="Needs attention">${alerts.map(alertHtml).join('')}</div>
         <div class="kpis" style="--n:${kpis.length}">${kpis.map(kpiHtml).join('')}</div>
-        <div class="dash-grid">${activityPanel(d, state)}${requestsPanel(d, range)}${automationPanel(d, range)}${conversationsPanel(d)}</div>
+        <div class="dash-main">
+          <div class="dash-col">${conversationsPanel(d)}${requestsPanel(d, range)}</div>
+          <div class="dash-col">${activityPanel(d, state)}${automationPanel(d, range)}</div>
+        </div>
         <p class="dash-note">Figures are live from the database for ${esc(d.account.name)} · ${esc(rangeLabel(range))}${range === 'all' ? '' : ' compared with the previous ' + range + ' days'}. Updated ${esc(new Date(d.generatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}.</p>
       </div>`;
       wireAlerts(view, alerts);

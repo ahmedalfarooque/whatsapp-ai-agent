@@ -7,10 +7,9 @@ The whole interface is drawn from **one token file, `dashboard/tokens.css`**. It
 else defines a colour per theme: `ui.css`, `login.css` and `company.css` only read tokens (a test fails if a component stylesheet branches on the appearance, except a short
 documented list of swaps such as the logo lockup), and the former parallel `theme-dark.css` no longer exists.
 
-* **Light** is the default (`<html data-theme="light">`): a cool off-white canvas with a faint teal and violet wash, white cards, navy ink, fine borders, one soft shadow. Teal fills the
+* **Light** is the default (`<html data-theme="light">`): a cool slate canvas (#EEF0F5) with white cards and a white header and sidebar, so every panel is outlined by a hairline (#D9DEE9) and a small crisp contact shadow (white-on-grey is what keeps light themes readable), navy ink. Teal fills the
   primary action (navy label), purple marks the secondary emphasis (selected navigation, the sign-in hover) and the focus ring, coral is danger.
-* **Dark** is a real hierarchy, not one flat navy: canvas `#050B1F` < sidebar `#081029` < card `#0C1737` < raised row `#121F47` < hover/selected `#182858`. Cards are separated by that
-  step and a hairline, never by a glowing outline. Text is an off-white (`#EEF2FF`) with two quieter steps, teal is the accent, the semantic colours are tuned for the dark surfaces.
+* **Dark** is an ink-charcoal with a faint blue cast, stepped by lightness: canvas `#0A0D14` < sidebar `#0E121B` < card `#141925` < raised `#1B2131` < hover/selected `#242C40`. Cards are\n  separated by that step and a low-contrast hairline, never by a glowing outline. Text is an off-white (`#ECEFF7`) with three quieter steps; brand navy lives in the logo tile and the sign-in panel,\n  teal appears only for the primary action, the live state and links, and purple tints the selection.
 * **Semantic tokens** per appearance: surfaces, borders, text (4 steps), primary/accent/secondary, success/warning/danger/info each as text colour, soft tint and hairline, depth
   (`--elev-1/2`, `--shadow-overlay`), the scrim, glass, the canvas wash and the chart series. Contrast of every text, tone-on-tint, button label, control edge and focus ring pair is tested
   for both appearances (`tests/unit/dashboard/theme.test.ts`: 4.5:1 for text, 3:1 for control edges and the focus ring).
@@ -26,12 +25,14 @@ documented list of swaps such as the logo lockup), and the former parallel `them
 
 ### Shell and components
 
-* **Header** (`.topbar`): a glass panel with the account logo, the account line (name, masked number, status), the page title and description, and the controls (language, AI state,
-  theme, date range, user menu, settings). The controls are neutral raised pills; teal marks only the state that is on. The old full-width saturated gradient is gone.
-* **Sidebar**: one surface step above the canvas, small-caps mono group labels, line icons (never emoji), a purple-tinted selected item with a teal rail, and account cards with their own
-  logo, masked number and status dot. Long business names wrap to two lines instead of ending in an ellipsis.
-* **Home**: alert cards are neutral surfaces with a tone rail and a tone-tinted icon; KPI cards are neutral with a small teal or purple icon chip and the figure in the text colour. The
-  former cartoon mascot is a calm ring-and-bubble mark; avatars use a restrained deep palette.
+* **Header** (`.topbar`): a sticky bar spanning the work area, bounded by one hairline: the account logo, the page title with the account line under it (name, masked number, status), and 34 px controls
+  (language, AI state, theme, date range, user menu, settings) on the right. The page description stays in the document for assistive technology but is not drawn. Teal marks only the state that is on.
+  On phones the header sits in the page flow, the theme and account labels become screen-reader-only, and the controls take two rows.
+* **Sidebar**: one surface step above the canvas, semibold group labels in the body face, line icons (never emoji), a purple-tinted selected item (no side rail), and account rows with their own
+  logo, masked number and status dot; the selected account is lifted. Long business names wrap to two lines instead of ending in an ellipsis.
+* **Home**: one attention bar (connections, requests, AI and automation as three cells with a tone dot and a View action, stacked below 1240 px), one KPI strip (five cells, hairline dividers, no icon chips), then two
+  columns: the work (recent conversations, customer requests) on the left and the machine (activity with period tabs, AI and automation) on the right. Figures are plain and divided, not tinted tiles; the decorative mascot is gone.
+* **Conversations**: one bordered workspace split by a hairline (list | thread) that fills the viewport height; the thread has its own header (avatar, name, state, actions), day separators, bubbles by sender (customer, AI, automatic reply, staff) and a composer pinned to the bottom. Below 900 px it is list-then-thread with a back button.
 * **Shared**: panels, tables (sticky header, hairline rows), buttons (primary teal, tonal success/danger, ghost), fields, switches, tabs, badges and chips (tone tint + hairline), toasts
   (tone rail), dialogs (surface + scrim with a small blur), scrollbars — all token-driven, in both appearances and in RTL.
 
@@ -45,7 +46,7 @@ Source: the supplied brand guide `Synrtechs_DESIGN 1.pdf`; nothing was invented.
 | Teal | `#27E6C5` | primary action fill (navy label, 11:1), focus ring and accent in dark, selected-state rail, live indicators |
 | Purple | `#6941E2` | secondary emphasis: selected navigation tint, focus ring in light, the sign-in button's hover fill (white on it 6:1). Its text tint is `#B8A6F7` in dark and `#5A33D0` in light |
 | Coral | `#FF6B6B` | danger and errors |
-| Type | Geist, Space Mono, Cairo | Geist for Latin body text in both appearances, Space Mono for the small spaced labels, Cairo for Arabic (open licences, shipped in `assets/fonts` with `Geist-OFL.txt` and `Cairo-SpaceMono-OFL.txt`) |
+| Type | Geist, Space Mono, Cairo | Geist for Latin body text in both appearances, Space Mono kept for the sign-in page labels, Cairo for Arabic (open licences, shipped in `assets/fonts` with `Geist-OFL.txt` and `Cairo-SpaceMono-OFL.txt`) |
 
 Everything else (canvas, panels, hairlines, muted text, the text-safe teal `#08796E` for light, the semantic status colours) is **derived from the navy** and checked for contrast; the values are in
 `tokens.css`.
