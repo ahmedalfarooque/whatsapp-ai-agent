@@ -139,9 +139,13 @@ unchanged — rolling back to the base commit by itself if any proof fails. Migr
 database. Rehearse a migration first on a `/tmp` copy of the database (a `.backup` of it) with the archived target source, as described in the handoffs.
 
 ```powershell
-# from the canonical checkout: stage the script on the server, run the read-only preconditions, then the release
-# (the production-deploy gate applies to the agent; the owner runs these). The script is staged to a file first because a script fed to
-# `bash -s` over stdin is cut short by children that read stdin (npm, systemctl) — the run would end silently after the restart.
+# from the canonical checkout — the ONE command: reads the base from production (live HEAD, checked against the stamp), takes the target from
+# master == origin/master, stages the script and runs the rehearsal (--check-only, writes nothing); -Apply then runs the release itself.
+pwsh scripts/release-full.ps1                   # rehearsal
+pwsh scripts/release-full.ps1 -Apply            # rehearsal, then the release
+# what it does by hand (the production-deploy gate applies to the agent; the owner runs these). The script is staged to a file first because a
+# script fed to `bash -s` over stdin is cut short by children that read stdin (npm, systemctl) — the run would end silently after the restart.
+# release-full.sh runs ON the server only: `bash scripts/release-full.sh --check-only` on Windows aborts by design (no hashes, not the server).
 Get-Content -Raw scripts\release-full.sh | ssh -i $env:USERPROFILE\.ssh\oracle-whatsapp-ai.key ubuntu@130.110.112.192 "tr -d '\r' > /tmp/release-full.sh"
 ssh -i $env:USERPROFILE\.ssh\oracle-whatsapp-ai.key ubuntu@130.110.112.192 "bash /tmp/release-full.sh --base <live> --target <commit> --check-only"
 ssh -i $env:USERPROFILE\.ssh\oracle-whatsapp-ai.key ubuntu@130.110.112.192 "bash /tmp/release-full.sh --base <live> --target <commit>"

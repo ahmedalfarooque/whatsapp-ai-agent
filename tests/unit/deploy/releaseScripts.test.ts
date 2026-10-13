@@ -50,6 +50,39 @@ describe('release.ps1', () => {
   });
 });
 
+describe('release-full.ps1 (the full-release wrapper) and release-full.sh (the server-side script)', () => {
+  const wrapper = read('release-full.ps1');
+  const c = code(wrapper);
+  const sh = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'scripts', 'release-full.sh'), 'utf8');
+  it('is a rehearsal (--check-only) unless -Apply is given, and the release only follows a passed rehearsal', () => {
+    expect(wrapper).toMatch(/\[switch\]\$Apply/);
+    expect(c).toMatch(/--check-only/);
+    expect(c.indexOf('--check-only')).toBeLessThan(c.indexOf('if (-not $Apply)'));
+    expect(c).toMatch(/REHEARSAL FAILED[^\n]*exit 1/);
+    expect(c.indexOf('REHEARSAL PASSED')).toBeLessThan(c.indexOf('Ssh "bash $Remote --base $baseFull --target $targetFull"\n'));
+  });
+  it('takes the target from master == origin/master only, and the base from production itself (ssh live HEAD, cross-checked with the published stamp)', () => {
+    expect(c).toMatch(/differ; push or reconcile first/);
+    expect(c).toMatch(/is not master == origin\/master/);
+    expect(c).toContain('build-info.json');
+    expect(c).toMatch(/rev-parse HEAD/);
+    expect(c).toMatch(/its published stamp says/);
+    expect(c).toMatch(/merge-base --is-ancestor \$baseFull \$targetFull/);
+  });
+  it('stages the script with CRLF stripped, uses the documented key, and never touches port 3005 or runs the script locally', () => {
+    expect(c).toContain("tr -d '\\r' > $Remote");
+    expect(c).toContain('oracle-whatsapp-ai.key');
+    expect(c).not.toMatch(/\b3005\b/);
+    expect(c).not.toMatch(/bash scripts\/release-full\.sh/);
+  });
+  it('the server script explains its two hashes and refuses to run outside the production checkout', () => {
+    expect(sh).toMatch(/--base <commit production is live on> and --target <commit of origin\/master> are both required/);
+    expect(sh).toMatch(/pwsh scripts\/release-full\.ps1/);
+    expect(sh).toMatch(/abort server .* is not the production checkout/);
+    expect(sh.indexOf('abort server')).toBeLessThan(sh.indexOf('git -C $R remote get-url origin'));
+  });
+});
+
 describe('release-status.ps1', () => {
   it('is read-only: no write, restart, merge or file transfer anywhere', () => {
     const c = code(status);

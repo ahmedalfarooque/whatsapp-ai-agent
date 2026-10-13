@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # FULL production release of the WhatsApp AI Agent (code under src/, migrations, dashboard): run ON the Oracle server as ubuntu.
 #   bash scripts/release-full.sh --base <live commit> --target <commit on origin/master> [--check-only]
+# From the Windows checkout: `pwsh scripts/release-full.ps1 [-Target <commit>] [-Apply]` fills both hashes in (base = production's live HEAD, checked
+# against the published stamp), stages this file and runs the rehearsal; nothing runs locally.
 # When streamed over ssh, STAGE it first ("cat > /tmp/release-full.sh; bash /tmp/release-full.sh ..."): a script read by `bash -s` from stdin is cut
 # short by any child that reads stdin (npm, systemctl), which twice ended a run silently after a successful restart. Children here also get </dev/null.
 # Order (docs/ENVIRONMENTS_AND_RELEASES.md): guards -> verified backup (database .backup + integrity, accounts/, baileys-auth/, uploads/,
@@ -14,7 +16,8 @@ R=/home/ubuntu/whatsapp-ai-agent; D=/home/ubuntu/whatsapp-data; DB=$D/app.db; B=
 BASE=""; TARGET=""; CHECK=0
 while [ $# -gt 0 ]; do case "$1" in --base) BASE=$2; shift 2;; --target) TARGET=$2; shift 2;; --check-only) CHECK=1; shift;; *) echo "unknown arg $1"; exit 2;; esac; done
 abort() { echo "ABORT[$1]: $2"; exit 1; }
-[[ "$BASE" =~ ^[0-9a-f]{7,40}$ && "$TARGET" =~ ^[0-9a-f]{7,40}$ ]] || abort args "--base and --target must be commit hashes"
+[[ "$BASE" =~ ^[0-9a-f]{7,40}$ && "$TARGET" =~ ^[0-9a-f]{7,40}$ ]] || abort args "--base <commit production is live on> and --target <commit of origin/master> are both required and must be commit hashes. This script runs ON the server; from the Windows checkout use: pwsh scripts/release-full.ps1 [-Target <commit>] [-Apply] (it reads the base from production and stages this file)"
+[ -d "$R/.git" ] || abort server "$R is not the production checkout: this script runs on the Oracle server (from Windows: pwsh scripts/release-full.ps1)"
 [ "$PORT" = 3000 ] || abort port-guard "app port must be 3000"
 ss -ltn | grep -q ':3005 ' && echo "note: port 3005 belongs to another project and is left alone" || true
 [ "$(git -C $R remote get-url origin)" = "https://github.com/ahmedalfarooque/whatsapp-ai-agent.git" ] || abort repo "unexpected origin"
