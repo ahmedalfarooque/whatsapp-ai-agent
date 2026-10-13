@@ -50,8 +50,18 @@ echo "backup: $OUT ($(du -sh $OUT | cut -f1))"
 
 # ---- code
 git -C $R merge --ff-only "$TFULL" >/dev/null || abort merge "fast-forward failed"
-rollback() { echo "ROLLING BACK to ${HEAD:0:7}"; git -C $R checkout -q --detach "$HEAD"; (cd $R && npm run build --silent) || true; sudo systemctl restart $SVC || true; echo "rolled back (database migration, if any, is additive and kept; backup at $OUT)"; }
-if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --omit=dev --silent) || { rollback; abort deps "npm ci failed"; }; fi
+# Rollback puts the master branch itself back on the base commit (not a detached HEAD: the next release's "on master" guard must still pass) and
+# restores the dependency tree of that commit before rebuilding, so a dependency change in the failed target can never leave the base unbuildable.
+rollback() {
+  echo "ROLLING BACK to ${HEAD:0:7}"
+  git -C $R checkout -q -B master "$HEAD"
+  if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --silent) || echo "warning: npm ci for the base commit failed; the previous node_modules may be incomplete"; fi
+  (cd $R && npm run build --silent) || echo "warning: rebuild of the base commit failed; dist/ left as it was"
+  sudo systemctl restart $SVC || true
+  echo "rolled back (database migration, if any, is additive and kept; backup at $OUT)"
+}
+# A full install: `npm run build` needs the dev dependencies (typescript); production code only loads the runtime ones, as before.
+if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --silent) || { rollback; abort deps "npm ci failed"; }; fi
 (cd $R && npm run build --silent) || { rollback; abort build "build failed"; }
 # the build stamp the dashboard footer shows (ignored by Git; same shape the static launcher writes)
 printf '{"commit":"%s","fullCommit":"%s","branch":"master","environment":"production","releasedAt":"%s","writtenBy":"scripts/release-full.sh"}\n' "$(git -C $R rev-parse --short HEAD)" "$(git -C $R rev-parse HEAD)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > $R/dashboard/build-info.json
