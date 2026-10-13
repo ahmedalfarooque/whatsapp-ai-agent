@@ -274,7 +274,9 @@ export function getBusinessSettings(accountId: number = currentAccountId()): Bus
     supportedLanguages: row.supported_languages ? csvToList(row.supported_languages) : [],
     openRouterModel: row.open_router_model ?? env.OPENROUTER_MODEL,
     aiReplyLanguage: row.ai_reply_language,
-    openRouterVisionModel: row.open_router_vision_model ?? env.OPENROUTER_VISION_MODEL,
+    // Pictures go to the business's explicit vision model, else the shared env vision model, else the business's OWN chat model (never a
+    // free router that cannot take images: that is what produced "could not open the picture" on every business on 2026-10-13).
+    openRouterVisionModel: row.open_router_vision_model ?? (env.OPENROUTER_VISION_MODEL || row.open_router_model || env.OPENROUTER_MODEL),
     businessNameAr: row.business_name_ar,
     businessCategory: row.business_category,
     descriptionAr: row.description_ar,

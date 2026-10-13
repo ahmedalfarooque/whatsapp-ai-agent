@@ -17,6 +17,7 @@ import { describeMoment, nextOpening } from '../setup/hours';
 import { AUDIO_TRANSCRIPT_TOOL, audioContextLine, transcribeAudio, type AudioTranscription } from '../llm/audio';
 import { extractDocumentText, isExtractableDocument, type DocumentTextResult } from '../media/textExtractors';
 import { DOCUMENT_TEXT_TOOL, MEDIA_NOTE_TOOL, documentContextLine, videoContextLine } from '../llm/mediaContext';
+import { trimHistoryToBudget } from '../knowledge/select';
 import {
   getOrCreateActiveConversation,
   appendMessage,
@@ -369,7 +370,9 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
 
   // The model's memory of this customer in this business: this conversation only, the latest N messages, and nothing older than
   // CONVERSATION_MEMORY_HOURS (docs/AI_ASSISTANT.md). The stored conversation is untouched.
-  const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS);
+  // ...and never more text than HISTORY_PROMPT_CHARS: a long conversation drops its oldest turns rather than growing the prompt past the
+  // provider's per-request cap (production 2026-10-13: 14k-token prompts were refused with HTTP 402 while the credit was low).
+  const history = trimHistoryToBudget(getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS), env.HISTORY_PROMPT_CHARS);
   const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText });
 
   let finalText = '';
@@ -416,6 +419,15 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
       'agent loop failed for inbound message',
     );
     if (responseProblem) failureDetail = `AI failed; fallback sent (${responseProblem.describe()})`;
+    if (responseProblem?.reason === 'payment_required') {
+      // The OpenRouter credit is exhausted (or too low for this prompt): every message fails the same way until it is topped up. The customer
+      // hears the apology once per window; the activity names the real cause for staff (the dashboard shows "AI credits exhausted").
+      if (!allowCredentialFallback(currentAccountId(), msg.waId)) {
+        recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: 'OpenRouter credits exhausted (HTTP 402) — apology already sent recently; top up at openrouter.ai/settings/credits' });
+        return;
+      }
+      failureDetail = `AI failed; fallback sent (${responseProblem.describe()}). Top up OpenRouter credits (openrouter.ai/settings/credits).`;
+    }
     if (credentialProblem) {
       // The provider key is unusable: every message would fail the same way. Tell the customer once in a while, not on every message.
       if (!allowCredentialFallback(currentAccountId(), msg.waId)) {

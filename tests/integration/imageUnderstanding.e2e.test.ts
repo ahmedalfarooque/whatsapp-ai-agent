@@ -257,7 +257,7 @@ describe('pictures respect the same boundaries as text', () => {
     provider(() => answer(LABEL), () => answer('Got it.'));
     await processInboundMessage(picture(fresh, waId, 'is this yours?'), { knowledge: { sections: [], asPromptText: '' } });
     expect(visionCalls()).toHaveLength(1);
-    expect(visionCalls()[0]!.model).toBe(env.OPENROUTER_VISION_MODEL);
+    expect(visionCalls()[0]!.model).toBe(env.OPENROUTER_MODEL); // the fresh business's own chat model sees the picture (no separate vision model needed)
     expect(chatText(chatCalls()[0]!)).toContain('PICTURES THE CUSTOMER SENDS');
     expect(sent()).toHaveLength(1);
   });

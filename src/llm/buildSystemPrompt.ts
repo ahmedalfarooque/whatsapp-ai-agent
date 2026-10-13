@@ -12,6 +12,7 @@ import { realEstateSection } from '../realestate/promptSection';
 
 import { decideReplyLanguage } from './language';
 import { currentClosing, describeMoment, isOpenAt, nextOpening } from '../setup/hours';
+import { selectKnowledgeForPrompt } from '../knowledge/select';
 
 const IMAGE_RULES = `
 PICTURES THE CUSTOMER SENDS:
@@ -252,7 +253,7 @@ ${settings.hoursConfigured ? `BUSINESS HOURS (local time):\n${formatBusinessHour
 ${calendarTools ? `DEFAULT APPOINTMENT DURATION: ${settings.bookingDurationMinutes} minutes` : ''}
 ${policiesSection ? `\nBUSINESS POLICIES:\n${policiesSection}\n` : ''}
 BUSINESS KNOWLEDGE:
-${knowledge.asPromptText || '(no knowledge files loaded — say you do not have that information yet if asked about services/pricing/policies)'}
+${selectKnowledgeForPrompt(knowledge, context.latestText, env.KNOWLEDGE_PROMPT_CHARS).text || '(no knowledge files loaded — say you do not have that information yet if asked about services/pricing/policies)'}
 `;
 }
 

@@ -104,6 +104,9 @@ export function getAiState(accountId: number, now: number = Date.now()): AiState
     if (failure.detail.startsWith('AI credential problem') && !keyVerified) {
       return { ...known, state: 'error', label: 'AI key rejected', detail: 'The AI provider rejected the saved key since it was last saved' };
     }
+    if (/HTTP 402|credits exhausted/i.test(failure.detail)) {
+      return { ...known, verified: keyVerified, state: 'error', label: 'AI credits exhausted', detail: 'OpenRouter answered HTTP 402 (credit exhausted or too low for the prompt): top up credits at openrouter.ai/settings/credits; customers receive the fallback message until then' };
+    }
     const why = /\(([^)]*)\)/.exec(failure.detail)?.[1];
     return { ...known, verified: keyVerified, state: 'error', label: 'AI replies failing', detail: `The latest AI reply failed${why ? ` (${why})` : ''}; the customer received the fallback message` };
   }

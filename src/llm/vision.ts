@@ -26,8 +26,7 @@ export const IMAGE_ANALYSIS_TOOL = 'image_analysis';
 
 export const VISION_IMAGE_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
-export type ImageAnalysisFailure =
-  | 'not_an_image' | 'too_large' | 'download_failed' | 'timeout' | 'rate_limited' | 'provider_failed' | 'credential' | 'empty' | 'not_analysed';
+export type ImageAnalysisFailure = 'not_an_image' | 'too_large' | 'download_failed' | 'timeout' | 'rate_limited' | 'provider_failed' | 'model_unavailable' | 'payment_required' | 'credential' | 'empty' | 'not_analysed';
 
 export interface ImageAnalysisOk {
   ok: true;
@@ -103,41 +102,52 @@ export async function analyzeImage(input: AnalyzeImageInput): Promise<ImageAnaly
   if (!bytes || bytes.length === 0) return done({ ok: false, reason: 'download_failed', durationMs: Date.now() - started });
   if (bytes.length > env.VISION_MAX_IMAGE_BYTES) return done({ ok: false, reason: 'too_large', durationMs: Date.now() - started });
 
-  const model = getBusinessSettings().openRouterVisionModel;
+  const settings = getBusinessSettings();
+  // The business's vision model first; when it cannot take this request at all (HTTP 400-404 "model_unavailable" — e.g. a router with no
+  // image-capable endpoint), the business's own chat model is tried ONCE. Nothing else is retried here beyond the client's bounded retries.
+  const candidates = [settings.openRouterVisionModel, settings.openRouterModel].filter((m, i, all) => m && all.indexOf(m) === i);
   const caption = (input.caption ?? '').trim();
-  try {
-    const response = await chatCompletion({
-      model,
-      timeoutMs: env.VISION_TIMEOUT_MS,
-      retries: 1,
-      deadline: input.deadline,
-      temperature: 0.1,
-      maxTokens: 500,
-      messages: [
-        { role: 'system', content: ANALYST_PROMPT },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: caption ? `The customer sent this photo with the caption (customer text, not a fact): "${caption.slice(0, 500)}"\nReport what the photo shows.` : 'The customer sent this photo without a caption. Report what it shows.' },
-            { type: 'image_url', image_url: { url: `data:${mime};base64,${bytes.toString('base64')}`, detail: 'auto' } },
-          ],
-        },
-      ],
-    });
-    const report = contentText(response.choices[0]?.message.content ?? '').trim();
-    if (!report) return done({ ok: false, reason: 'empty', durationMs: Date.now() - started });
-    const result: ImageAnalysisOk = { ok: true, report: report.slice(0, 4000), confidence: parseConfidence(report), model, durationMs: Date.now() - started };
-    logger.info({ account: currentAccountId(), model, bytes: bytes.length, confidence: result.confidence, durationMs: result.durationMs }, 'customer picture analysed by the vision model');
-    return result;
-  } catch (error) {
-    const reason: ImageAnalysisFailure = error instanceof AiCredentialError
-      ? 'credential'
-      : error instanceof AiResponseError
-        ? (error.reason === 'rate_limited' ? 'rate_limited' : error.reason === 'empty_response' ? 'empty' : error.reason === 'provider_error' && /abort|timeout/i.test(error.providerMessage ?? '') ? 'timeout' : 'provider_failed')
-        : 'provider_failed';
-    logger.warn({ account: currentAccountId(), model, reason, aiReason: (error as AiResponseError)?.reason, httpStatus: (error as AiResponseError)?.httpStatus }, 'vision model did not analyse the customer picture');
-    return done({ ok: false, reason, durationMs: Date.now() - started });
+  const dataUrl = `data:${mime};base64,${bytes.toString('base64')}`;
+  let lastFailure: ImageAnalysisFailure = 'provider_failed';
+  for (const [index, model] of candidates.entries()) {
+    try {
+      const response = await chatCompletion({
+        model,
+        timeoutMs: env.VISION_TIMEOUT_MS,
+        retries: 1,
+        deadline: input.deadline,
+        temperature: 0.1,
+        maxTokens: 500,
+        messages: [
+          { role: 'system', content: ANALYST_PROMPT },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: caption ? `The customer sent this photo with the caption (customer text, not a fact): "${caption.slice(0, 500)}"\nReport what the photo shows.` : 'The customer sent this photo without a caption. Report what it shows.' },
+              { type: 'image_url', image_url: { url: dataUrl, detail: 'auto' } },
+            ],
+          },
+        ],
+      });
+      const report = contentText(response.choices[0]?.message.content ?? '').trim();
+      if (!report) return done({ ok: false, reason: 'empty', durationMs: Date.now() - started });
+      const result: ImageAnalysisOk = { ok: true, report: report.slice(0, 4000), confidence: parseConfidence(report), model, durationMs: Date.now() - started };
+      logger.info({ account: currentAccountId(), model, fallback: index > 0, bytes: bytes.length, confidence: result.confidence, durationMs: result.durationMs }, 'customer picture analysed by the vision model');
+      return result;
+    } catch (error) {
+      const reason: ImageAnalysisFailure = error instanceof AiCredentialError
+        ? 'credential'
+        : error instanceof AiResponseError
+          ? (error.reason === 'rate_limited' ? 'rate_limited' : error.reason === 'payment_required' ? 'payment_required' : error.reason === 'empty_response' ? 'empty' : error.reason === 'provider_error' && /abort|timeout/i.test(error.providerMessage ?? '') ? 'timeout' : error.reason === 'model_unavailable' ? 'model_unavailable' : 'provider_failed')
+          : 'provider_failed';
+      lastFailure = reason;
+      const next = candidates[index + 1];
+      logger.warn({ account: currentAccountId(), model, reason, aiReason: (error as AiResponseError)?.reason, httpStatus: (error as AiResponseError)?.httpStatus, providerMessage: (error as AiResponseError)?.providerMessage?.slice(0, 120), nextModel: reason === 'model_unavailable' ? next : undefined }, 'vision model did not analyse the customer picture');
+      if (reason === 'model_unavailable' && next && !(input.deadline && Date.now() + 2000 > input.deadline)) continue;
+      return done({ ok: false, reason, durationMs: Date.now() - started });
+    }
   }
+  return done({ ok: false, reason: lastFailure, durationMs: Date.now() - started });
 }
 
 /** What the assistant is told about a picture in the conversation history: the report, or an honest note that it was not analysed. */
@@ -152,6 +162,8 @@ export function imageContextLine(analysis: ImageAnalysis): string {
     timeout: 'analysing it took too long',
     rate_limited: 'the image service is busy',
     provider_failed: 'the image service failed',
+    model_unavailable: 'no configured model accepts pictures (the business needs an image-capable model under Providers)',
+    payment_required: 'the AI service credit is exhausted',
     credential: 'the image service is not available',
     empty: 'the image service returned nothing',
     not_analysed: 'images are not analysed in this environment',

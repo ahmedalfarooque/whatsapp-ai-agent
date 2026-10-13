@@ -7,7 +7,8 @@ export type AiResponseReason =
   | 'empty_response' // HTTP 200 but no text (and no tool call)
   | 'malformed_response' // not JSON, no choices, no message
   | 'rate_limited' // HTTP 429 / 408
-  | 'model_unavailable' // HTTP 400-404: this model/endpoint cannot serve the request (e.g. privacy or data-policy restrictions)
+  | 'payment_required' // HTTP 402: the OpenRouter credit is exhausted or too low for this prompt ("Prompt tokens limit exceeded")
+  | 'model_unavailable' // HTTP 400-404: this model/endpoint cannot serve the request (e.g. privacy or data-policy restrictions, no image input)
   | 'provider_error' // HTTP 5xx or another failure
   | 'tool_rounds_exhausted' // the model kept calling tools and never answered
   | 'time_budget_exceeded'; // the whole AI loop for one message ran out of time
@@ -25,12 +26,14 @@ export class AiResponseError extends Error {
 
   /** Short text for the activity log shown in the dashboard. */
   describe(): string {
+    if (this.reason === 'payment_required') return `OpenRouter credits exhausted or too low for this prompt, HTTP 402${this.model ? `, model ${this.model}` : ''}${this.providerMessage ? ` — ${this.providerMessage.slice(0, 120)}` : ''}`;
     return `${this.reason.replace(/_/g, ' ')}${this.httpStatus ? `, HTTP ${this.httpStatus}` : ''}${this.model ? `, model ${this.model}` : ''}`;
   }
 }
 
 export function reasonForHttpStatus(status: number): AiResponseReason {
   if (status === 429 || status === 408) return 'rate_limited';
+  if (status === 402) return 'payment_required';
   if (status >= 500) return 'provider_error';
   if (status >= 400) return 'model_unavailable';
   return 'provider_error';

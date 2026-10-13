@@ -71,8 +71,17 @@ const envSchema = z
 
     OPENROUTER_API_KEY: z.string().optional().default(''),
     OPENROUTER_MODEL: z.string().default('openrouter/free'),
-    /** The model that receives the actual image bytes when a customer sends a picture. Must accept image input (openrouter/free does: it routes to an image-capable free model). */
-    OPENROUTER_VISION_MODEL: z.string().default('openrouter/free'),
+    /** The model that receives the actual image bytes when a customer sends a picture. Empty (the default) = the business's own chat model
+     *  (which must then accept image input, as openai/gpt-4.1-mini does). Production evidence 2026-10-13: `openrouter/free` answers HTTP 404
+     *  "model_unavailable" to image requests, so it is NOT a safe default for pictures. */
+    OPENROUTER_VISION_MODEL: z.string().optional().default(''),
+    /** Prompt size guards (characters): the knowledge base is selected by relevance within this budget, the history is trimmed to this budget,
+     *  and at most this many business documents (each cut to this length) are pasted into a prompt. A prompt that grows without bound hits the
+     *  provider's per-request token cap (OpenRouter answers HTTP 402 "Prompt tokens limit exceeded" when the credit is low). */
+    KNOWLEDGE_PROMPT_CHARS: z.coerce.number().int().positive().default(16000),
+    HISTORY_PROMPT_CHARS: z.coerce.number().int().positive().default(12000),
+    DOCUMENTS_PROMPT_COUNT: z.coerce.number().int().positive().default(6),
+    DOCUMENT_PROMPT_CHARS: z.coerce.number().int().positive().default(3000),
     /** One image-analysis call may take this long (the whole message still obeys AI_LOOP_TIMEOUT_MS). */
     VISION_TIMEOUT_MS: z.coerce.number().int().positive().default(25000),
     /** Pictures larger than this are not analysed (WhatsApp images are usually well under 2 MB). */

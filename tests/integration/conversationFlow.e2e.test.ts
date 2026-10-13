@@ -218,6 +218,24 @@ describe('end-to-end conversation flow (mocked external services)', () => {
       expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error', detail: 'AI failed; fallback sent (model unavailable, HTTP 404, model openrouter/free)' });
     });
 
+    it('PRODUCTION 2026-10-13: an exhausted OpenRouter credit (HTTP 402) is named for staff, the customer hears the apology ONCE per window, and later messages are not spammed with it', async () => {
+      const waId = '15552220017';
+      preselectLanguage(waId);
+      vi.mocked(chatCompletion).mockRejectedValue(new AiResponseError('payment_required', 402, 'openai/gpt-4.1-mini', 'Prompt tokens limit exceeded: 14140 > 10822. To increase, visit https://openrouter.ai/settings/credits'));
+      await processInboundMessage(inbound(waId, 'wamid.credit1', 'I want to sell my building'), { knowledge });
+      const reply = String(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1]);
+      expect(reply).toMatch(/went wrong/i);
+      expect(reply).not.toMatch(/402|credit|openrouter|token/i);
+      expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error' });
+      expect(activityFor(waId).at(-1)!.detail).toMatch(/^AI failed; fallback sent \(OpenRouter credits exhausted or too low for this prompt, HTTP 402, model openai\/gpt-4\.1-mini — Prompt tokens limit exceeded/);
+      expect(activityFor(waId).at(-1)!.detail).toContain('openrouter.ai/settings/credits');
+      const sentBefore = vi.mocked(sendTextMessage).mock.calls.length;
+      await processInboundMessage(inbound(waId, 'wamid.credit2', 'what services do you offer?'), { knowledge });
+      expect(vi.mocked(sendTextMessage).mock.calls.length).toBe(sentBefore); // no second apology within the window
+      expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'suppressed' });
+      expect(activityFor(waId).at(-1)!.detail).toMatch(/credits exhausted \(HTTP 402\)/);
+    });
+
     it('a model that never stops calling tools is cut off at the round cap and answered with the fallback, not a fake success', async () => {
       const waId = '15552220008';
       preselectLanguage(waId);

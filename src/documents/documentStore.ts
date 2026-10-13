@@ -321,10 +321,13 @@ export function documentsForAiContext(db: Database.Database = getDb(), accountId
   } catch {
     /* older databases have no catalogue table */
   }
+  // Bounded: at most DOCUMENTS_PROMPT_COUNT documents, each cut to DOCUMENT_PROMPT_CHARS, so documents alone can never push a prompt past
+  // the provider's per-request token cap. The newest active documents win.
   return listDocuments({ status: 'active', accountId }, db)
     .filter((d) => !catalogueDocs.has(d.id))
     .filter((d) => (d.visibility === 'ai_knowledge' || d.visibility === 'customer') && d.extracted_text)
-    .map((d) => ({ title: d.title || d.original_name, text: d.extracted_text!.slice(0, 4000), customerVisible: d.visibility === 'customer' }));
+    .slice(0, env.DOCUMENTS_PROMPT_COUNT)
+    .map((d) => ({ title: d.title || d.original_name, text: d.extracted_text!.slice(0, env.DOCUMENT_PROMPT_CHARS), customerVisible: d.visibility === 'customer' }));
 }
 
 /** Titles of documents customers may be told about (never internal ones). */

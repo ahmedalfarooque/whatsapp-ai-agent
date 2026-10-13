@@ -1,3 +1,10 @@
+> **Incident 2026-10-13 (pictures "could not be opened", "something went wrong").** Two causes, both fixed in code: (1) the shared vision default was
+> openrouter/free, which answers HTTP 404 to image input — pictures now go to the business's own chat model unless a vision model is set, and a
+> model that refuses pictures falls back to the chat model once; (2) OpenRouter answered HTTP 402 "Prompt tokens limit exceeded" because the
+> account's credit was nearly exhausted *and* prompts were ~14k tokens — prompts are now bounded (KNOWLEDGE_PROMPT_CHARS, HISTORY_PROMPT_CHARS,
+> DOCUMENTS_PROMPT_COUNT / DOCUMENT_PROMPT_CHARS), a 402 is shown as "AI credits exhausted" on the dashboard and apologised for once per window.
+> Topping up the OpenRouter credit is the owner's action.
+
 # The AI assistant: how a free-text message is answered
 
 A customer's message reaches the assistant only when the guided menu has no rule for it (a number, a menu word, a language word, a
