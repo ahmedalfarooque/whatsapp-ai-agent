@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # FULL production release of the WhatsApp AI Agent (code under src/, migrations, dashboard): run ON the Oracle server as ubuntu.
 #   bash scripts/release-full.sh --base <live commit> --target <commit on origin/master> [--check-only]
+# When streamed over ssh, STAGE it first ("cat > /tmp/release-full.sh; bash /tmp/release-full.sh ..."): a script read by `bash -s` from stdin is cut
+# short by any child that reads stdin (npm, systemctl), which twice ended a run silently after a successful restart. Children here also get </dev/null.
 # Order (docs/ENVIRONMENTS_AND_RELEASES.md): guards -> verified backup (database .backup + integrity, accounts/, baileys-auth/, uploads/,
 # knowledge/, .env) -> git merge --ff-only -> npm ci only if package files changed -> npm run build -> restart ONLY whatsapp-ai-agent ->
 # proof (health, readiness, port 3000 once, port 3005 untouched, migrations, admin/credential/knowledge/baileys-identity fingerprints).
@@ -55,17 +57,17 @@ git -C $R merge --ff-only "$TFULL" >/dev/null || abort merge "fast-forward faile
 rollback() {
   echo "ROLLING BACK to ${HEAD:0:7}"
   git -C $R checkout -q -B master "$HEAD"
-  if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --silent) || echo "warning: npm ci for the base commit failed; the previous node_modules may be incomplete"; fi
-  (cd $R && npm run build --silent) || echo "warning: rebuild of the base commit failed; dist/ left as it was"
-  sudo systemctl restart $SVC || true
+  if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --silent </dev/null) || echo "warning: npm ci for the base commit failed; the previous node_modules may be incomplete"; fi
+  (cd $R && npm run build --silent </dev/null) || echo "warning: rebuild of the base commit failed; dist/ left as it was"
+  sudo systemctl restart $SVC </dev/null || true
   echo "rolled back (database migration, if any, is additive and kept; backup at $OUT)"
 }
 # A full install: `npm run build` needs the dev dependencies (typescript); production code only loads the runtime ones, as before.
-if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --silent) || { rollback; abort deps "npm ci failed"; }; fi
-(cd $R && npm run build --silent) || { rollback; abort build "build failed"; }
+if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --silent </dev/null) || { rollback; abort deps "npm ci failed"; }; fi
+(cd $R && npm run build --silent </dev/null) || { rollback; abort build "build failed"; }
 # the build stamp the dashboard footer shows (ignored by Git; same shape the static launcher writes)
 printf '{"commit":"%s","fullCommit":"%s","branch":"master","environment":"production","releasedAt":"%s","writtenBy":"scripts/release-full.sh"}\n' "$(git -C $R rev-parse --short HEAD)" "$(git -C $R rev-parse HEAD)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > $R/dashboard/build-info.json
-sudo systemctl restart $SVC
+sudo systemctl restart $SVC </dev/null
 for i in $(seq 1 30); do sleep 1; [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health)" = 200 ] && break; done
 
 # ---- proof (every probe is tolerant: a failed curl yields "000" and is judged below; under `set -e` an unguarded failure here would
