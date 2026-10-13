@@ -83,6 +83,13 @@ describe('release-full.ps1 (the full-release wrapper) and release-full.sh (the s
     expect(c).not.toMatch(/\b3005\b/);
     expect(c).not.toMatch(/bash scripts\/release-full\.sh/);
   });
+  it('REGRESSION 2026-10-13 (4d5c9ce): under set -e every `grep -c` count in the server script tolerates a zero count (grep exits 1 then); nothing on port 3005 ended the proof silently after the restart', () => {
+    const counts = [...sh.matchAll(/grep -c [^\n)]*/g)].map((m) => m[0]);
+    expect(counts.length).toBeGreaterThan(0);
+    for (const c of counts) expect({ c, guarded: /\|\| true/.test(c) }).toEqual({ c, guarded: true });
+    expect(sh).toMatch(/set -e/);
+    expect(sh.indexOf('L3005=$(ss -ltn | grep -c \':3005 \' || true)')).toBeGreaterThan(sh.indexOf('systemctl restart $SVC'));
+  });
   it('the server script explains its two hashes and refuses to run outside the production checkout', () => {
     expect(sh).toMatch(/--base <commit production is live on> and --target <commit of origin\/master> are both required/);
     expect(sh).toMatch(/pwsh scripts\/release-full\.ps1/);

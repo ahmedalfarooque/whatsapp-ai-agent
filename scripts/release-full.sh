@@ -77,7 +77,9 @@ for i in $(seq 1 30); do sleep 1; [ "$(curl -s -o /dev/null -w '%{http_code}' ht
 # end the script silently AFTER the restart, leaving the release in place but unproven — which is what happened on 2026-10-13)
 H=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health || echo 000); RD=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/readiness || echo 000)
 PUB=$(curl -s -o /dev/null -w '%{http_code}' https://whatsapp.alfarooque.com/health || echo 000)
-L3000=$(ss -ltn | grep -c ":$PORT "); L3005=$(ss -ltn | grep -c ':3005 ')
+# `grep -c` exits 1 when it counts ZERO lines: with nothing listening on 3005 (the other project stopped) the 4d5c9ce release of
+# 2026-10-13 ended silently right here, after the restart and before the proof. `|| true` keeps the count and ignores the status.
+L3000=$(ss -ltn | grep -c ":$PORT " || true); L3005=$(ss -ltn | grep -c ':3005 ' || true)
 AFTER=$(fp)
 echo "after: health=$H readiness=$RD public=$PUB listen3000=$L3000 listen3005=$L3005 service=$(systemctl is-active $SVC) head=$(git -C $R rev-parse --short HEAD) migrations=$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM schema_migrations;') last=$(sqlite3 "file:$DB?mode=ro" 'SELECT id FROM schema_migrations ORDER BY id DESC LIMIT 1;')"
 echo "fingerprints after:  $AFTER"
