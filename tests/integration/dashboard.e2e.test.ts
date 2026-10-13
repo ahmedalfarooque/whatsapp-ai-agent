@@ -720,11 +720,11 @@ describe('dashboard', () => {
     await agent.post('/api/dashboard/ai/configure').send({ model: 'openrouter/free' });
   });
 
-  it('the build stamp is served even without a release file: it names an ISOLATED local environment and the production window, never cached; the accounts list carries its server time', async () => {
+  it('the build stamp is served even without a release file: it names the LEGACY isolated environment and the one supported command, never cached; the accounts list carries its server time', async () => {
     const stamp = await request(app).get('/dashboard/build-info.json');
     expect(stamp.status).toBe(200);
     expect(stamp.headers['cache-control']).toContain('no-store');
-    expect(stamp.body).toMatchObject({ environment: 'local-isolated', dataSource: 'local-database', stamped: false, productionWindow: 'http://workspace.localhost:3100/dashboard' });
+    expect(stamp.body).toMatchObject({ environment: 'local-isolated', dataSource: 'local-database', stamped: false, supportedCommand: 'npm run dev' });
     expect(typeof stamp.body.commit).toBe('string');
     const accounts = await agent.get('/api/dashboard/accounts');
     expect(accounts.status).toBe(200);

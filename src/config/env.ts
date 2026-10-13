@@ -37,7 +37,7 @@ export const META_CLOUD_API_REQUIRED_KEYS = [
  * Credentials required for the real AI provider regardless of the WhatsApp
  * transport. OPTIONAL at the schema level (so development can start without
  * them) but mandatory whenever NODE_ENV=production. They must never be
- * required in development/test — that's what lets `npm run dev` start with
+ * required in development/test — that's what lets the legacy local backend (`npm run legacy:isolated-backend`) start with
  * mock providers (see src/whatsapp/client.ts, src/llm/openRouterClient.ts,
  * src/calendar/availability.ts / booking.ts) and no real credentials.
  */
@@ -156,7 +156,7 @@ const envSchema = z
     // Google Calendar is optional for deployments that do not enable it; in
     // that case calendar operations deliberately remain on the mock provider.
     // Development and
-    // test never require them — this is what makes `npm run dev` safe to
+    // test never require them — this is what makes the legacy local backend safe to
     // start without Meta/OpenRouter/Google credentials, and is also why
     // this check must never be loosened to cover 'production' accidentally
     // matching via string coercion or a typo — it's an exact enum compare.

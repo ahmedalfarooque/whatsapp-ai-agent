@@ -143,8 +143,8 @@ const UNAUTHENTICATED_AUTH_ROUTES = ['/auth/status', '/auth/setup', '/auth/login
 export function createDashboardRouter(): Router {
   const router = Router();
   const dashboardDir = path.join(__dirname, '..', '..', 'dashboard');
-  // Stamp for a checkout that has no release stamp: this process's own commit, computed once. It is an isolated environment by definition
-  // (the release scripts always write the file on production), and it says so, with the documented way to look at production's data.
+  // Stamp for a checkout that has no release stamp: this process's own commit, computed once. It is the LEGACY isolated environment by definition
+  // (the release scripts always write the file on production), and it says so, naming the one supported local command (`npm run dev`).
   let localStamp: Record<string, unknown> | null = null;
   function localBuildInfo(): Record<string, unknown> {
     if (!localStamp) {
@@ -155,7 +155,7 @@ export function createDashboardRouter(): Router {
         fullCommit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
         branch = execFileSync('git', ['-C', root, 'branch', '--show-current'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       } catch { /* not a git checkout (e.g. a packaged copy): the stamp still names the environment */ }
-      localStamp = { commit: fullCommit ? fullCommit.slice(0, 7) : 'unknown', fullCommit: fullCommit || null, branch: branch || null, environment: 'local-isolated', dataSource: 'local-database', stamped: false, productionWindow: 'http://workspace.localhost:3100/dashboard', generatedAt: new Date().toISOString() };
+      localStamp = { commit: fullCommit ? fullCommit.slice(0, 7) : 'unknown', fullCommit: fullCommit || null, branch: branch || null, environment: 'local-isolated', dataSource: 'local-database', stamped: false, supportedCommand: 'npm run dev', generatedAt: new Date().toISOString() };
     }
     return localStamp;
   }

@@ -30,24 +30,34 @@ whether a WhatsApp session directory exists on this machine.
 * **Data**: production's database, behind production's authenticated backend, is the only authoritative copy of the businesses, customers and connection states. Nothing is
   exported, mirrored or snapshotted into other environments, and production alone owns the live WhatsApp sessions.
 
-### The canonical local URL: the local window (`scripts/dev-proxy.cjs`)
+### The one local command: `npm run dev` (the local window, `scripts/dev.cjs` → `scripts/dev-proxy.cjs`)
 
-**`http://workspace.localhost:3100/dashboard`** is the one local address to use. Start it with the launcher, which checks port 3100 first, identifies
-whatever listens there by PID and command line, reuses a proxy of this checkout, refuses to touch anything else (a stale proxy from another checkout is
-reported and stopped only with `-Replace`), starts the proxy when needed, proves the window answers with this checkout's commit and that production is
-reachable, prints commit / mode / data source / "no local storage", and opens the browser. `http://localhost:3000` is the ISOLATED backend (next section),
-a different mode with different data; the launcher reports what listens there and leaves it alone.
+From the checkout root (`D:\PROJECTS\WhatsApp AI Agent` on the owner's machine) **`npm run dev`** starts the one supported local application and opens the browser on
+the port it chose. Port order: **3000, then 3100, 3200, 3300, 3400**; **3005 is never probed, bound or opened** (another project). For each candidate the launcher first
+identifies what already listens there through its `/dashboard/build-info.json`: a window of **this checkout** (the stamp names this repository root) is **reused** — the
+browser opens on it and the command exits, so running `npm run dev` twice never produces two instances; a window of another checkout, the legacy isolated backend or
+any unrelated program is reported with its PID and left alone, and the next port is tried. A port is taken only by binding it, so two launchers started at the same
+moment cannot both win: the loser re-identifies the winner and reuses it. The window runs **in the launcher's own process** — Ctrl+C stops exactly that, nothing is
+spawned, and a failed start closes the server before exiting non-zero, so nothing is ever orphaned.
 
-```powershell
-pwsh scripts/local-window.ps1            # canonical: read-only window on production's data, opens the browser
-pwsh scripts/local-window.ps1 -Write     # the proxy allows the approved business-content writes (--write-business-data)
-pwsh scripts/local-window.ps1 -Stop      # stops the proxy this checkout started (a positively identified one only)
-npm run window                           # the bare proxy (same as node scripts/dev-proxy.cjs), for other shells
-node scripts/dev-proxy.cjs --check       # prints what it would do and exits
+It prints: repository root and commit (+ uncommitted-change count), entry point and PID, the chosen port and the order it came from, the build commit the window
+serves, the data source (`https://whatsapp.alfarooque.com`, read through production's own login and permissions), the mode (`read-only` / `business-data`), the
+environment (`local-ui`, no local database, no local WhatsApp session), production's `/health` result, and the URL. The URL is **`http://localhost:<port>/dashboard`**;
+the window redirects it to `http://workspace.localhost:<port>/dashboard`, a loopback name every browser resolves without a hosts-file entry, and serves data only on
+that name, so the production session cookie is scoped to it and never reaches another local web app on any port.
+
+```bash
+npm run dev                           # read-only window on production's data (the normal case)
+npm run dev -- --write-business-data  # the approved business-content writes go to production; connections, sending, users, keys stay blocked
+npm run dev -- --no-open              # do not open the browser
+npm run dev -- --port 3200            # exactly this port (never 3005)
+npm run dev -- --status               # report what is on the candidate ports and exit; nothing is started
 ```
 
-When production cannot be reached the proxy answers `502 upstream_unreachable` and the dashboard shows that error; it never falls back to local data
-(there is none in this mode). The `.claude/launch.json` preview configurations are `local-window` (canonical) and `isolated-backend`.
+If no candidate can be used it prints `NO PORT AVAILABLE` with one line per port (who holds it) and exits 1 without starting or stopping anything.
+When production cannot be reached the proxy answers `502 upstream_unreachable` and the dashboard shows "The application server cannot be reached" with
+**Retry**; it never falls back to local data (there is none in this mode) and never shows the first-run setup form. The `.claude/launch.json` preview
+configuration is `dev` (the same command with `--no-open`, previewed at `http://localhost:3000`).
 
 Sign in with your normal production account. The proxy serves the dashboard files from **this checkout** (so your uncommitted UI work is what you see) and forwards the
 `/api/dashboard/...` calls to production's backend over HTTPS. The four businesses, their company information and their **live** connection status are therefore production's, read
@@ -55,15 +65,20 @@ through production's own login, permissions and per-account isolation. There is 
 
 What it refuses, regardless of who is signed in (see `decide()` in the script and `tests/unit/deploy/devProxy.test.ts`): starting, pairing, enabling, disabling, creating or deleting a WhatsApp
 account or session; showing a pairing QR code; sending any WhatsApp message (replies, take-over, quotation send, notification retry); users, passwords, credentials, API keys and system settings; and
-**every** write unless `--write-business-data` is given, in which case only the business-content operations in `BUSINESS_WRITES`. It listens on `127.0.0.1` only, accepts only the host
-`workspace.localhost:<port>` (so the session cookie never reaches another local app), never logs request or response bodies, and refuses port 3005. A banner above every page says
-`Local window · Data: PRODUCTION (live) …` so a production record is never mistaken for test data.
+**every** write unless `--write-business-data` is given, in which case only the business-content operations in `BUSINESS_WRITES`. It listens on `127.0.0.1` only, serves only the host
+`workspace.localhost:<port>` (so the session cookie never reaches another local app; `localhost`/`127.0.0.1` on the same port are redirected there, any other host gets 421), never logs
+request or response bodies, and refuses port 3005. A banner above every page says `Local window · Data: PRODUCTION (live) …` so a production record is never mistaken for test data.
 
-### Isolated local backend (own database)
+Stopping: Ctrl+C in the terminal that runs `npm run dev`. Recovery when production is down: leave the window running, fix production (section "Releases" / the server), press Retry.
+Recovery when a port is held by a crashed window of this checkout: it no longer answers `build-info.json`, so the launcher reports the PID and moves to the next port; end that
+process yourself if you want the port back — the launcher never terminates anything.
 
-`npm run build && npm start` with a local `.env` (see below), then `node scripts/build-info.cjs` once per checkout state (it stamps `dashboard/build-info.json` with the commit; ignored by Git).
-Own database, own sessions, no production data. The banner says `Isolated local environment · Own local database, not production data`.
-If you pair a **development** WhatsApp number there, it is labelled as such by being on this machine's database only; never pair a production number here.
+### LEGACY: isolated local backend (own database) — not part of the normal workflow
+
+`npm run legacy:isolated-backend` (`tsx watch src/index.ts`, or `npm run build && npm start`) with a local `.env` runs the backend itself on **this machine's** `data/app.db`, with its
+own test accounts and sessions and **no production data**. It is kept for backend work that needs a disposable database (migrations, pipeline tests with the mock providers); it is
+not reachable from `npm run dev`, and its banner says `LEGACY isolated local environment · Own local database, NOT production data · The supported application is "npm run dev"`.
+It takes port 3000 if free; `npm run dev` then identifies it there and uses 3100 instead. Never pair a production WhatsApp number on it.
 
 ### Live sync of accounts and connection states
 
@@ -80,8 +95,8 @@ copied and nothing flows back. The server has no push channel; this is bounded p
 | --- | --- |
 | Footer `Build 2ebc5bd · Production`, no banner | production |
 | Banner `Local window · UI from commit … · Data: PRODUCTION (live), read-only` | the proxy: this checkout's UI on production's data |
-| Banner `Isolated local environment · Own local database` | a local backend |
-| Footer `Build <commit> · Isolated local environment` + banner naming `workspace.localhost:3100` | a local backend whose stamp the server generated itself (no release file) |
+| Banner `LEGACY isolated local environment · Own local database, NOT production data` | the legacy local backend (`npm run legacy:isolated-backend`) |
+| Footer `Build <commit> · LEGACY isolated local environment` + banner naming `npm run dev` | a legacy local backend whose stamp the server generated itself (no release file) |
 | Footer `Build: not stamped` | a release made before build stamps existed (the next release adds the stamp) |
 
 The stamp is `dashboard/build-info.json`, written by the release script on the server (and by the proxy for itself), never committed. The same commit shown on two environments means they run the same code.
@@ -161,7 +176,7 @@ The database is not part of a static rollback because a static release never cha
 
 ## What is deliberately different between environments
 
-For an **isolated local backend**: database contents, accounts, customers, conversations, connection statuses, `.env` values, WhatsApp sessions, uploads, per-account knowledge files, logs and backups.
+For the **legacy isolated local backend**: database contents, accounts, customers, conversations, connection statuses, `.env` values, WhatsApp sessions, uploads, per-account knowledge files, logs and backups.
 `node scripts/env-report.cjs` and the production audit show these; none of them is a defect. The **local window** (proxy) differs from production in exactly one way: the UI files come from your checkout.
 
 ## What is never copied, anywhere

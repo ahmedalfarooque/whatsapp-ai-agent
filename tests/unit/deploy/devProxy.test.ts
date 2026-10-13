@@ -96,19 +96,29 @@ describe('the local server (against a disposable upstream)', () => {
   });
   afterAll(async () => { for (const s of [readOnly, writeMode, upstream]) await new Promise((r) => s.close(() => r(null))); });
 
-  it('answers only on workspace.localhost:<port> (cookie scope and DNS-rebinding guard)', async () => {
-    for (const host of ['localhost:1', '127.0.0.1:1', 'evil.example']) {
+  it('serves only workspace.localhost:<port> (cookie scope and DNS-rebinding guard); localhost/127.0.0.1 on the same port are redirected there, nothing else is answered', async () => {
+    const port = readOnly.proxyState.port;
+    for (const host of [`localhost:${port}`, `127.0.0.1:${port}`]) {
+      const r = await call(readOnly, 'GET', '/dashboard?x=1', {}, host);
+      expect(r.status, host).toBe(302);
+      expect(r.headers.location, host).toBe(`http://workspace.localhost:${port}/dashboard?x=1`);
+      expect(r.body, host).toBe('');
+    }
+    expect((await call(readOnly, 'GET', '/', {}, `localhost:${port}`)).headers.location).toBe(`http://workspace.localhost:${port}/dashboard`);
+    expect((await call(readOnly, 'GET', '/api/dashboard/accounts', {}, `localhost:${port}`)).status).toBe(302); // data is never served on the loopback name
+    expect((await call(readOnly, 'POST', '/api/dashboard/auth/login', {}, `localhost:${port}`)).status).toBe(421);
+    for (const host of ['localhost:1', '127.0.0.1:1', 'evil.example', `evil.example:${port}`]) {
       const r = await call(readOnly, 'GET', '/dashboard', {}, host);
       expect(r.status, host).toBe(421);
     }
   });
 
-  it('serves the dashboard from THIS checkout, and a build identifier that names the commit and the data source', async () => {
+  it('serves the dashboard from THIS checkout, and a build identifier that names the commit, the data source and the checkout', async () => {
     const page = await call(readOnly, 'GET', '/dashboard');
     expect(page.status).toBe(200);
     expect(page.body).toBe(readFileSync(path.resolve(__dirname, '..', '..', '..', 'dashboard', 'index.html'), 'utf8'));
     const info = JSON.parse((await call(readOnly, 'GET', '/dashboard/build-info.json')).body);
-    expect(info).toMatchObject({ environment: 'local-ui', dataSource: 'production', mode: 'read-only' });
+    expect(info).toMatchObject({ environment: 'local-ui', dataSource: 'production', mode: 'read-only', root: path.resolve(__dirname, '..', '..', '..') });
     expect(info.commit).toMatch(/^[0-9a-f]{7,}$/);
     expect((await call(readOnly, 'GET', '/dashboard/../package.json')).status).toBeGreaterThanOrEqual(400);
     expect((await call(readOnly, 'GET', '/dashboard/%2e%2e/package.json')).status).toBeGreaterThanOrEqual(400);

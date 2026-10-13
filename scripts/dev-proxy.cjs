@@ -2,8 +2,9 @@
 /**
  * Local dashboard on PRODUCTION DATA — one source of truth, no copies.
  *
- *   node scripts/dev-proxy.cjs [--port 3100] [--write-business-data] [--check]
- *   then open  http://workspace.localhost:3100/dashboard   and sign in with your normal production account.
+ *   npm run dev                      <- the supported command (scripts/dev.cjs runs this server in-process on the first free port of 3000, 3100, 3200, ...)
+ *   node scripts/dev-proxy.cjs [--port 3100] [--write-business-data] [--check]   <- the bare server, one fixed port, no port selection, no browser
+ *   then open  http://localhost:<port>/dashboard  (redirected to http://workspace.localhost:<port>/dashboard) and sign in with your normal production account.
  *
  * What it is: a tiny local web server. It serves the dashboard (HTML/CSS/JS) from THIS checkout, so you see your local, uncommitted UI work immediately,
  * and it forwards every data request (/api/dashboard/...) to production's own authenticated backend over HTTPS. The accounts, company information,
@@ -17,8 +18,9 @@
  *   - write anything at all, unless you start it with --write-business-data, and then ONLY the business-content operations in BUSINESS_WRITES.
  * Production remains the sole owner of live WhatsApp sessions and of every record; this machine is just another window onto it.
  *
- * Safety properties: listens on 127.0.0.1 only; accepts only the Host `workspace.localhost:<port>` (the session cookie is therefore scoped to that name and is
- * never sent to any other local web app, nor to http://localhost:<other port>); the upstream is fixed to production (an override is allowed only for a
+ * Safety properties: listens on 127.0.0.1 only; serves only the Host `workspace.localhost:<port>` (the session cookie is therefore scoped to that name and is
+ * never sent to any other local web app, nor to http://localhost:<other port>; localhost/127.0.0.1 on the same port are redirected there, every other host gets
+ * 421 and nothing else); the upstream is fixed to production (an override is allowed only for a
  * loopback test server); same-origin check on writes; no request/response body is ever logged, only "METHOD path status" for writes.
  */
 'use strict';
@@ -109,6 +111,7 @@ function buildInfo(opts) {
     branch: git(['branch', '--show-current']) || null,
     uncommittedChanges: git(['status', '--porcelain', '--untracked-files=no']).split('\n').filter((l) => l && !l.includes('.project-sync/')).length,
     environment: 'local-ui',
+    root: ROOT, // which checkout serves this window (loopback-only information; lets `npm run dev` recognise and reuse its own window)
     dataSource: 'production',
     dataSourceHost: new URL(opts.upstream).host,
     mode: opts.mode,
@@ -146,8 +149,16 @@ function createProxyServer(options = {}) {
     const url = new URL(req.url || '/', 'http://local');
     const pathname = url.pathname;
     const expectedHost = `${COOKIE_HOST}:${state.port}`;
-    // DNS-rebinding / cookie-scope guard: only workspace.localhost:<port>. Anything else is told where to go and gets nothing.
-    if ((req.headers.host || '').toLowerCase() !== expectedHost) {
+    const host = (req.headers.host || '').toLowerCase();
+    // DNS-rebinding / cookie-scope guard: only workspace.localhost:<port>. The plain loopback names on the SAME port (what `npm run dev` prints and
+    // what a person types) are sent there with a redirect, so no hosts-file entry and no knowledge of the private name is needed; anything else is told
+    // where to go and gets nothing.
+    if (host !== expectedHost) {
+      if (['GET', 'HEAD'].includes(req.method) && [`localhost:${state.port}`, `127.0.0.1:${state.port}`, `[::1]:${state.port}`].includes(host)) {
+        res.writeHead(302, { Location: `http://${expectedHost}${pathname === '/' ? '/dashboard' : pathname}${url.search}`, 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
       res.writeHead(421, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end(`Open http://${expectedHost}/dashboard (this window only answers on that address, so your sign-in cookie stays private to it).\n`);
       return;

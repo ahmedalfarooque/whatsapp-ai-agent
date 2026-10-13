@@ -680,7 +680,8 @@
 <tr><td><code>npm run typecheck</code></td><td>Asks the TypeScript compiler to check every file for type errors, without producing output files.</td></tr>
 <tr><td><code>npm run lint</code></td><td>Runs ESLint to catch style/correctness issues.</td></tr>
 <tr><td><code>npm run build</code></td><td>Compiles TypeScript into plain JavaScript in <code>dist/</code>, and copies the SQL migration files alongside it.</td></tr>
-<tr><td><code>npm run dev</code></td><td>Starts the server directly from the TypeScript source, restarting automatically on file changes.</td></tr>
+<tr><td><code>npm run dev</code></td><td>Starts the local window: this checkout's dashboard on production's live data, on the first free port of 3000/3100/3200/3300/3400, and opens the browser.</td></tr>
+<tr><td><code>npm run legacy:isolated-backend</code></td><td>LEGACY: starts the backend itself from the TypeScript source on a local database (restarts on file changes). Not production data.</td></tr>
 </table>
 
 <h2>Confirming it's alive</h2>

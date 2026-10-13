@@ -47,18 +47,20 @@ from for design rationale.
 
 ## 3. Local development
 
-> **Two local modes, one canonical URL.** The everyday local URL is **http://workspace.localhost:3100/dashboard** — the *local window*: this
-> checkout's dashboard on **production's live data** (accounts, connection states, customers, messages) through production's own login, read-only by
-> default, no local database, no local WhatsApp session, nothing copied. Start it with `pwsh scripts/local-window.ps1` (reuses a running proxy, never
-> duplicates it, opens the browser) or `npm run window`. The *isolated backend* on **http://localhost:3000** (`npm run dev`) is a separate mode with its own
-> `data/app.db` and its own test accounts; its banner says so and names the window URL. Anything on **localhost:3005** is another project — never use it.
-> Details: `docs/ENVIRONMENTS_AND_RELEASES.md`.
+> **One root, one command.** From the checkout root, `npm run dev` starts the one supported local application: this checkout's dashboard on
+> **production's live data** (the four businesses, their connection states, customers, messages) read through production's own authenticated API,
+> read-only by default, no local database, no local WhatsApp session, nothing copied. It takes the first free port of **3000 → 3100 → 3200 → 3300 → 3400**
+> (never 3005, which belongs to another project), never stops anything that is already running, reuses its own running instance instead of starting a
+> second one, prints root / entry point / PID / port / commit / data source / mode, and opens **http://localhost:&lt;port&gt;/dashboard** (the browser lands on
+> `workspace.localhost:<port>`, a loopback name that keeps the sign-in cookie away from every other local app; no hosts-file entry is needed).
+> Ctrl+C stops it. If production cannot be reached the page says so with a Retry button — it never shows local or cached records.
+> The *legacy* isolated backend (`npm run legacy:isolated-backend`, own `data/app.db`, own test accounts) is not part of the normal workflow; see `docs/ENVIRONMENTS_AND_RELEASES.md`.
 
 ```bash
 npm install
-cp .env.example .env      # fill in real or test values, see section 4
-pwsh scripts/local-window.ps1   # the local window on production data (canonical)
-npm run dev                     # OR the isolated backend on its own database (tsx watch, port 3000)
+npm run dev                          # the application: production's data, this checkout's UI, first free port of 3000/3100/3200/3300/3400
+npm run dev -- --write-business-data # optional: the approved business-content edits go to production (connections, sending, users, keys stay blocked)
+npm run dev -- --status              # what is running on the candidate ports, nothing started
 ```
 
 Run the test suite (fully mocked — no real credentials needed):

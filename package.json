@@ -9,8 +9,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copyAssets.js",
-    "window": "node scripts/dev-proxy.cjs",
-    "dev": "tsx watch src/index.ts",
+    "dev": "node scripts/dev.cjs",
+    "legacy:isolated-backend": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts",

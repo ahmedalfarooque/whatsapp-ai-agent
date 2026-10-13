@@ -304,7 +304,7 @@ async function renderBuildInfo() {
     return;
   }
   const env = info.environment || 'unknown';
-  const label = env === 'production' ? 'Production' : env === 'local-ui' ? 'Local window' : env === 'local-isolated' ? 'Isolated local environment' : env;
+  const label = env === 'production' ? 'Production' : env === 'local-ui' ? 'Local window' : env === 'local-isolated' ? 'LEGACY isolated local environment' : env;
   if (footer) {
     footer.textContent = `Build ${info.commit} · ${label}`;
     footer.title = [info.fullCommit, info.branch && `branch ${info.branch}`, info.releasedAt && `released ${info.releasedAt}`, info.dataSource && `data: ${info.dataSource}`].filter(Boolean).join(' · ');
@@ -314,7 +314,7 @@ async function renderBuildInfo() {
     if (env === 'production') { banner.hidden = true; return; }
     const parts = [`${label}`, `UI from commit ${info.commit}${info.branch ? ` (${info.branch})` : ''}${info.uncommittedChanges ? ' + uncommitted changes' : ''}`];
     if (env === 'local-ui') parts.push(info.mode === 'business-data' ? 'Data: PRODUCTION (live), business content editable' : 'Data: PRODUCTION (live), read-only');
-    else parts.push('Own local database, not production data', info.productionWindow ? `For production's accounts open ${info.productionWindow} (node scripts/dev-proxy.cjs)` : '');
+    else parts.push('Own local database, NOT production data', info.supportedCommand ? `The supported application is "${info.supportedCommand}" (production's accounts, live)` : '');
     banner.className = `env-banner ${env === 'local-ui' ? (info.mode === 'business-data' ? 'write' : 'read') : 'isolated'}`;
     banner.textContent = parts.filter(Boolean).join(' · ');
     banner.hidden = false;

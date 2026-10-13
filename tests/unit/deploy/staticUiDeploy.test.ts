@@ -149,7 +149,7 @@ d('deploy-static-ui.sh preconditions (check-only, disposable repositories)', () 
   });
 
   it('accepts the developer proxy and the two release scripts (none is loaded by the app) but still refuses backend, data and other tooling', () => {
-    const ok = makeEnv('devtools', { target: (w) => { put(w, 'scripts/dev-proxy.cjs', '// tool'); put(w, 'scripts/build-info.cjs', '// tool'); put(w, 'scripts/release.ps1', '# tool'); put(w, 'scripts/release-status.ps1', '# tool'); put(w, 'scripts/local-window.ps1', '# tool'); } });
+    const ok = makeEnv('devtools', { target: (w) => { put(w, 'scripts/dev-proxy.cjs', '// tool'); put(w, 'scripts/build-info.cjs', '// tool'); put(w, 'scripts/release.ps1', '# tool'); put(w, 'scripts/release-status.ps1', '# tool'); put(w, 'scripts/dev.cjs', '// tool'); } });
     expect(run(ok, ['--base', ok.base, '--target', ok.target, '--check-only']).out).toContain('CHECK-ONLY OK');
     for (const file of ['src/index.ts', 'package.json', 'data/app.db', 'scripts/project-sync.cjs', 'scripts/release.sh', 'scripts/dev-proxy.js']) {
       const bad = makeEnv('reject-' + file.replace(/\W/g, '-'), { target: (w) => { put(w, file, 'x'); } });

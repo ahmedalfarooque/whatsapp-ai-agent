@@ -50,33 +50,6 @@ describe('release.ps1', () => {
   });
 });
 
-describe('local-window.ps1 (the one local launcher)', () => {
-  const launcher = read('local-window.ps1');
-  const c = code(launcher);
-  it('opens the canonical URL, never ports 3000/3005, and identifies a listener by command line before anything else', () => {
-    expect(c).toContain('http://workspace.localhost:$Port/dashboard');
-    expect(c).toMatch(/\$Port -eq 3005 -or \$Port -eq 3000/);
-    expect(c).toMatch(/Win32_Process/);
-    expect(c).toContain("dev-proxy\\.cjs");
-  });
-  it('stops a process only when it is positively a dev-proxy (and a foreign one only with -Replace); unrelated listeners are reported, never killed', () => {
-    const stops = [...c.matchAll(/Stop-Process[^\n]*/g)].map((m) => m[0]);
-    expect(stops.length).toBeGreaterThan(0);
-    for (const s of stops) expect(s).toMatch(/\$existing\.Pid/);
-    expect(c).toMatch(/if \(-not \(IsOurProxy \$existing\)\) \{ Write-Error/);
-    expect(c).toMatch(/if \(-not \$Replace\) \{ Write-Error/);
-    expect(c).toMatch(/which is not this project's proxy\. Not touched/);
-    expect(c).not.toMatch(/taskkill|Get-Process node \||Stop-Process -Name/);
-  });
-  it('reuses a running proxy of this checkout, verifies commit, environment, data source and production health, and reports no local storage', () => {
-    expect(c).toContain('reusing the running local window proxy');
-    expect(c).toMatch(/environment -ne 'local-ui' -or \$stamp\.dataSource -ne 'production'/);
-    expect(c).toMatch(/fullCommit -ne \$head/);
-    expect(c).toContain('https://whatsapp.alfarooque.com/health');
-    expect(c).toContain('no local database, no WhatsApp session');
-  });
-});
-
 describe('release-status.ps1', () => {
   it('is read-only: no write, restart, merge or file transfer anywhere', () => {
     const c = code(status);

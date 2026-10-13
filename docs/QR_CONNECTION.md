@@ -10,7 +10,7 @@ used on the server.
 
 ## Connecting
 
-1. Start the server (`npm run build && npm start`, or `npm run dev`). On boot it
+1. Start the server (`npm run build && npm start`, or the legacy `npm run legacy:isolated-backend`; `npm run dev` is the production-data window and never pairs). On boot it
    restores a saved session if one exists; otherwise it starts pairing so a QR
    is ready as soon as you open the dashboard.
 2. Sign in to `/dashboard` and open **WhatsApp Connection**.
