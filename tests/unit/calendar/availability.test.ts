@@ -3,12 +3,12 @@ import { computeFreeSlots } from '../../../src/calendar/availability';
 
 describe('computeFreeSlots', () => {
   it('slices business hours into duration-sized free slots when nothing is busy', () => {
-    // Business hours 09:00-18:00 (9 hours), 30 min slots => 18 slots, minus past-time filtering.
+    // Test business hours (tests/setup.ts) 00:00-23:59, 30 min slots => 47 slots (the 23:30 slot would end at 24:00, after closing), minus past-time filtering.
     const farFutureDate = '2999-06-10'; // ensures no slot is filtered as "past"
     const slots = computeFreeSlots(farFutureDate, 30, [], 0);
-    expect(slots.length).toBe(18);
-    expect(slots[0].toFormat('HH:mm')).toBe('09:00');
-    expect(slots[slots.length - 1].toFormat('HH:mm')).toBe('17:30');
+    expect(slots.length).toBe(47);
+    expect(slots[0].toFormat('HH:mm')).toBe('00:00');
+    expect(slots[slots.length - 1].toFormat('HH:mm')).toBe('23:00');
   });
 
   it('excludes slots that overlap a busy interval', () => {

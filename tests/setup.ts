@@ -46,8 +46,9 @@ process.env.GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID ?? 'primary';
 
 process.env.BUSINESS_NAME = process.env.BUSINESS_NAME ?? 'Test Business';
 process.env.BUSINESS_TIMEZONE = process.env.BUSINESS_TIMEZONE ?? 'UTC';
-process.env.BUSINESS_HOURS_START = process.env.BUSINESS_HOURS_START ?? '09:00';
-process.env.BUSINESS_HOURS_END = process.env.BUSINESS_HOURS_END ?? '18:00';
+// Open all day: the suite must not depend on the wall clock (at 09:00-18:00 UTC it passed, after 18:00 UTC the after-hours menu answered instead).
+process.env.BUSINESS_HOURS_START = process.env.BUSINESS_HOURS_START ?? '00:00';
+process.env.BUSINESS_HOURS_END = process.env.BUSINESS_HOURS_END ?? '23:59';
 process.env.BUSINESS_DAYS = process.env.BUSINESS_DAYS ?? '1,2,3,4,5,6,7';
 
 process.env.RESTART_KEYWORDS = process.env.RESTART_KEYWORDS ?? 'restart,reset,start over';

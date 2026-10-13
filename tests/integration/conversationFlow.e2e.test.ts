@@ -21,6 +21,7 @@ import { findFreeSlots } from '../../src/calendar/availability';
 import { createEvent } from '../../src/calendar/booking';
 import { processInboundMessage } from '../../src/pipeline/processInboundMessage';
 import { AiResponseError } from '../../src/llm/aiResponseError';
+import { resetPromptScalesForTests } from '../../src/llm/promptCap';
 import { getDb } from '../../src/memory/db';
 import { getRecentMessages, getOrCreateActiveConversation } from '../../src/memory/conversationRepo';
 import { getOrCreateCustomer, setCustomerLanguage } from '../../src/memory/customerRepo';
@@ -63,6 +64,7 @@ function preselectLanguage(waId: string) {
 describe('end-to-end conversation flow (mocked external services)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetPromptScalesForTests();
   });
 
   it('greets, answers a knowledge question, then completes a booking', async () => {
@@ -234,6 +236,36 @@ describe('end-to-end conversation flow (mocked external services)', () => {
       expect(vi.mocked(sendTextMessage).mock.calls.length).toBe(sentBefore); // no second apology within the window
       expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'suppressed' });
       expect(activityFor(waId).at(-1)!.detail).toMatch(/credits exhausted \(HTTP 402\)/);
+    });
+
+    it('a 402 that names the provider token cap is answered by ONE retry with a smaller prompt, and the next message starts small', async () => {
+      resetPromptScalesForTests();
+      const waId = '15552220018';
+      preselectLanguage(waId);
+      vi.mocked(chatCompletion)
+        .mockRejectedValueOnce(new AiResponseError('payment_required', 402, 'openai/gpt-4.1-mini', 'Prompt tokens limit exceeded: 6666 > 6196. To increase, visit https://openrouter.ai/settings/credits'))
+        .mockResolvedValue(textResponse('Happy to help with your building.') as never);
+      await processInboundMessage(inbound(waId, 'wamid.cap1', 'I want to sell my building'), { knowledge });
+      expect(chatCompletion).toHaveBeenCalledTimes(2);
+      expect(String(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1])).toContain('Happy to help');
+      const lengthOf = (call: number) => JSON.stringify(vi.mocked(chatCompletion).mock.calls[call]![0]).length;
+      expect(lengthOf(1)).toBeLessThanOrEqual(lengthOf(0));
+      await processInboundMessage(inbound(waId, 'wamid.cap2', 'and the price?'), { knowledge });
+      expect(chatCompletion).toHaveBeenCalledTimes(3); // no failed first attempt this time
+      resetPromptScalesForTests();
+    });
+
+    it('a token-cap 402 AFTER a tool round is never retried (the loop would re-run tools): one failed answer, the safe fallback, no success recorded', async () => {
+      const waId = '15552220019';
+      preselectLanguage(waId);
+      vi.mocked(chatCompletion)
+        .mockResolvedValueOnce(toolCallResponse('no_such_tool', {}) as never)
+        .mockRejectedValue(new AiResponseError('payment_required', 402, 'openai/gpt-4.1-mini', 'Prompt tokens limit exceeded: 6666 > 6196. To increase, visit https://openrouter.ai/settings/credits'));
+      await processInboundMessage(inbound(waId, 'wamid.cap3', 'check something'), { knowledge });
+      expect(chatCompletion).toHaveBeenCalledTimes(2); // round 1 (tool) + round 2 (402); no second loop
+      expect(String(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1])).toMatch(/went wrong/i);
+      expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error' });
+      expect(activityFor(waId).some((r) => r.kind === 'ai')).toBe(false);
     });
 
     it('a model that never stops calling tools is cut off at the round cap and answered with the fallback, not a fake success', async () => {

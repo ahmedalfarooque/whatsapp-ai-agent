@@ -90,7 +90,13 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
       throw new AiResponseError('time_budget_exceeded', null, null);
     }
     const accountTools = toolSchemasForAccount(currentAccountId());
-    const response = await chatCompletion({ messages, tools: accountTools.length ? accountTools : undefined, deadline });
+    let response: Awaited<ReturnType<typeof chatCompletion>>;
+    try {
+      response = await chatCompletion({ messages, tools: accountTools.length ? accountTools : undefined, deadline });
+    } catch (error) {
+      if (error instanceof AiResponseError && round > 1) error.afterToolCalls = true; // tools ran in an earlier round: the caller must not re-run this loop
+      throw error;
+    }
     const choice = response.choices[0];
     if (!choice) {
       throw new AiResponseError('malformed_response', null, null);

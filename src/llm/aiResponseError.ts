@@ -14,6 +14,9 @@ export type AiResponseReason =
   | 'time_budget_exceeded'; // the whole AI loop for one message ran out of time
 
 export class AiResponseError extends Error {
+  /** Set by the agent loop when the failure came on a round AFTER tool calls were requested: the whole loop must then never be re-run (a tool may already have acted). */
+  afterToolCalls = false;
+
   constructor(
     public readonly reason: AiResponseReason,
     public readonly httpStatus: number | null,

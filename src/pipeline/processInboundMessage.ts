@@ -42,6 +42,7 @@ import type { KnowledgeBase } from '../knowledge/loader';
 import { withCustomerLock } from './idempotency';
 import { AiCredentialError } from '../llm/aiCredentialError';
 import { AiResponseError } from '../llm/aiResponseError';
+import { currentPromptScale, parsePromptCap, rememberPromptScale, scaleForCap } from '../llm/promptCap';
 import { env } from '../config/env';
 import { MENU_IDS, detectLanguageFromScript, isHardRestart, isMenuKeyword, isSubstantiveFreeText } from '../automation/menu';
 import { MENU_STATES, DATA_DRIVEN_FALLBACKS, routeMenu, type RouteResult } from '../automation/menuRouter';
@@ -372,8 +373,14 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   // CONVERSATION_MEMORY_HOURS (docs/AI_ASSISTANT.md). The stored conversation is untouched.
   // ...and never more text than HISTORY_PROMPT_CHARS: a long conversation drops its oldest turns rather than growing the prompt past the
   // provider's per-request cap (production 2026-10-13: 14k-token prompts were refused with HTTP 402 while the credit was low).
-  const history = trimHistoryToBudget(getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS), env.HISTORY_PROMPT_CHARS);
-  const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText });
+  // When the provider's cap is lower than usual (credit nearly gone) the budgets shrink by the scale learned from its last 402 (llm/promptCap.ts).
+  const promptAccountId = currentAccountId();
+  let promptScale = currentPromptScale(promptAccountId);
+  const buildPrompt = (scale: number) => ({
+    history: trimHistoryToBudget(getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS), Math.floor(env.HISTORY_PROMPT_CHARS * scale)),
+    systemPrompt: buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText, knowledgeScale: scale }),
+  });
+  let { history, systemPrompt } = buildPrompt(promptScale);
 
   let finalText = '';
   let kind: 'ai' | 'error' = 'ai';
@@ -382,7 +389,20 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   let heldBy: Handoff | null = null;
   const visionNote = [analysis ? (analysis.ok ? `picture analysed in ${(analysis.durationMs / 1000).toFixed(1)} s (${analysis.model}, confidence ${analysis.confidence})` : `picture not analysed (${analysis.reason})`) : null, ...mediaNotes].filter(Boolean).join(' · ') || null;
   try {
-    const loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
+    let loopResult: Awaited<ReturnType<typeof runAgentLoop>>;
+    try {
+      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
+    } catch (firstError) {
+      // HTTP 402 "Prompt tokens limit exceeded: N > CAP": send less (same model, no extra cost) and try ONCE more; anything else rethrows.
+      const cap = firstError instanceof AiResponseError && firstError.reason === 'payment_required' && !firstError.afterToolCalls ? parsePromptCap(firstError.providerMessage) : null;
+      const shrunk = cap ? Math.max(0.15, promptScale * scaleForCap(cap)) : promptScale;
+      if (!cap || shrunk >= promptScale) throw firstError;
+      promptScale = shrunk;
+      rememberPromptScale(promptAccountId, promptScale);
+      logger.warn({ waId: maskedId, account: promptAccountId, promptTokens: cap.used, tokenCap: cap.cap, scale: Number(promptScale.toFixed(2)) }, 'provider token cap is below the prompt size; retrying once with a smaller prompt');
+      ({ history, systemPrompt } = buildPrompt(promptScale));
+      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
+    }
     logger.info({ waId: maskedId, account: currentAccountId(), totalMs: Date.now() - startedAt, visionMs: analysis?.durationMs ?? 0, picture: Boolean(picture), rounds: loopResult.generatedMessages.filter((g) => g.content.startsWith('[requested tools:')).length + 1 }, 'AI reply ready');
     finalText = loopResult.finalText;
     // The model took a while: ownership may have changed meanwhile. Decide from the database NOW, before anything is stored or sent.

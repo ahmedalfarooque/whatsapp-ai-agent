@@ -128,6 +128,8 @@ export interface PromptContext {
   customerId?: number;
   /** The customer's latest message (text or picture caption): the reply language follows it (shared policy, see llm/language.ts). */
   latestText?: string | null;
+  /** Multiplies KNOWLEDGE_PROMPT_CHARS (0-1): the provider's token cap is lower than usual (llm/promptCap.ts). */
+  knowledgeScale?: number;
 }
 
 /**
@@ -253,7 +255,7 @@ ${settings.hoursConfigured ? `BUSINESS HOURS (local time):\n${formatBusinessHour
 ${calendarTools ? `DEFAULT APPOINTMENT DURATION: ${settings.bookingDurationMinutes} minutes` : ''}
 ${policiesSection ? `\nBUSINESS POLICIES:\n${policiesSection}\n` : ''}
 BUSINESS KNOWLEDGE:
-${selectKnowledgeForPrompt(knowledge, context.latestText, env.KNOWLEDGE_PROMPT_CHARS).text || '(no knowledge files loaded — say you do not have that information yet if asked about services/pricing/policies)'}
+${selectKnowledgeForPrompt(knowledge, context.latestText, Math.floor(env.KNOWLEDGE_PROMPT_CHARS * (context.knowledgeScale ?? 1))).text || '(no knowledge files loaded — say you do not have that information yet if asked about services/pricing/policies)'}
 `;
 }
 
