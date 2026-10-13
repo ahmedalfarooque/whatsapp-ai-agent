@@ -29,7 +29,9 @@ git -C $R merge-base --is-ancestor "$HEAD" "$TFULL" || abort target "not a fast-
 NEED=$(du -sk $D | cut -f1); FREE=$(df -k --output=avail /home/ubuntu | tail -1); [ "$FREE" -gt $((NEED * 3)) ] || abort space "not enough free space for a backup"
 PKG=$(git -C $R diff --name-only "$HEAD" "$TFULL" -- package.json package-lock.json | wc -l)
 MIG=$(git -C $R diff --name-only "$HEAD" "$TFULL" -- src/memory/migrations | tr '\n' ' ')
-fp() { echo "admins=$(sqlite3 "file:$DB?mode=ro" 'SELECT id,username,role,password_hash FROM admin_users ORDER BY id;' | sha256sum | cut -c1-16) creds=$(sqlite3 "file:$DB?mode=ro" 'SELECT * FROM credential_overrides ORDER BY key;' | sha256sum | cut -c1-16) accounts=$(sqlite3 "file:$DB?mode=ro" 'SELECT id,name,enabled,phone_number,jid FROM whatsapp_accounts ORDER BY id;' | sha256sum | cut -c1-16) customers=$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM customers;') messages=$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM conversation_messages;') baileys_identity=$(for f in $D/baileys-auth/creds.json $D/accounts/*/baileys-auth/creds.json; do [ -f "$f" ] && python3 -c "import json;d=json.load(open('$f'));print('$f',d.get('registrationId'),(d.get('me') or {}).get('id'))"; done | sha256sum | cut -c1-16) baileys_files=$(find $D -path '*baileys-auth*' -type f | wc -l) uploads=$(find $D -path '*uploads*' -type f | wc -l) knowledge=$(find $R/knowledge -type f \( -name '*.md' -o -name '*.json' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"; }
+fp() { echo "admins=$(sqlite3 "file:$DB?mode=ro" 'SELECT id,username,role,password_hash FROM admin_users ORDER BY id;' | sha256sum | cut -c1-16) creds=$(sqlite3 "file:$DB?mode=ro" 'SELECT * FROM credential_overrides ORDER BY key;' | sha256sum | cut -c1-16) accounts=$(sqlite3 "file:$DB?mode=ro" 'SELECT id,name,enabled,phone_number,jid FROM whatsapp_accounts ORDER BY id;' | sha256sum | cut -c1-16) customers=$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM customers;') messages=$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM conversation_messages;') baileys_identity=$(for f in $D/baileys-auth/creds.json $D/accounts/*/baileys-auth/creds.json; do if [ -f "$f" ]; then python3 -c "import json;d=json.load(open('$f'));print('$f',d.get('registrationId'),(d.get('me') or {}).get('id'))"; fi; done | sha256sum | cut -c1-16) baileys_files=$(find $D -path '*baileys-auth*' -type f | wc -l) uploads=$(find $D -path '*uploads*' -type f | wc -l) knowledge=$(find $R/knowledge -type f \( -name '*.md' -o -name '*.json' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"; return 0; }
+# (an unpaired account has no creds.json right after a restart; the old `[ -f ] && …` form made fp() return non-zero there and, under set -e, ended the
+#  2026-10-13 release silently after the restart — the release itself was complete and was proven by hand)
 BEFORE=$(fp)
 echo "preconditions ok: ${HEAD:0:7} -> ${TFULL:0:7}; package files changed: $PKG; migrations added: ${MIG:-none}"
 echo "fingerprints before: $BEFORE"
@@ -56,9 +58,10 @@ printf '{"commit":"%s","fullCommit":"%s","branch":"master","environment":"produc
 sudo systemctl restart $SVC
 for i in $(seq 1 30); do sleep 1; [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health)" = 200 ] && break; done
 
-# ---- proof
-H=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health); RD=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/readiness)
-PUB=$(curl -s -o /dev/null -w '%{http_code}' https://whatsapp.alfarooque.com/health)
+# ---- proof (every probe is tolerant: a failed curl yields "000" and is judged below; under `set -e` an unguarded failure here would
+# end the script silently AFTER the restart, leaving the release in place but unproven — which is what happened on 2026-10-13)
+H=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health || echo 000); RD=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/readiness || echo 000)
+PUB=$(curl -s -o /dev/null -w '%{http_code}' https://whatsapp.alfarooque.com/health || echo 000)
 L3000=$(ss -ltn | grep -c ":$PORT "); L3005=$(ss -ltn | grep -c ':3005 ')
 AFTER=$(fp)
 echo "after: health=$H readiness=$RD public=$PUB listen3000=$L3000 listen3005=$L3005 service=$(systemctl is-active $SVC) head=$(git -C $R rev-parse --short HEAD) migrations=$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM schema_migrations;') last=$(sqlite3 "file:$DB?mode=ro" 'SELECT id FROM schema_migrations ORDER BY id DESC LIMIT 1;')"
