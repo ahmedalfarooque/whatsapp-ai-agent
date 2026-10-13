@@ -47,7 +47,8 @@ describe('reply rules in the prompt', () => {
     expect(buildSystemPrompt(EMPTY_KNOWLEDGE, 'ar', new Date(), { latestText: 'Combien coûte la teinture des vitres ?' })).toContain('REPLY LANGUAGE: French');
     // a message with no language of its own (a number) falls back to the menu choice
     expect(buildSystemPrompt(EMPTY_KNOWLEDGE, 'ar', new Date(), { latestText: '2' })).toContain('REPLY LANGUAGE: Arabic for this message');
-    expect(buildSystemPrompt(EMPTY_KNOWLEDGE)).toContain("REPLY LANGUAGE: the language of the customer's latest message");
+    // nothing detectable and nothing selected: English (the shared default), never a guess
+    expect(buildSystemPrompt(EMPTY_KNOWLEDGE)).toContain('REPLY LANGUAGE: English for this message');
     for (const prompt of [buildSystemPrompt(EMPTY_KNOWLEDGE, 'ar'), buildSystemPrompt(EMPTY_KNOWLEDGE, 'en')]) {
       expect(prompt).not.toContain('regardless of the language');
       expect(prompt).toContain('if they switch language, switch with them');

@@ -38,7 +38,7 @@ describe('migration 021 — customer history, inquiry cart, quotations (additive
     };
     runMigrations(db);
 
-    expect(original(snapshot(db, 'customers'), ['email', 'company_name'])).toEqual(before.customers);
+    expect(original(snapshot(db, 'customers'), ['email', 'company_name', 'after_hours_notified_at'])).toEqual(before.customers); // 025 adds after_hours_notified_at
     expect(original(snapshot(db, 'customer_requests'), ['cart_id', 'source'])).toEqual(before.requests);
     expect(original(snapshot(db, 'request_events'), ['admin_user_id', 'reason'])).toEqual(before.events);
     expect(original(snapshot(db, 'notification_outbox'), ['attachment_file_id'])).toEqual(before.outbox);

@@ -22,8 +22,14 @@ export interface Customer {
   flow_data: string | null;
   /** Chat address (may be an opaque @lid) the customer last wrote from; replies go back there. */
   reply_jid: string | null;
+  /** When the after-hours notice (closed + follow-up choices) was last sent, so it is not repeated within one conversation window. */
+  after_hours_notified_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export function setCustomerAfterHoursNotified(customerId: number, at: Date = new Date(), db: Database.Database = getDb()): void {
+  db.prepare("UPDATE customers SET after_hours_notified_at = ?, updated_at = datetime('now') WHERE id = ?").run(at.toISOString(), customerId);
 }
 
 /** Normalizes a WhatsApp wa_id to a consistent digits-only form for lookups. */

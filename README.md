@@ -55,6 +55,7 @@ from for design rationale.
 > `workspace.localhost:<port>`, a loopback name that keeps the sign-in cookie away from every other local app; no hosts-file entry is needed).
 > Ctrl+C stops it. If production cannot be reached the page says so with a Retry button — it never shows local or cached records.
 > The *legacy* isolated backend (`npm run legacy:isolated-backend`, own `data/app.db`, own test accounts) is not part of the normal workflow; see `docs/ENVIRONMENTS_AND_RELEASES.md`.
+> After-hours replies, callback / staff-message requests, reminders and customer media (voice notes, files) are described in `docs/AFTER_HOURS_AND_FOLLOWUPS.md`.
 
 ```bash
 npm install

@@ -14,7 +14,7 @@ import { currentAccountId, runWithAccount } from '../accounts/accountContext';
  * caller; failures are retried with backoff.
  */
 
-export type OutboxKind = 'business_new_request' | 'business_status' | 'customer_status' | 'operator_result' | 'customer_quotation';
+export type OutboxKind = 'business_new_request' | 'business_status' | 'customer_status' | 'operator_result' | 'customer_quotation' | 'staff_followup';
 export type OutboxStatus = 'pending' | 'sent' | 'failed';
 
 export interface OutboxRow {

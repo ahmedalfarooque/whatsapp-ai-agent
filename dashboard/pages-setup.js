@@ -78,8 +78,35 @@
     let disposed = false;
     disposeView = () => { disposed = true; };
 
+    /** "2026-12-25 | Christmas" / "2026-10-20 to 2026-10-22 | Stocktake" per line → closures list (null when the box is empty). */
+    function parseClosures(text) {
+      const out = [];
+      for (const raw of String(text || '').split('\n')) {
+        const line = raw.trim();
+        if (!line) continue;
+        const [dates, label] = line.split('|').map((x) => x.trim());
+        const m = /^(\d{4}-\d{2}-\d{2})(?:\s+(?:to|-|–)\s+(\d{4}-\d{2}-\d{2}))?$/.exec(dates || '');
+        if (!m) throw new Error(`Closure "${line}" must be a date (YYYY-MM-DD) or "date to date", optionally followed by " | label".`);
+        out.push({ from: m[1], to: m[2] || undefined, label: label || undefined });
+      }
+      return out.length ? out : null;
+    }
+    /** "key | English | Arabic [| off]" per line → appointment types ([] when the box is empty: nothing is changed). */
+    function parseAppointmentTypes(text) {
+      const out = [];
+      for (const raw of String(text || '').split('\n')) {
+        const line = raw.trim();
+        if (!line) continue;
+        const parts = line.split('|').map((x) => x.trim());
+        if (parts.length < 3) throw new Error(`Appointment type "${line}" must be "key | English label | Arabic label".`);
+        out.push({ key: parts[0].toLowerCase().replace(/[^a-z0-9_]+/g, '_'), labelEn: parts[1], labelAr: parts[2], enabled: !/^(off|disabled|0)$/i.test(parts[3] || '') });
+      }
+      return out;
+    }
+
     async function load() {
       S.data = await api(base);
+      try { S.data.appointmentTypes = (await api(`${base}/appointment-types`)).types; } catch { S.data.appointmentTypes = []; }
       S.draft = S.data.draft && S.data.draft.status === 'draft' ? S.data.draft : null;
       S.lastApplied = S.data.draft && S.data.draft.status === 'applied' ? S.data.draft : null;
       document.title = `${S.data.account.name} — setup`;
@@ -173,6 +200,26 @@
           </div>
           <div class="field"><span class="label" id="days-label">Open on</span><div class="days" role="group" aria-labelledby="days-label">${DAYS.map(([n, name]) => `<label class="day"><input type="checkbox" name="days" value="${n}" ${days.has(n) ? 'checked' : ''}> ${name}</label>`).join('')}</div></div>
           ${hoursNote}
+          <details class="field" ${s.weeklyHours ? 'open' : ''}><summary>Different hours per day / split shifts (optional)</summary>
+            <p class="field-help">Fill a day here and it replaces the simple hours above for every day: leave a day empty to mark it closed. Two intervals per day allow a split shift (for example 9:00–13:00 and 16:00–21:00).</p>
+            <table class="data-table weekly-hours"><thead><tr><th>Day</th><th>Opens</th><th>Closes</th><th>Opens (2nd)</th><th>Closes (2nd)</th></tr></thead><tbody>
+              ${DAYS.map(([n, name]) => { const iv = (s.weeklyHours && s.weeklyHours[String(n)]) || []; const a = iv[0] || ['', '']; const b = iv[1] || ['', '']; return `<tr><td>${name}</td><td><input type="time" name="wh_${n}_0s" value="${esc(a[0])}" aria-label="${name} opens"></td><td><input type="time" name="wh_${n}_0e" value="${esc(a[1])}" aria-label="${name} closes"></td><td><input type="time" name="wh_${n}_1s" value="${esc(b[0])}" aria-label="${name} second opening"></td><td><input type="time" name="wh_${n}_1e" value="${esc(b[1])}" aria-label="${name} second closing"></td></tr>`; }).join('')}
+            </tbody></table>
+            <label class="day"><input type="checkbox" name="clearWeekly"> Remove the per-day schedule and use the simple hours above</label>
+          </details>
+          <div class="field"><label for="inf-closures">Holidays and exceptional closures</label><textarea id="inf-closures" name="closures" rows="3" placeholder="2026-12-25 | Christmas&#10;2026-10-20 to 2026-10-22 | Stocktake">${esc((s.closures || []).map((c) => `${c.from}${c.to && c.to !== c.from ? ` to ${c.to}` : ''}${c.label ? ` | ${c.label}` : ''}`).join('\n'))}</textarea><p class="field-help">One per line: a date, or a date range with "to", optionally followed by " | label". Customers are told the business is closed on those days.</p></div>
+        </fieldset>
+        <fieldset><legend>After hours &amp; follow-up requests</legend>
+          <div class="form-grid">
+            <div class="field"><label class="day"><input type="checkbox" name="afterHoursEnabled" ${s.afterHoursEnabled ? 'checked' : ''}> Tell customers when the business is closed and offer the follow-up choices</label><p class="field-help">Outside the hours above a customer is told the business is closed, given the hours and the next opening, and offered: a phone callback, a WhatsApp message from staff, contact as soon as staff are available, an agreed time, self-service information, or cancelling a request. The assistant keeps answering questions.</p></div>
+            <div class="field"><label class="day"><input type="checkbox" name="directCallEnabled" ${s.directCallEnabled ? 'checked' : ''}> Offer "call us now" with the contact phone while open</label></div>
+            <div class="field"><label for="inf-window">Callback window (minutes)</label><input id="inf-window" name="callbackWindowMinutes" type="number" min="5" max="240" value="${esc(s.callbackWindowMinutes)}"><p class="field-help">After the agreed time, the "Call customer" action stays enabled this long; then the request is overdue and must be rescheduled or closed with an outcome.</p></div>
+            <div class="field"><label for="inf-lead">Remind staff (minutes before the agreed time)</label><input id="inf-lead" name="reminderLeadMinutes" type="number" min="0" max="1440" value="${esc(s.reminderLeadMinutes)}"></div>
+            <div class="field"><label for="inf-repeat">Repeat an unanswered reminder every (minutes)</label><input id="inf-repeat" name="reminderRepeatMinutes" type="number" min="1" max="120" value="${esc(s.reminderRepeatMinutes)}"></div>
+            <div class="field"><label for="inf-max">Reminder attempts (max)</label><input id="inf-max" name="reminderMaxAttempts" type="number" min="1" max="10" value="${esc(s.reminderMaxAttempts)}"></div>
+            <div class="field"><label for="inf-promise">Response-time promise (optional)</label><input id="inf-promise" name="responseTimePromise" type="text" maxlength="200" value="${esc(val(s.responseTimePromise))}" placeholder="e.g. within one working day"><p class="field-help">Shown to customers only when set; nothing is promised otherwise.</p></div>
+          </div>
+          <div class="field"><label for="inf-types">Appointment / enquiry types (one per line: key | English | Arabic)</label><textarea id="inf-types" name="appointmentTypes" rows="5" dir="auto">${esc((S.data.appointmentTypes || []).map((t) => `${t.key} | ${t.labelEn} | ${t.labelAr}${t.enabled ? '' : ' | off'}`).join('\n'))}</textarea><p class="field-help">What "request a callback" and "request a WhatsApp message" ask the customer about — the types that fit THIS business (consultation, property viewing, quotation discussion…). Add " | off" to keep a type without offering it.</p></div>
         </fieldset>
         <fieldset><legend>Contact information</legend>
           <div class="form-grid">
@@ -201,7 +248,25 @@
           fridayHoursStart: nul(f.fridayHoursStart.value), fridayHoursEnd: nul(f.fridayHoursEnd.value),
           businessTimezone: nul(f.businessTimezone.value), businessDays: days.length ? days.join(',') : null,
           contactPhone: nul(f.contactPhone.value), contactEmail: nul(f.contactEmail.value),
+          afterHoursEnabled: f.afterHoursEnabled.checked, directCallEnabled: f.directCallEnabled.checked,
+          callbackWindowMinutes: Number(f.callbackWindowMinutes.value) || 30, reminderLeadMinutes: Number(f.reminderLeadMinutes.value) || 0,
+          reminderRepeatMinutes: Number(f.reminderRepeatMinutes.value) || 5, reminderMaxAttempts: Number(f.reminderMaxAttempts.value) || 3,
+          responseTimePromise: nul(f.responseTimePromise.value),
+          closures: parseClosures(f.closures.value),
         };
+        // Per-day schedule: any filled day switches the business to the weekly schedule (empty days = closed); the checkbox removes it.
+        if (f.clearWeekly.checked) profile.weeklyHours = null;
+        else {
+          const weekly = {}; let any = false;
+          for (const [n] of DAYS) {
+            const iv = [];
+            for (const k of [0, 1]) { const a = f[`wh_${n}_${k}s`].value; const b = f[`wh_${n}_${k}e`].value; if (a && b) iv.push([a, b]); }
+            if (iv.length) any = true;
+            weekly[String(n)] = iv;
+          }
+          if (any) profile.weeklyHours = weekly;
+        }
+        const types = parseAppointmentTypes(f.appointmentTypes.value);
         const status = view.querySelector('#info-status');
         const submit = form.querySelector('[type=submit]');
         submit.disabled = true;
@@ -209,6 +274,7 @@
         try {
           await api(`/api/dashboard/accounts/${id}`, json('PUT', { name: f.name.value.trim(), nameAr: nul(f.nameAr.value), businessCategory: nul(f.businessCategory.value) }));
           await api(`${base}/profile`, json('PUT', profile));
+          if (types.length) await api(`${base}/appointment-types`, json('PUT', { types }));
           await loadAccounts();
           await load();
           toast('Business information saved.', 'success');

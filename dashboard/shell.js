@@ -322,6 +322,72 @@ async function renderBuildInfo() {
 }
 document.addEventListener('DOMContentLoaded', () => { renderBuildInfo(); });
 
+// ---------------------------------------------------------------- staff notifications (bell)
+// Persistent server-side notifications (follow-up requests: new, ready, due, overdue). Polled every 20 s while the dashboard is open; a
+// notification that asks to ring sounds a short tone (Web Audio) and, when the person allowed it, a system notification. This works only
+// while the dashboard is open in a browser: with the browser closed the WhatsApp staff alert (notification outbox) is the channel.
+const notif = { lastId: 0, seen: false, timer: null, items: [], unread: 0, failures: 0, muted: localStorage.getItem('workspace.notif-muted') === '1' };
+function notifEls() { return { menu: document.getElementById('notif-menu'), btn: document.getElementById('notif-btn'), count: document.getElementById('notif-count'), panel: document.getElementById('notif-panel'), list: document.getElementById('notif-list'), note: document.getElementById('notif-note') }; }
+function ringTone() {
+  if (notif.muted) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    [0, 0.35, 0.7].forEach((t) => { const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'sine'; o.frequency.value = t === 0.35 ? 1046 : 880; g.gain.setValueAtTime(0.0001, ctx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.3); o.connect(g).connect(ctx.destination); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.32); });
+    setTimeout(() => ctx.close().catch(() => {}), 1500);
+  } catch { /* audio not available: the badge and the panel still show it */ }
+}
+function systemNotify(item) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try { const n = new Notification(item.title, { body: item.body.split('\n').slice(0, 4).join('\n'), tag: `staff-notif-${item.id}` }); n.onclick = () => { window.focus(); if (item.conversationLink) location.hash = item.conversationLink; n.close(); }; } catch { /* ignore */ }
+}
+function renderNotifPanel() {
+  const els = notifEls();
+  if (!els.list) return;
+  els.count.textContent = String(notif.unread);
+  els.count.hidden = notif.unread === 0;
+  els.note.textContent = notif.muted ? 'sound off' : '';
+  els.list.innerHTML = notif.items.length
+    ? notif.items.slice(0, 30).map((n) => `<a class="notif-item ${n.status === 'unread' ? 'unread' : ''}" href="${n.conversationLink || '#/support'}" data-notif="${n.id}" data-followup="${n.followupId || ''}"><b>${esc(n.title)}</b><span>${esc(n.body.split('\n').slice(1, 4).join(' · '))}</span><small>${esc(new Date(n.createdAt + (n.createdAt.endsWith('Z') ? '' : 'Z')).toLocaleString())}</small></a>`).join('')
+    : '<p class="muted" style="padding:10px 12px">Nothing waiting. New callback and message requests, reminders at the agreed time and overdue requests appear here.</p>';
+  els.list.innerHTML += `<div class="notif-foot"><a href="#/support">Open the Human Support Queue</a><button type="button" class="btn small" id="notif-mute">${notif.muted ? 'Sound on' : 'Sound off'}</button>${'Notification' in window && Notification.permission === 'default' ? '<button type="button" class="btn small" id="notif-allow">Allow system alerts</button>' : ''}</div>`;
+  els.list.querySelectorAll('[data-notif]').forEach((a) => a.addEventListener('click', () => { fetch(`/api/dashboard/staff-notifications/${a.dataset.notif}/read`, { method: 'POST', credentials: 'include' }).catch(() => {}); a.classList.remove('unread'); }));
+  els.list.querySelector('#notif-mute')?.addEventListener('click', () => { notif.muted = !notif.muted; localStorage.setItem('workspace.notif-muted', notif.muted ? '1' : '0'); renderNotifPanel(); });
+  els.list.querySelector('#notif-allow')?.addEventListener('click', () => { Notification.requestPermission().then(() => renderNotifPanel()); });
+}
+async function pollStaffNotifications() {
+  clearTimeout(notif.timer);
+  const els = notifEls();
+  let delay = 20000;
+  try {
+    const r = await fetch('/api/dashboard/staff-notifications', { credentials: 'include', cache: 'no-store' });
+    if (r.status === 401 || r.status === 403) { if (els.menu) els.menu.hidden = true; delay = 60000; }
+    else if (r.ok) {
+      const data = await r.json();
+      notif.failures = 0;
+      if (els.menu) els.menu.hidden = false;
+      const fresh = data.notifications.filter((n) => n.id > notif.lastId && n.status === 'unread');
+      if (notif.seen && fresh.some((n) => n.ring)) { ringTone(); fresh.filter((n) => n.ring).slice(0, 3).forEach(systemNotify); }
+      notif.items = data.notifications;
+      notif.unread = data.unread;
+      notif.lastId = Math.max(notif.lastId, ...data.notifications.map((n) => n.id));
+      notif.seen = true;
+      renderNotifPanel();
+    } else { notif.failures += 1; delay = Math.min(120000, 20000 * 2 ** notif.failures); }
+  } catch { notif.failures += 1; delay = Math.min(120000, 20000 * 2 ** notif.failures); }
+  notif.timer = setTimeout(pollStaffNotifications, document.hidden ? Math.max(delay, 60000) : delay);
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const els = notifEls();
+  if (!els.btn) return;
+  els.btn.addEventListener('click', () => { const open = els.panel.hidden; els.panel.hidden = !open; els.btn.setAttribute('aria-expanded', String(open)); if (open) renderNotifPanel(); });
+  document.addEventListener('click', (e) => { if (!els.menu.contains(e.target)) { els.panel.hidden = true; els.btn.setAttribute('aria-expanded', 'false'); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pollStaffNotifications(); });
+  document.addEventListener('workspace:auth', () => pollStaffNotifications());
+  setTimeout(pollStaffNotifications, 1500);
+});
+
 // Date range for the dashboard's figures (remembered per browser).
 const RANGE_KEY = 'workspace.range';
 const RANGES = [['7', '7 Days'], ['30', '30 Days'], ['90', '90 Days'], ['all', 'All time']];

@@ -77,6 +77,11 @@ const envSchema = z
     VISION_TIMEOUT_MS: z.coerce.number().int().positive().default(25000),
     /** Pictures larger than this are not analysed (WhatsApp images are usually well under 2 MB). */
     VISION_MAX_IMAGE_BYTES: z.coerce.number().int().positive().default(6 * 1024 * 1024),
+    /** Shared default for voice-note transcription: an audio-capable OpenRouter model id, or empty = voice notes are not transcribed (the
+     *  customer is told so). A business can set its own in business_settings.open_router_audio_model. Nothing paid is chosen by default. */
+    OPENROUTER_AUDIO_MODEL: z.string().optional().default(''),
+    AUDIO_TIMEOUT_MS: z.coerce.number().int().positive().default(40000),
+    AUDIO_MAX_BYTES: z.coerce.number().int().positive().default(16 * 1024 * 1024),
     OPENROUTER_SITE_URL: z.string().optional().default(''),
     OPENROUTER_APP_NAME: z.string().optional().default('WhatsApp AI Agent'),
 

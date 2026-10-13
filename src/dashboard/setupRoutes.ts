@@ -29,6 +29,7 @@ import {
   MenuValidationError, getMenuConfig, renderMainMenuText, resetMenuConfig, saveMenuConfig, MAX_MENU_ITEMS, MENU_ITEM_KINDS,
 } from '../automation/menuConfig';
 import { ensureTemplateDefaults, getTemplate, publishTemplate } from '../templates/templateRepo';
+import { AppointmentTypeError, listAppointmentTypes, saveAppointmentTypes, MAX_APPOINTMENT_TYPES } from '../followups/appointmentTypes';
 import { getDb } from '../memory/db';
 import { cataloguesEnabledFor } from '../catalogues/catalogueRepo';
 import { invalidateAccountKnowledge, discardConnection } from '../whatsapp/qrConnection';
@@ -73,7 +74,7 @@ export function registerSetupRoutes(router: Router, actor: (req: Request) => str
   function fail(res: Response, error: unknown): void {
     if (error instanceof BusinessSettingsValidationError || error instanceof AccountValidationError) { res.status(error.status).json({ error: 'validation_failed', fields: error.fields }); return; }
     if (error instanceof AccountDeletionError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
-    if (error instanceof LinkValidationError || error instanceof DocumentValidationError || error instanceof MenuValidationError || error instanceof DraftValidationError || error instanceof DraftStateError || error instanceof ApplyError) {
+    if (error instanceof LinkValidationError || error instanceof DocumentValidationError || error instanceof MenuValidationError || error instanceof DraftValidationError || error instanceof DraftStateError || error instanceof ApplyError || error instanceof AppointmentTypeError) {
       res.status(error.status).json({ error: error.message });
       return;
     }
@@ -145,6 +146,19 @@ export function registerSetupRoutes(router: Router, actor: (req: Request) => str
       updateBusinessSettings(req.body ?? {}, id);
       res.json(runWithAccount(id, () => profileView(id)));
     } catch (error) { fail(res, error); }
+  });
+
+  // ---- appointment types (what "request a callback / a staff message" asks about) -----
+  router.get(`${base}/setup/appointment-types`, (req, res) => {
+    const id = accountOf(req, res);
+    if (id === null) return;
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ types: listAppointmentTypes(id), max: MAX_APPOINTMENT_TYPES });
+  });
+  router.put(`${base}/setup/appointment-types`, (req, res) => {
+    const id = accountOf(req, res);
+    if (id === null) return;
+    try { res.json({ types: saveAppointmentTypes((req.body ?? {}).types, id), max: MAX_APPOINTMENT_TYPES }); } catch (error) { fail(res, error); }
   });
 
   // ---- business links -------------------------------------------------------------

@@ -424,12 +424,97 @@ route('#/support', 'Human Support Queue', 'Customers who asked for a person. Whi
     }
   }
 
+  // ---- follow-up requests (callbacks / staff WhatsApp messages): the server decides what is actionable; the buttons only mirror it
+  const fu = { filter: 'open', openForm: null };
+  const fuBadge = (s) => badge(s, s === 'overdue' ? 'red' : s === 'eligible' || s === 'assigned' ? 'green' : s === 'scheduled' || s === 'pending' ? 'amber' : s === 'completed' ? 'blue' : '');
+  const localTime = (iso, tz) => { if (!iso) return '—'; try { return new Date(iso).toLocaleString(undefined, { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }); } catch { return iso; } };
+  async function fuAct(path, body, okMessage) {
+    await api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    toast(okMessage, 'success');
+    fu.openForm = null;
+    await draw();
+  }
+  async function followupsPanel() {
+    let data;
+    try {
+      data = await api(`/api/dashboard/followups?state=${fu.filter}`);
+    } catch (error) {
+      return `<section class="panel"><div class="panel-head"><div><p class="eyebrow">FOLLOW-UP REQUESTS</p><h3>Callbacks and staff messages</h3></div></div>${errorView(error.status === 404 ? 'This server does not have the follow-up requests feature yet (it ships with the next release).' : error.message)}</section>`;
+    }
+    const canAct = can('support', 'edit');
+    const c = data.counts;
+    const tab = (key, label, n) => `<button class="btn small ${fu.filter === key ? 'primary' : ''}" data-fu-filter="${key}">${esc(label)}${n === undefined ? '' : ` (${n})`}</button>`;
+    const business = data.business.hoursConfigured
+      ? data.business.open ? badge('Open now', 'green') : `${badge('Closed now', 'amber')} <span class="muted">next opening ${esc(localTime(data.business.nextOpening, data.business.timezone))}</span>`
+      : badge('Hours not configured', 'amber');
+    const cards = data.followups.map((f) => {
+      const w = f.call;
+      const callBtn = f.contactMethod === 'call' && canAct
+        ? (w.allowed && w.tel ? `<a class="btn small primary" href="${esc(w.tel)}" data-fu-call="${f.id}" title="Opens your phone's dialler (not a WhatsApp call)">📞 Call customer</a>`
+          : `<button class="btn small" disabled title="${esc(w.reason)}">📞 Call customer</button>`)
+        : '';
+      const windowLine = f.requestedAt
+        ? w.state === 'before' ? `Scheduled ${esc(localTime(f.requestedAt, f.timezone))} (${esc(f.timezone)}) — waiting` : w.state === 'open' ? `Window open until ${esc(localTime(f.windowEndAt, f.timezone))}` : w.state === 'after' ? `Window passed (${esc(localTime(f.windowEndAt, f.timezone))}) — reschedule or record the outcome` : `Closed`
+        : f.status === 'pending' ? `Waits for the business to open: ${esc(localTime(f.eligibleAt, f.timezone))}` : 'As soon as possible';
+      const form = fu.openForm && fu.openForm.id === f.id ? fu.openForm.kind : null;
+      return `<article class="followup-card ${w.state === 'open' && f.status !== 'completed' && f.status !== 'cancelled' ? 'open' : ''} ${f.status === 'overdue' ? 'overdue' : ''}" data-fu-card="${f.id}">
+        <div>
+          <div><b>${esc(f.customerName || 'Customer')}</b> <span class="file">${esc(maskNumber(f.customerWaId))}</span> ${fuBadge(f.status)} ${badge(f.contactMethod === 'call' ? 'Phone callback' : 'WhatsApp message', 'blue')} ${f.appointmentType ? badge(f.appointmentType, 'purple') : ''}</div>
+          <div class="fu-meta"><span>${esc(f.reference)}</span><span>${windowLine}</span><span>Requested ${formatDate(f.createdAt)}</span>${f.assignedToName ? `<span>Handled by ${esc(f.assignedToName)}</span>` : ''}${f.customerNote ? `<span>📝 ${esc(f.customerNote)}</span>` : ''}${f.outcome ? `<span>Outcome: ${esc(f.outcome)}${f.outcomeNote ? ` — ${esc(f.outcomeNote)}` : ''}</span>` : ''}${f.reminderAttempts ? `<span>${f.reminderAttempts} reminder${f.reminderAttempts > 1 ? 's' : ''} sent</span>` : ''}</div>
+        </div>
+        <div class="fu-actions">
+          <a class="btn small" href="${esc(f.conversationLink)}">Open conversation</a>
+          ${callBtn}
+          ${f.contactMethod === 'whatsapp' && canAct ? `<a class="btn small ${w.allowed ? 'primary' : ''}" href="${esc(f.conversationLink)}" title="${esc(w.reason)}">💬 Reply on WhatsApp</a>` : ''}
+          ${f.actions.assign && !f.assignedAdminId ? `<button class="btn small" data-fu-assign="${f.id}">Take it</button>` : ''}
+          ${f.actions.complete ? `<button class="btn small success" data-fu-form="complete" data-id="${f.id}">Complete</button>` : ''}
+          ${f.actions.reschedule ? `<button class="btn small" data-fu-form="reschedule" data-id="${f.id}">Reschedule</button>` : ''}
+          ${f.actions.cancel ? `<button class="btn small danger" data-fu-cancel="${f.id}">Cancel</button>` : ''}
+        </div>
+        ${form === 'complete' ? `<form class="fu-inline" data-fu-complete="${f.id}"><label>Outcome <select name="outcome"><option value="reached">Reached the customer</option><option value="no_answer">No answer</option><option value="voicemail">Left a voicemail</option><option value="messaged">Messaged on WhatsApp</option><option value="wrong_number">Wrong number</option><option value="other">Other</option></select></label><input name="note" type="text" maxlength="300" placeholder="Note (optional)"><button class="btn small primary" type="submit">Save outcome</button><button class="btn small" type="button" data-fu-close>Close</button></form>` : ''}
+        ${form === 'reschedule' ? `<form class="fu-inline" data-fu-reschedule="${f.id}"><label>New time (${esc(f.timezone)}) <input name="at" type="datetime-local" required></label><button class="btn small primary" type="submit">Reschedule</button><button class="btn small" type="button" data-fu-close>Close</button></form>` : ''}
+      </article>`;
+    }).join('');
+    return `<section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">FOLLOW-UP REQUESTS</p><h3>${c.eligible + c.assigned + c.overdue} actionable · ${c.scheduled + c.pending} waiting · ${c.completed} completed</h3></div><div>${business}</div></div>
+      <div class="toolbar">${tab('open', 'All open', c.pending + c.scheduled + c.eligible + c.assigned + c.overdue)}${tab('due', 'Actionable now', c.eligible + c.assigned + c.overdue)}${tab('scheduled', 'Scheduled', c.scheduled + c.pending)}${tab('overdue', 'Overdue', c.overdue)}${tab('completed', 'Completed', c.completed)}${tab('cancelled', 'Cancelled', c.cancelled)}</div>
+      ${data.followups.length ? cards : emptyView('No follow-up request here. When a customer asks for a phone callback or a WhatsApp message from staff (after hours or from the menu), it appears here with the agreed time, rings at that time, and the "Call customer" action opens your phone\'s dialler during the callback window.')}
+      <p class="muted" style="margin-top:10px">Callback window: ${data.business.callbackWindowMinutes} minutes after the agreed time. "Call customer" opens the device's ordinary dialler with the customer's number — it is not a WhatsApp call, and opening it is not an outcome: record what happened with Complete. Reminders ring here while the dashboard is open; with the browser closed, staff receive the WhatsApp alert.</p>
+    </section>`;
+  }
+  function bindFollowups() {
+    view.querySelectorAll('[data-fu-filter]').forEach((btn) => btn.addEventListener('click', () => { fu.filter = btn.dataset.fuFilter; draw(); }));
+    view.querySelectorAll('[data-fu-form]').forEach((btn) => btn.addEventListener('click', () => { fu.openForm = { id: Number(btn.dataset.id), kind: btn.dataset.fuForm }; draw(); }));
+    view.querySelectorAll('[data-fu-close]').forEach((btn) => btn.addEventListener('click', () => { fu.openForm = null; draw(); }));
+    view.querySelectorAll('[data-fu-assign]').forEach((btn) => btn.addEventListener('click', () => fuAct(`/api/dashboard/followups/${btn.dataset.fuAssign}/assign`, {}, 'The request is yours').catch((e) => toast(e.message, 'error'))));
+    view.querySelectorAll('[data-fu-cancel]').forEach((btn) => btn.addEventListener('click', async () => { if (!(await confirmDialog('Cancel this follow-up request? Its reminders stop and the customer is not contacted.'))) return; fuAct(`/api/dashboard/followups/${btn.dataset.fuCancel}/cancel`, { reason: 'cancelled by staff' }, 'Request cancelled').catch((e) => toast(e.message, 'error')); }));
+    view.querySelectorAll('[data-fu-call]').forEach((a) => a.addEventListener('click', async (e) => {
+      // The server re-checks the window and records that the dialler was opened; only then is the tel: link followed.
+      e.preventDefault();
+      try {
+        const r = await api(`/api/dashboard/followups/${a.dataset.fuCall}/call`, { method: 'POST' });
+        if (r.tel) window.location.href = r.tel;
+        toast('Dialler opened — record the outcome with Complete when done', 'success');
+        await draw();
+      } catch (error) { toast(error.message, 'error'); await draw(); }
+    }));
+    view.querySelectorAll('[data-fu-complete]').forEach((form) => form.addEventListener('submit', (e) => { e.preventDefault(); fuAct(`/api/dashboard/followups/${form.dataset.fuComplete}/complete`, { outcome: form.elements.outcome.value, note: form.elements.note.value }, 'Outcome recorded').catch((err) => toast(err.message, 'error')); }));
+    view.querySelectorAll('[data-fu-reschedule]').forEach((form) => form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const local = form.elements.at.value; // the browser's local time; the server validates it against the business schedule
+      if (!local) return;
+      fuAct(`/api/dashboard/followups/${form.dataset.fuReschedule}/reschedule`, { requestedAt: new Date(local).toISOString() }, 'Rescheduled').catch((err) => toast(err.message, 'error'));
+    }));
+  }
+
   async function draw() {
     const data = await api(`/api/dashboard/handoffs?state=${state.filter}`);
+    const followups = await followupsPanel();
     if (disposed) return;
     const canAct = can('support', 'edit');
     const tab = (key, label, n) => `<button class="btn ${state.filter === key ? 'primary' : ''}" data-filter="${key}">${esc(label)}${n === null ? '' : ` (${n})`}</button>`;
     view.innerHTML = `
+      ${followups}
       <section class="panel">
         <div class="panel-head"><div><p class="eyebrow">HUMAN HANDOFF</p><h3>${data.counts.waiting} waiting · ${data.counts.active} in progress · ${data.counts.resolved} resolved</h3></div></div>
         <div class="toolbar">${tab('open', 'All open', null)}${tab('waiting', 'Waiting', data.counts.waiting)}${tab('active', 'In progress', data.counts.active)}${tab('resolved', 'Resolved', data.counts.resolved)}</div>
@@ -461,8 +546,10 @@ route('#/support', 'Human Support Queue', 'Customers who asked for a person. Whi
       }
     }));
     view.querySelectorAll('[data-return]').forEach((btn) => btn.addEventListener('click', () => act(`/api/dashboard/handoffs/${btn.dataset.return}/return-to-ai`, btn, 'The conversation is back with the assistant')));
+    bindFollowups();
     clearTimeout(timer);
-    if (!disposed) timer = setTimeout(() => draw().catch(() => {}), 15000);
+    // The 15 s refresh pauses while an outcome / reschedule form is open, so what the person is typing is never wiped by a redraw.
+    if (!disposed) timer = setTimeout(() => { if (fu.openForm) { timer = setTimeout(() => draw().catch(() => {}), 15000); return; } draw().catch(() => {}); }, 15000);
   }
   await draw();
 });

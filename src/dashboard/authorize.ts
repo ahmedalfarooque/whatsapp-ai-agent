@@ -84,6 +84,9 @@ const RULES: readonly Rule[] = [
   { test: /^\/realestate\/(overview|leads|followups)(\/|$)/, spec: F('requests') },
   { test: /^\/customers\/\d+\/(pause|resume|take-over)$/, spec: F('support', 'edit') },
   { test: /^\/handoffs(\/|$)/, spec: F('support') },
+  // follow-up requests (callbacks / staff messages) live beside the handoff queue; the bell is readable by anyone with support view
+  { test: /^\/followups(\/|$)/, spec: F('support') },
+  { test: /^\/staff-notifications(\/|$)/, spec: F('support', 'view') },
   { test: /^\/inbox(\/|$)/, spec: F('conversations') },
   { test: /^\/customers(\/|$)/, spec: F('customers') },
   { test: /^\/customer-reports(\/|$)/, spec: F('customers') },

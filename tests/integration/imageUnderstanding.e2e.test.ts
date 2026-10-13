@@ -291,13 +291,16 @@ describe('pictures respect the same boundaries as text', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('documents and voice notes are stored for staff and never analysed or answered by the AI: the customer gets ONE acknowledgement that they cannot be read', async () => {
+  it('a file is READ (or honestly reported unreadable) and answered by the AI; a voice note with no audio model configured gets ONE acknowledgement and never reaches the model', async () => {
     provider(() => answer(CAMRY));
     const waId = nextWa();
+    // the "PDF" here is not a real PDF: the extractor fails, the model is told the file was NOT read, and still answers the customer
     await processInboundMessage({ waId, messageId: `wamid.doc.${++counter}`, timestamp: Date.now(), type: 'document', text: 'my invoice', accountId: AUTO, media: media({ kind: 'document', mimeType: 'application/pdf' }) }, { knowledge: LAND_CRUISER_KB });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String((fetchMock.mock.calls[0]![1] as { body: string }).body)).toContain('DOCUMENT NOT READ');
     await processInboundMessage({ waId, messageId: `wamid.voice.${++counter}`, timestamp: Date.now(), type: 'voice', accountId: AUTO }, { knowledge: LAND_CRUISER_KB });
-    expect(sent()).toHaveLength(1);
-    expect(sent()[0]).toMatch(/voice notes, videos or files/);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sent()).toHaveLength(2);
+    expect(sent()[1]).toMatch(/voice notes, videos or files/);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // the voice note never reached the model: no audio model is configured
   });
 });

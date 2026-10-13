@@ -7,6 +7,11 @@ import { toolRegistry, toolSchemasForAccount } from '../tools';
 import { currentAccountId } from '../accounts/accountContext';
 import { contentText, type ChatMessage } from './types';
 import { IMAGE_ANALYSIS_TOOL } from './vision';
+import { AUDIO_TRANSCRIPT_TOOL } from './audio';
+import { DOCUMENT_TEXT_TOOL, MEDIA_NOTE_TOOL } from './mediaContext';
+
+/** Hidden "tool" rows that carry what the assistant knows about a customer's picture, voice note, file or video (shown to the model as context). */
+export const CONTEXT_TOOL_ROWS = new Set([IMAGE_ANALYSIS_TOOL, AUDIO_TRANSCRIPT_TOOL, DOCUMENT_TEXT_TOOL, MEDIA_NOTE_TOOL]);
 import type { ChatMessageForLlm } from '../memory/conversationRepo';
 
 export interface GeneratedMessage {
@@ -29,7 +34,7 @@ export interface AgentLoopResult {
  */
 export function historyToChatMessages(history: ChatMessageForLlm[]): ChatMessage[] {
   return history
-    .filter((h) => (h.role !== 'tool' || h.tool_name === IMAGE_ANALYSIS_TOOL) && !(h.role === 'assistant' && h.content.startsWith('[requested tools:')))
+    .filter((h) => (h.role !== 'tool' || CONTEXT_TOOL_ROWS.has(h.tool_name ?? '')) && !(h.role === 'assistant' && h.content.startsWith('[requested tools:')))
     // A picture's analysis is stored beside the customer's message (hidden from the inbox) and shown to the model as context on the
     // customer's side of the conversation: it is what the assistant knows about that photo, now and in later turns.
     .map((h) => (h.role === 'tool' ? { role: 'user' as const, content: h.content } : { role: h.role, content: h.content }));

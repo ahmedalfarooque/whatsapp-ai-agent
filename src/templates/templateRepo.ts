@@ -195,6 +195,23 @@ export function resetTemplateToDefault(key: string, updatedBy: string, db: Datab
 
 export interface TemplateVars {
   name?: string | null;
+  // ---- after-hours / follow-up requests
+  /** "tomorrow at 9:00 AM" — the next opening, in the message language. */
+  next_open?: string;
+  /** The agreed (or described) contact time. */
+  when?: string;
+  /** "Phone call" / "WhatsApp message" in the message language. */
+  method?: string;
+  /** The chosen appointment type label; {types} is the numbered list to choose from; {requests} the customer's open requests. */
+  type?: string;
+  types?: string;
+  requests?: string;
+  /** "30 minutes" — the callback window. */
+  window?: string;
+  /** The business's response-time promise; empty unless configured. */
+  promise?: string;
+  /** Overrides the published contact phone ({phone}) for one message. */
+  phone?: string;
   business?: string;
   maps?: string;
   hours?: string;
@@ -282,7 +299,7 @@ function renderTemplateBody(text: string, vars: TemplateVars): string {
     business_en: settings.businessName,
     business_ar: settings.businessNameAr ?? settings.businessName,
     description: (language === 'ar' ? settings.descriptionAr ?? settings.descriptionEn : settings.descriptionEn ?? settings.descriptionAr) ?? '',
-    phone: settings.contactPhone ?? '',
+    phone: vars.phone ?? settings.contactPhone ?? '',
     email: settings.contactEmail ?? '',
     website: /\{website\}/.test(text) ? primaryWebsite(currentAccountId()) : '',
     hours: vars.hours ?? formatBusinessHours(settings, language),
@@ -295,9 +312,12 @@ function renderTemplateBody(text: string, vars: TemplateVars): string {
     catalogue: vars.catalogue ?? '',
     service: vars.service ?? '', date: vars.date ?? '', time: vars.time ?? '', vehicle: vars.vehicle ?? '', details: vars.details ?? '',
     customer: vars.customer ?? '', status: vars.status ?? '', kind: vars.kind ?? '', actor: vars.actor ?? '',
+    // after-hours / follow-up requests (followupDefaults.ts)
+    next_open: vars.next_open ?? '', when: vars.when ?? '', method: vars.method ?? '', type: vars.type ?? '', types: vars.types ?? '', requests: vars.requests ?? '',
+    window: vars.window ?? '', promise: vars.promise ?? (settings.responseTimePromise ?? ''),
   };
   return text
-    .replace(/\{(name|business|business_en|business_ar|maps|hours|address|notes|reference|offers|catalogues|projects|catalogue|service|date|time|vehicle|details|customer|status|kind|actor|description|phone|email|website)\}/g, (_, k: string) => values[k] || EMPTY_MARK)
+    .replace(/\{(name|business|business_en|business_ar|maps|hours|address|notes|reference|offers|catalogues|projects|catalogue|service|date|time|vehicle|details|customer|status|kind|actor|description|phone|email|website|next_open|when|method|type|types|requests|window|promise)\}/g, (_, k: string) => values[k] || EMPTY_MARK)
     // A line whose only content was an empty placeholder ("Location: ", "🅿️ ") is dropped so
     // customers never see dangling labels. Lines with real text keep their text.
     .split('\n')

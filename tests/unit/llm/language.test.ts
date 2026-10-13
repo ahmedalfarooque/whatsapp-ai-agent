@@ -55,9 +55,10 @@ describe('decideReplyLanguage (the shared policy)', () => {
     expect(decideReplyLanguage({ latestText: '价格是多少？', menuLanguage: 'ar' }).code).toBe('zh');
   });
 
-  it('a message with no language of its own uses the menu choice; with no menu choice the model follows the latest message', () => {
+  it('a message with no language of its own uses the menu choice; with no menu choice either, English is the shared default (never a guess)', () => {
     expect(decideReplyLanguage({ latestText: '2', menuLanguage: 'ar' })).toMatchObject({ code: 'ar', source: 'menu_choice' });
-    expect(decideReplyLanguage({ latestText: '👍' })).toMatchObject({ code: null, source: 'unknown' });
+    expect(decideReplyLanguage({ latestText: '👍' })).toMatchObject({ code: 'en', name: 'English', source: 'default_english' });
+    expect(decideReplyLanguage({ latestText: '👍' }).instruction).toContain('REPLY LANGUAGE: English for this message');
     expect(decideReplyLanguage({ latestText: 'ok', menuLanguage: 'ar' })).toMatchObject({ code: 'ar', source: 'menu_choice' }); // too short to be sure it is English
   });
 

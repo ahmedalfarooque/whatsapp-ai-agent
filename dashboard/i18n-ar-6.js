@@ -2,6 +2,15 @@
 window.I18N_AR = window.I18N_AR || {};
 window.I18N_AR_PATTERNS = window.I18N_AR_PATTERNS || [];
 Object.assign(window.I18N_AR, {
+  // follow-up requests (Human Support Queue) and the staff notification bell
+  'Take it': 'تولّي الطلب', 'Complete': 'إكمال', 'Reschedule': 'إعادة الجدولة', 'Save outcome': 'حفظ النتيجة', 'Allow system alerts': 'السماح بتنبيهات النظام',
+  'Dialler opened — record the outcome with Complete when done': 'تم فتح تطبيق الاتصال — سجّل النتيجة عبر «إكمال» عند الانتهاء',
+  'The request is yours': 'أصبح الطلب لديك', 'Request cancelled': 'تم إلغاء الطلب', 'Outcome recorded': 'تم تسجيل النتيجة', 'Rescheduled': 'تمت إعادة الجدولة',
+  'Open conversation': 'فتح المحادثة', 'Call customer': 'الاتصال بالعميل', 'Reply on WhatsApp': 'الرد عبر واتساب', 'Cancel': 'إلغاء', 'Close': 'إغلاق',
+  'Notifications': 'الإشعارات', 'Staff notifications': 'إشعارات الموظفين', 'Sound on': 'تشغيل الصوت', 'Sound off': 'إيقاف الصوت', 'sound off': 'الصوت متوقف',
+  'Open the Human Support Queue': 'فتح طابور الدعم البشري', 'FOLLOW-UP REQUESTS': 'طلبات المتابعة', 'Callbacks and staff messages': 'طلبات الاتصال ورسائل الموظفين',
+  'Actionable now': 'جاهزة الآن', 'Overdue': 'متأخرة',
+  'Open now': 'مفتوح الآن', 'Closed now': 'مغلق الآن', 'Hours not configured': 'لم تُضبط ساعات العمل', 'Phone callback': 'اتصال هاتفي', 'WhatsApp message': 'رسالة واتساب',
   // template categories and section captions (upper-case captions are literal text in the pages)
   'Greeting': 'الترحيب', 'GREETING': 'الترحيب',
   'Inquiry Cart': 'سلة الاستفسارات',

@@ -71,6 +71,7 @@ import { resolveDashboardAccount, assertAccountAccess } from './accountMiddlewar
 import { authorizeDashboardRequest } from './authorize';
 import { registerUserRoutes } from './userRoutes';
 import { registerHandoffRoutes } from './handoffRoutes';
+import { registerFollowupRoutes } from './followupRoutes';
 import { registerInboxRoutes } from './inboxRoutes';
 import { HandoffError, returnToAi, getHold, getOpenHandoff, takeOverCustomer, type HandoffActor } from '../handoff/handoffRepo';
 import { buildOverview, getAiState, OVERVIEW_RANGES, type OverviewRange } from './overview';
@@ -359,6 +360,7 @@ export function createDashboardRouter(): Router {
   });
   registerUserRoutes(router);
   registerHandoffRoutes(router);
+  registerFollowupRoutes(router);
   registerInboxRoutes(router);
   registerCustomerRoutes(router);
   registerBrandingRoutes(router);
@@ -1218,7 +1220,9 @@ export function createDashboardRouter(): Router {
     // The VISION model (the one given customer pictures) and the reply-language override are per business too; both optional.
     const visionModel = typeof req.body?.visionModel === 'string' ? req.body.visionModel.trim() : '';
     const replyLanguage = typeof req.body?.replyLanguage === 'string' ? req.body.replyLanguage.trim().toLowerCase() : undefined;
-    if (!apiKey && !model && !visionModel && replyLanguage === undefined) {
+    // The AUDIO model (the one given customer voice notes) is per business and optional: '' = voice notes are not transcribed.
+    const audioModel = typeof req.body?.audioModel === 'string' ? req.body.audioModel.trim() : undefined;
+    if (!apiKey && !model && !visionModel && replyLanguage === undefined && audioModel === undefined) {
       res.status(400).json({ error: 'validation_failed', fields: ['apiKey', 'model'] });
       return;
     }
@@ -1234,6 +1238,11 @@ export function createDashboardRouter(): Router {
       res.status(400).json({ error: 'validation_failed', fields: ['replyLanguage'] });
       return;
     }
+    if (audioModel !== undefined && audioModel !== '' && !/^[A-Za-z0-9._:/-]{1,100}$/.test(audioModel)) {
+      res.status(400).json({ error: 'validation_failed', fields: ['audioModel'] });
+      return;
+    }
+    if (audioModel !== undefined) updateBusinessSettings({ openRouterAudioModel: audioModel || null }); // '' = voice notes are not transcribed
     if (apiKey) setSecret('OPENROUTER_API_KEY', apiKey, req.adminUserId as number);
     if (model) updateBusinessSettings({ openRouterModel: model });
     if (visionModel) updateBusinessSettings({ openRouterVisionModel: visionModel });
@@ -1262,6 +1271,7 @@ export function createDashboardRouter(): Router {
         model: effectiveModel, modelStatus: probe?.status ?? null,
         visionModel: settings.openRouterVisionModel, visionStatus: visionProbe?.status ?? null,
         replyLanguage: settings.aiReplyLanguage,
+        audioModel: settings.openRouterAudioModel,
       });
     } catch (error) {
       logger.error({ error }, 'dashboard: AI configure/test threw unexpectedly');

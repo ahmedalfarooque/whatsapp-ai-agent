@@ -68,8 +68,24 @@ export const businessSettingsInputSchema = z
     staffWhatsappNumber: z.string().regex(/^\+?\d{8,15}$/, 'must be an international number like +9665XXXXXXXX').nullable(),
     contactPhone: z.string().max(40).regex(/^\+?[\d\s().-]{5,40}$/, 'must be a phone number').nullable(),
     contactEmail: z.string().max(200).regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'must be an email address').nullable(),
+    // ---- after-hours, follow-up and reminder rules (migration 025); null = the shared default
+    /** ISO weekday "1".."7" → open intervals [["09:00","13:00"],["16:00","20:00"]]; an empty list = closed that day. */
+    weeklyHours: z.record(z.string().regex(/^[1-7]$/), z.array(z.tuple([z.string().regex(HHMM_RE, 'must be HH:mm'), z.string().regex(HHMM_RE, 'must be HH:mm')])).max(4)).nullable(),
+    closures: z.array(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').optional(), label: z.string().max(120).optional() })).max(60).nullable(),
+    afterHoursEnabled: z.boolean().nullable(),
+    directCallEnabled: z.boolean().nullable(),
+    callbackWindowMinutes: z.number().int().min(5).max(240).nullable(),
+    reminderLeadMinutes: z.number().int().min(0).max(1440).nullable(),
+    reminderRepeatMinutes: z.number().int().min(1).max(120).nullable(),
+    reminderMaxAttempts: z.number().int().min(1).max(10).nullable(),
+    responseTimePromise: z.string().max(200).nullable(),
+    /** null = voice notes are not transcribed for this business; a model id = the OpenRouter model that receives the audio. */
+    openRouterAudioModel: z.string().min(1).max(100).nullable(),
   })
   .partial();
+
+export type WeeklyHours = Record<string, Array<[string, string]>>;
+export interface BusinessClosure { from: string; to?: string; label?: string }
 
 export type BusinessSettingsPatch = z.infer<typeof businessSettingsInputSchema>;
 
@@ -118,6 +134,20 @@ export interface BusinessSettings {
   hoursConfigured: boolean;
   /** True when a Google Maps link was entered (or this is the original business, which has a confirmed default). */
   googleMapsConfigured: boolean;
+  /** Per-day schedule (split shifts, different days); null = derived from the start/end/days columns. */
+  weeklyHours: WeeklyHours | null;
+  /** Whole days the business is closed (holidays, exceptional closures), local dates. */
+  closures: BusinessClosure[];
+  afterHoursEnabled: boolean;
+  directCallEnabled: boolean;
+  callbackWindowMinutes: number;
+  reminderLeadMinutes: number;
+  reminderRepeatMinutes: number;
+  reminderMaxAttempts: number;
+  /** Promised to customers only when the business set it ("within one working day"). */
+  responseTimePromise: string | null;
+  /** null = voice notes are not transcribed for this business. */
+  openRouterAudioModel: string | null;
 }
 
 /** Official Google Maps link for Rowad Alfa Auto Care (overridable from the dashboard). */
@@ -170,6 +200,16 @@ interface BusinessSettingsRow {
   staff_whatsapp_number: string | null;
   contact_phone: string | null;
   contact_email: string | null;
+  weekly_hours: string | null;
+  closures: string | null;
+  after_hours_enabled: number;
+  direct_call_enabled: number;
+  callback_window_minutes: number;
+  reminder_lead_minutes: number;
+  reminder_repeat_minutes: number;
+  reminder_max_attempts: number;
+  response_time_promise: string | null;
+  open_router_audio_model: string | null;
 }
 
 /** business_settings.id == whatsapp account id (one profile per business). */
@@ -184,7 +224,8 @@ function readRow(accountId: number): BusinessSettingsRow {
             business_name_ar, business_category, description_ar, description_en, address_ar, address_en,
             google_maps_url, latitude, longitude, friday_hours_start, friday_hours_end,
             location_notes_ar, location_notes_en, logo_document_id, staff_whatsapp_number,
-            contact_phone, contact_email
+            contact_phone, contact_email, weekly_hours, closures, after_hours_enabled, direct_call_enabled, callback_window_minutes,
+            reminder_lead_minutes, reminder_repeat_minutes, reminder_max_attempts, response_time_promise, open_router_audio_model
      FROM business_settings WHERE id = ?`,
   );
   let row = select.get(accountId) as BusinessSettingsRow | undefined;
@@ -253,7 +294,47 @@ export function getBusinessSettings(accountId: number = currentAccountId()): Bus
     locationNotesEn: row.location_notes_en,
     logoDocumentId: row.logo_document_id,
     staffWhatsappNumber: row.staff_whatsapp_number,
+    weeklyHours: parseWeeklyHours(row.weekly_hours),
+    closures: parseClosures(row.closures),
+    afterHoursEnabled: row.after_hours_enabled !== 0,
+    directCallEnabled: row.direct_call_enabled !== 0,
+    callbackWindowMinutes: row.callback_window_minutes ?? 30,
+    reminderLeadMinutes: row.reminder_lead_minutes ?? 0,
+    reminderRepeatMinutes: row.reminder_repeat_minutes ?? 5,
+    reminderMaxAttempts: row.reminder_max_attempts ?? 3,
+    responseTimePromise: row.response_time_promise,
+    openRouterAudioModel: row.open_router_audio_model ?? (env.OPENROUTER_AUDIO_MODEL || null),
   };
+}
+
+/** A stored weekly schedule, or null when absent or unreadable (a damaged value never crashes a reply: the older columns apply instead). */
+function parseWeeklyHours(raw: string | null): WeeklyHours | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const out: WeeklyHours = {};
+    for (const [day, intervals] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!/^[1-7]$/.test(day) || !Array.isArray(intervals)) continue;
+      out[day] = intervals.filter((i): i is [string, string] => Array.isArray(i) && i.length === 2 && HHMM_RE.test(String(i[0])) && HHMM_RE.test(String(i[1]))).map((i) => [String(i[0]), String(i[1])]);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function parseClosures(raw: string | null): BusinessClosure[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && /^\d{4}-\d{2}-\d{2}$/.test(String((c as Record<string, unknown>).from)))
+      .map((c) => ({ from: String(c.from), to: /^\d{4}-\d{2}-\d{2}$/.test(String(c.to)) ? String(c.to) : undefined, label: c.label ? String(c.label).slice(0, 120) : undefined }));
+  } catch {
+    return [];
+  }
 }
 
 const DAY_NAMES: Record<'ar' | 'en', string[]> = {
@@ -279,6 +360,7 @@ export function formatClock(hhmm: string, language: 'ar' | 'en'): string {
  */
 export function formatBusinessHours(settings: BusinessSettings, language: 'ar' | 'en'): string {
   if (!settings.hoursConfigured) return '';
+  if (settings.weeklyHours) return formatWeeklyHours(settings.weeklyHours, language);
   const days = settings.businessDays.filter((d) => d >= 1 && d <= 7);
   const friday = 5;
   const fridayStart = settings.fridayHoursStart ?? settings.businessHoursStart;
@@ -300,6 +382,21 @@ export function formatBusinessHours(settings: BusinessSettings, language: 'ar' |
   if (range) lines.push(`• ${range}: ${formatClock(settings.businessHoursStart, language)} - ${formatClock(settings.businessHoursEnd, language)}`);
   if (fridayDiffers) lines.push(`• ${language === 'ar' ? 'يوم الجمعة' : 'Friday'}: ${formatClock(fridayStart, language)} - ${formatClock(fridayEnd, language)}`);
   const closed = [1, 2, 3, 4, 5, 6, 7].filter((d) => !days.includes(d));
+  if (closed.length) lines.push(`• ${language === 'ar' ? 'مغلق' : 'Closed'}: ${closed.map((d) => names[d]).join(language === 'ar' ? '، ' : ', ')}`);
+  return lines.join('\n');
+}
+
+/** A per-day schedule, one line per day in Saudi week order; split shifts are joined with " / "; a day without intervals is closed. */
+export function formatWeeklyHours(weekly: WeeklyHours, language: 'ar' | 'en'): string {
+  const names = DAY_NAMES[language];
+  const sep = language === 'ar' ? ' / ' : ' / ';
+  const lines: string[] = [];
+  const closed: number[] = [];
+  for (const d of [6, 7, 1, 2, 3, 4, 5]) {
+    const intervals = weekly[String(d)] ?? [];
+    if (intervals.length === 0) { closed.push(d); continue; }
+    lines.push(`• ${names[d]}: ${intervals.map(([a, b]) => `${formatClock(a, language)} - ${formatClock(b, language)}`).join(sep)}`);
+  }
   if (closed.length) lines.push(`• ${language === 'ar' ? 'مغلق' : 'Closed'}: ${closed.map((d) => names[d]).join(language === 'ar' ? '، ' : ', ')}`);
   return lines.join('\n');
 }
@@ -347,8 +444,19 @@ export function getBusinessSettingsOverrides(accountId: number = currentAccountI
     staffWhatsappNumber: row.staff_whatsapp_number !== null,
     contactPhone: row.contact_phone !== null,
     contactEmail: row.contact_email !== null,
-    hoursConfigured: row.business_hours_start !== null && row.business_hours_end !== null,
+    hoursConfigured: (row.business_hours_start !== null && row.business_hours_end !== null) || row.weekly_hours !== null,
     googleMapsConfigured: row.google_maps_url !== null,
+    weeklyHours: row.weekly_hours !== null,
+    closures: row.closures !== null,
+    // NOT NULL columns with a shared default: "overridden" = differs from that default
+    afterHoursEnabled: row.after_hours_enabled !== 1,
+    directCallEnabled: row.direct_call_enabled !== 1,
+    callbackWindowMinutes: row.callback_window_minutes !== 30,
+    reminderLeadMinutes: row.reminder_lead_minutes !== 0,
+    reminderRepeatMinutes: row.reminder_repeat_minutes !== 5,
+    reminderMaxAttempts: row.reminder_max_attempts !== 3,
+    responseTimePromise: row.response_time_promise !== null,
+    openRouterAudioModel: row.open_router_audio_model !== null,
   };
 }
 
@@ -387,7 +495,20 @@ const COLUMN_MAP: Record<keyof BusinessSettingsPatch, string> = {
   staffWhatsappNumber: 'staff_whatsapp_number',
   contactPhone: 'contact_phone',
   contactEmail: 'contact_email',
+  weeklyHours: 'weekly_hours',
+  closures: 'closures',
+  afterHoursEnabled: 'after_hours_enabled',
+  directCallEnabled: 'direct_call_enabled',
+  callbackWindowMinutes: 'callback_window_minutes',
+  reminderLeadMinutes: 'reminder_lead_minutes',
+  reminderRepeatMinutes: 'reminder_repeat_minutes',
+  reminderMaxAttempts: 'reminder_max_attempts',
+  responseTimePromise: 'response_time_promise',
+  openRouterAudioModel: 'open_router_audio_model',
 };
+
+/** Columns whose shared default is a non-null value: a `null` patch means "back to the default", never SQL NULL. */
+const NOT_NULL_DEFAULTS: Partial<Record<string, number>> = { after_hours_enabled: 1, direct_call_enabled: 1, callback_window_minutes: 30, reminder_lead_minutes: 0, reminder_repeat_minutes: 5, reminder_max_attempts: 3 };
 
 /**
  * Validates the given patch (each field's own rule; `null` means "reset to
@@ -407,7 +528,7 @@ export function updateBusinessSettings(patch: unknown, accountId: number = curre
   readRow(accountId); // asserts the account exists (and creates its empty profile row if needed)
   const entries = Object.entries(result.data).filter(([, v]) => v !== undefined) as [
     keyof BusinessSettingsPatch,
-    string | number | string[] | null,
+    string | number | boolean | string[] | object | null,
   ][];
   if (entries.length === 0) return getBusinessSettings(accountId);
 
@@ -416,7 +537,10 @@ export function updateBusinessSettings(patch: unknown, accountId: number = curre
   for (const [field, value] of entries) {
     const column = COLUMN_MAP[field];
     setClauses.push(`${column} = @${column}`);
-    params[column] = Array.isArray(value) ? value.join(',') : value;
+    if (value === null) params[column] = NOT_NULL_DEFAULTS[column] ?? null;
+    else if (typeof value === 'boolean') params[column] = value ? 1 : 0;
+    else if (field === 'weeklyHours' || field === 'closures') params[column] = JSON.stringify(value);
+    else params[column] = Array.isArray(value) ? value.join(',') : (value as string | number);
   }
   setClauses.push("updated_at = datetime('now')");
 

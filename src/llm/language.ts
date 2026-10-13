@@ -107,7 +107,7 @@ export function languageName(code: string): string {
 }
 
 export interface ReplyLanguageInput {
-  /** The customer's latest message (text or the caption under a picture). */
+  /** The customer's latest message: text, a picture caption, a voice-note transcript or the readable text of a file they sent. */
   latestText?: string | null;
   /** The language the customer picked from the menu ('ar' | 'en'), used for templates. */
   menuLanguage?: string | null;
@@ -119,7 +119,7 @@ export interface ReplyLanguageDecision {
   /** The language the assistant is asked to write in, or null when the model should follow the latest message itself. */
   code: string | null;
   name: string | null;
-  source: 'account_override' | 'latest_message' | 'menu_choice' | 'unknown';
+  source: 'account_override' | 'latest_message' | 'menu_choice' | 'default_english';
   /** The exact instruction given to the model. */
   instruction: string;
 }
@@ -145,7 +145,8 @@ export function decideReplyLanguage(input: ReplyLanguageInput): ReplyLanguageDec
       instruction: `REPLY LANGUAGE: ${name} for this message (the customer chose ${name} from the menu and their latest message shows no particular language). ${LANGUAGE_RULES}`,
     };
   }
-  return { code: null, name: null, source: 'unknown', instruction: `REPLY LANGUAGE: the language of the customer's latest message. ${LANGUAGE_RULES}` };
+  // Nothing detectable and nothing selected: English (the shared default for every business), never a guess.
+  return { code: 'en', name: 'English', source: 'default_english', instruction: `REPLY LANGUAGE: English for this message (no language could be detected in the customer's latest message or media and none was selected). ${LANGUAGE_RULES}` };
 }
 
 const LANGUAGE_RULES = 'Always answer in the language the customer used in their LATEST message: if they switch language, switch with them, every time; if a message mixes languages, use the main language of the question itself; if they explicitly ask for a language, use it. The language chosen from the menu only selects the menu texts, never the reply language. Keep brand, product, model and place names, product codes, part numbers, phone numbers and addresses exactly as written (never translated or altered); numbers stay numbers.';

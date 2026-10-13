@@ -1,3 +1,5 @@
+import { FOLLOWUP_TEMPLATES } from './followupDefaults';
+
 // Shipped reply templates — the customer-facing WhatsApp content for Rowad Alfa
 // Auto Care, ported from the original Antigravity implementation
 // (config.json reply_templates + the submenu detail texts in its router).
@@ -453,4 +455,7 @@ export const TEMPLATE_DEFAULTS: TemplateDefault[] = [
 ];
 
 /** Keys of templates removed from this list; unmodified rows are cleaned up on boot. */
+// The after-hours / follow-up texts are shared by every business (no business facts inside; see followupDefaults.ts).
+TEMPLATE_DEFAULTS.push(...FOLLOWUP_TEMPLATES);
+
 export const RETIRED_TEMPLATE_KEYS = ['welcome'];

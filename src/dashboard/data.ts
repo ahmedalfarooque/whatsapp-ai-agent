@@ -145,6 +145,8 @@ export interface AiConfigView {
   model: string;
   /** The image-capable model given customer pictures (per business; env default). */
   visionModel: string;
+  /** null = voice notes are not transcribed for this business. */
+  audioModel: string | null;
   /** null = the shared policy (reply in the customer's latest language); a code = this business always replies in it. */
   replyLanguage: string | null;
   maxToolRounds: number;
@@ -159,6 +161,7 @@ export function getAiConfig(): AiConfigView {
     providerMode: env.shouldUseMockProviders ? 'mock' : 'production',
     model: getBusinessSettings().openRouterModel,
     visionModel: getBusinessSettings().openRouterVisionModel,
+    audioModel: getBusinessSettings().openRouterAudioModel,
     replyLanguage: getBusinessSettings().aiReplyLanguage,
     maxToolRounds: env.MAX_TOOL_ROUNDS,
     conversationHistoryLimit: getBusinessSettings().conversationHistoryLimit,

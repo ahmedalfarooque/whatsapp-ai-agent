@@ -6,11 +6,17 @@ import {
   getOrCreateCustomer,
   setCustomerLanguage,
   setCustomerMenuState,
+  setCustomerAfterHoursNotified,
   getCustomerFlowData,
   getCustomerById,
   type Customer,
   type CustomerLanguage,
 } from '../memory/customerRepo';
+import { afterHoursNoticeSend, followupMenuSend, FOLLOWUP_STATES, isFollowupState, routeFollowup, type FollowupRouteResult } from '../followups/customerFlow';
+import { describeMoment, nextOpening } from '../setup/hours';
+import { AUDIO_TRANSCRIPT_TOOL, audioContextLine, transcribeAudio, type AudioTranscription } from '../llm/audio';
+import { extractDocumentText, isExtractableDocument, type DocumentTextResult } from '../media/textExtractors';
+import { DOCUMENT_TEXT_TOOL, MEDIA_NOTE_TOOL, documentContextLine, videoContextLine } from '../llm/mediaContext';
 import {
   getOrCreateActiveConversation,
   appendMessage,
@@ -194,10 +200,16 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   // the AI path after the vision model has looked at the actual image (never through the menu, and never inside a guided request, where
   // a typed answer is expected). A voice note, audio, video, document, sticker, location, reaction... is recorded for the team and NEVER
   // answered: no apology, no menu, no AI. Staff can still reply by hand.
-  const picture = msg.type === 'image' && msg.media?.kind === 'image' && settings.autoRepliesEnabled && settings.aiRepliesEnabled && !inGuidedFlow(customer.menu_state)
-    ? msg.media
-    : null;
-  if (msg.type !== 'text' && msg.type !== 'interactive' && !picture) {
+  const canAnalyse = settings.autoRepliesEnabled && settings.aiRepliesEnabled && !inGuidedFlow(customer.menu_state);
+  const picture = msg.type === 'image' && msg.media?.kind === 'image' && canAnalyse ? msg.media : null;
+  // A voice note is transcribed by the business's audio model (when one is configured) and then answered like typed text; a readable file
+  // (PDF, Word, Excel, PowerPoint, text) has its text read and is answered from it; a video is recorded and answered with an honest
+  // "cannot watch videos" note. Everything else keeps the one acknowledgement per window.
+  const voice = (msg.type === 'voice' || msg.type === 'audio') && msg.media && canAnalyse && getBusinessSettings().openRouterAudioModel ? msg.media : null;
+  const document = msg.type === 'document' && msg.media && canAnalyse && isExtractableDocument(msg.media.mimeType, msg.media.fileName) ? msg.media : null;
+  const video = msg.type === 'video' && msg.media && canAnalyse ? msg.media : null;
+  const analysedMedia = picture ?? voice ?? document ?? video;
+  if (msg.type !== 'text' && msg.type !== 'interactive' && !analysedMedia) {
     logger.info({ waId: maskedId, type: msg.type }, 'non-text inbound message recorded; no automatic reply');
     if (!SILENT_UNSTORED_TYPES.has(msg.type)) {
       storeInbound(conversation.id, msg);
@@ -206,8 +218,9 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
       // automatic replies off, and never for a picture the assistant could not answer for another reason (that path has its own reply).
       // Staff switch the acknowledgement off for a business by blanking the template.
       const ackText = ACKNOWLEDGED_MEDIA.has(msg.type) && settings.autoRepliesEnabled && !getHold(customer.id) ? resolveTemplate('unsupported_message', ctx.language, { name: customer.display_name ?? msg.contactName ?? '' }).trim() : '';
+      const why = msg.type === 'voice' || msg.type === 'audio' ? (canAnalyse ? 'no audio model is configured for this business' : 'not transcribed here') : msg.type === 'document' ? (canAnalyse ? `file type ${msg.media?.mimeType ?? 'unknown'} cannot be read` : 'not read here') : 'cannot be read automatically';
       if (ackText && allowMediaAcknowledgement(currentAccountId(), msg.waId)) {
-        await reply(ctx, ackText, 'rule', 'unsupported_message', `${msg.type} message — cannot be read automatically; the customer was told once`);
+        await reply(ctx, ackText, 'rule', 'unsupported_message', `${msg.type} message — ${why}; the customer was told once`);
       } else {
         recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: `${msg.type} message — not answered automatically${ACKNOWLEDGED_MEDIA.has(msg.type) && settings.autoRepliesEnabled && !getHold(customer.id) ? ' (acknowledgement already sent recently)' : ''}` });
       }
@@ -282,8 +295,8 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
 
   // A brand-new customer whose very first message is a real question (or a picture) gets an ANSWER (in the language they wrote), not a
   // language prompt. The language stored here only selects the MENU texts; the assistant itself follows the customer's latest message.
-  if (!customer.language && settings.aiRepliesEnabled && (picture || (msg.type === 'text' && isSubstantiveFreeText(msg.text)))) {
-    const detected = detectLanguageFromScript(msg.text) ?? (picture ? 'en' : undefined);
+  if (!customer.language && settings.aiRepliesEnabled && (analysedMedia || (msg.type === 'text' && isSubstantiveFreeText(msg.text)))) {
+    const detected = detectLanguageFromScript(msg.text) ?? (analysedMedia ? 'en' : undefined);
     if (detected) {
       customer = setCustomerLanguage(customer.id, detected);
       customer = setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
@@ -292,10 +305,20 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     }
   }
 
-  if (settings.ruleRepliesEnabled && !picture) {
+  if (settings.ruleRepliesEnabled && !analysedMedia) {
+    // The follow-up choices (callback, staff message, agreed time, cancel) run before the main menu: their states are theirs alone, and
+    // "cancel" from anywhere lists the customer's own open requests. Free text in the follow-up menu still goes to the assistant.
+    if (customer.language) {
+      const followup = routeFollowup({ text: msg.text, customer, conversationId: conversation.id, language: ctx.language });
+      if (followup) {
+        await applyFollowupRoute(ctx, followup);
+        return;
+      }
+    }
     const route = routeMenu({ text: msg.text, interactiveId: msg.interactiveId, customer });
     if (route) {
       await applyRoute(ctx, route);
+      await maybeAfterHoursNotice(ctx);
       return;
     }
   }
@@ -311,22 +334,50 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   // same photo and the photo is never analysed twice. A failed analysis is stored as an honest note, never as a guess.
   const startedAt = Date.now();
   let analysis: ImageAnalysis | null = null;
+  let transcript: AudioTranscription | null = null;
+  let documentText: DocumentTextResult | null = null;
+  const mediaNotes: string[] = [];
   if (picture) {
     analysis = await analyzeImage({ mimeType: picture.mimeType, fileLength: picture.fileLength, download: picture.download, caption: msg.text, deadline: startedAt + env.AI_LOOP_TIMEOUT_MS });
     appendMessage(conversation.id, { role: 'tool', toolName: IMAGE_ANALYSIS_TOOL, content: imageContextLine(analysis), whatsappMessageId: msg.messageId, metadata: { ok: analysis.ok, reason: analysis.ok ? undefined : analysis.reason, model: analysis.ok ? analysis.model : undefined, confidence: analysis.ok ? analysis.confidence : undefined, durationMs: analysis.durationMs } });
   }
+  if (voice) {
+    // The recording is downloaded once (memoised by the transport) and heard once; the transcript is the customer's message from here on.
+    transcript = await transcribeAudio({ mimeType: voice.mimeType, fileLength: voice.fileLength, download: voice.download, deadline: startedAt + env.AI_LOOP_TIMEOUT_MS });
+    appendMessage(conversation.id, { role: 'tool', toolName: AUDIO_TRANSCRIPT_TOOL, content: audioContextLine(transcript), whatsappMessageId: msg.messageId, metadata: { ok: transcript.ok, reason: transcript.ok ? undefined : transcript.reason, model: transcript.ok ? transcript.model : undefined, language: transcript.ok ? transcript.language : undefined, durationMs: transcript.durationMs } });
+    mediaNotes.push(transcript.ok ? `voice note transcribed in ${(transcript.durationMs / 1000).toFixed(1)} s (${transcript.model}${transcript.language ? `, ${transcript.language}` : ''})` : `voice note not transcribed (${transcript.reason})`);
+  }
+  if (document) {
+    const extractionStarted = Date.now();
+    try {
+      const bytes = await document.download();
+      documentText = await extractDocumentText({ bytes, mimeType: document.mimeType, fileName: document.fileName });
+    } catch (error) {
+      logger.warn({ waId: maskedId, errorName: (error as Error)?.name }, 'customer file could not be downloaded for reading');
+      documentText = { ok: false, kind: 'unknown', reason: 'extraction_failed', detail: 'download failed' };
+    }
+    appendMessage(conversation.id, { role: 'tool', toolName: DOCUMENT_TEXT_TOOL, content: documentContextLine(documentText, document.fileName), whatsappMessageId: msg.messageId, metadata: { ok: documentText.ok, reason: documentText.ok ? undefined : documentText.reason, kind: documentText.kind, chars: documentText.ok ? documentText.chars : undefined, durationMs: Date.now() - extractionStarted } });
+    mediaNotes.push(documentText.ok ? `${documentText.kind} read in ${((Date.now() - extractionStarted) / 1000).toFixed(1)} s (${documentText.chars} chars${documentText.truncated ? ', truncated' : ''})` : `file not read (${documentText.reason})`);
+  }
+  if (video) {
+    appendMessage(conversation.id, { role: 'tool', toolName: MEDIA_NOTE_TOOL, content: videoContextLine(), whatsappMessageId: msg.messageId, metadata: { ok: false, reason: 'video_not_supported' } });
+    mediaNotes.push('video not analysed (no frame or audio extraction here)');
+  }
+  // What the customer "said" this turn: their text or caption, else the transcript of their voice note, else the readable text of their
+  // file — the reply language follows it (shared policy: detected language → menu language → English).
+  const latestText = msg.text?.trim() || (transcript?.ok ? transcript.text : '') || (documentText?.ok ? documentText.text.slice(0, 2000) : '') || null;
 
   // The model's memory of this customer in this business: this conversation only, the latest N messages, and nothing older than
   // CONVERSATION_MEMORY_HOURS (docs/AI_ASSISTANT.md). The stored conversation is untouched.
   const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS);
-  const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText: msg.text });
+  const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText });
 
   let finalText = '';
   let kind: 'ai' | 'error' = 'ai';
   let failureDetail = 'AI failed; fallback sent';
   let verdict: 'send' | 'ai_handoff' | 'dropped' = 'send';
   let heldBy: Handoff | null = null;
-  const visionNote = analysis ? (analysis.ok ? `picture analysed in ${(analysis.durationMs / 1000).toFixed(1)} s (${analysis.model}, confidence ${analysis.confidence})` : `picture not analysed (${analysis.reason})`) : null;
+  const visionNote = [analysis ? (analysis.ok ? `picture analysed in ${(analysis.durationMs / 1000).toFixed(1)} s (${analysis.model}, confidence ${analysis.confidence})` : `picture not analysed (${analysis.reason})`) : null, ...mediaNotes].filter(Boolean).join(' · ') || null;
   try {
     const loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
     logger.info({ waId: maskedId, account: currentAccountId(), totalMs: Date.now() - startedAt, visionMs: analysis?.durationMs ?? 0, picture: Boolean(picture), rounds: loopResult.generatedMessages.filter((g) => g.content.startsWith('[requested tools:')).length + 1 }, 'AI reply ready');
@@ -400,6 +451,45 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   } catch (error) {
     recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: 'Reply could not be sent' });
     logger.error({ waId: maskedId, error }, 'failed to send reply to customer after processing');
+    return;
+  }
+  await maybeAfterHoursNotice(ctx);
+}
+
+/** Once per window while the business is closed: the closed notice (hours, next opening) and the follow-up choices, then the menu state waits for a choice. */
+const AFTER_HOURS_WINDOW_MS = 6 * 60 * 60_000;
+async function maybeAfterHoursNotice(ctx: ReplyContext): Promise<void> {
+  const biz = getBusinessSettings();
+  if (!biz.afterHoursEnabled || !biz.hoursConfigured || isOutsideBusinessHours(biz) !== true) return;
+  const fresh = getCustomerById(ctx.customer.id, undefined, null);
+  if (!fresh || !fresh.language || inGuidedFlow(fresh.menu_state) || isFollowupState(fresh.menu_state) || getHold(fresh.id)) return;
+  const last = fresh.after_hours_notified_at ? Date.parse(fresh.after_hours_notified_at) : 0;
+  if (Number.isFinite(last) && Date.now() - last < AFTER_HOURS_WINDOW_MS) return;
+  setCustomerAfterHoursNotified(fresh.id);
+  const language: CustomerLanguage = fresh.language;
+  const nextCtx: ReplyContext = { ...ctx, customer: fresh, language };
+  try {
+    const notice = afterHoursNoticeSend(biz, language);
+    const menu = followupMenuSend(biz, language);
+    await replyTemplate(nextCtx, notice.key, 'rule', notice.vars ?? {}, 'Outside opening hours: closed notice and follow-up choices sent once');
+    await replyTemplate(nextCtx, menu.key, 'rule', menu.vars ?? {});
+    setCustomerMenuState(fresh.id, FOLLOWUP_STATES.MENU, null);
+  } catch (error) {
+    logger.warn({ waId: maskWaId(ctx.msg.waId), error: String((error as Error).message) }, 'could not send the after-hours notice');
+  }
+}
+
+/** Applies a follow-up flow decision: the state first (so a crash never leaves a confirmation without a saved request), then the bubbles. */
+async function applyFollowupRoute(ctx: ReplyContext, result: FollowupRouteResult): Promise<void> {
+  const customer = setCustomerMenuState(ctx.customer.id, result.state, result.flowData);
+  const nextCtx: ReplyContext = { ...ctx, customer };
+  let first = true;
+  for (const item of result.send) {
+    const vars: TemplateVars = { ...(item.vars ?? {}) };
+    const resolved = resolveDataDrivenKey(item.key, ctx.language, vars);
+    if (resolved === OFFERS_LIST_TEMPLATE) await deliverOffers(nextCtx, resolved, 'rule', vars);
+    else await replyTemplate(nextCtx, resolved, 'rule', vars, first ? result.detail : undefined);
+    first = false;
   }
 }
 
@@ -594,9 +684,11 @@ async function deliverCatalogue(ctx: ReplyContext, catalogueId: number): Promise
  */
 async function replyOutOfHours(ctx: ReplyContext): Promise<void> {
   if (currentAccountId() === LEGACY_ACCOUNT_ID) return;
-  if (isOutsideBusinessHours(getBusinessSettings()) !== true) return;
+  const biz = getBusinessSettings();
+  if (isOutsideBusinessHours(biz) !== true) return;
   try {
-    await replyTemplate(ctx, 'out_of_hours', 'human_handoff', {}, 'Outside opening hours');
+    const next = nextOpening(biz);
+    await replyTemplate(ctx, 'out_of_hours', 'human_handoff', { next_open: next ? describeMoment(biz, next, ctx.language) : '' }, 'Outside opening hours');
   } catch (error) {
     logger.warn({ error }, 'could not send the out-of-hours reply');
   }
