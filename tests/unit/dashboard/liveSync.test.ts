@@ -72,4 +72,10 @@ describe('the page is wired to it', () => {
     expect(html).toMatch(/id="sync-status"[^>]*role="status"/);
     expect(accounts).toContain("document.addEventListener('workspace:accounts', onLive)");
   });
+  it('an unreachable server is an error with retry — never "not signed in" and never the first-run setup screen', () => {
+    expect(app).toMatch(/async function authStatus\(\)/);
+    expect(app).toContain('Nothing is shown from a cache or a local copy');
+    expect(app).not.toMatch(/fetch\('\/api\/dashboard\/auth\/status'[^\n]*\.then\(\(r\) => r\.json\(\)\)/);
+    expect(app).toMatch(/status = await authStatus\(\);\s*\} catch \(error\) \{\s*view\.innerHTML = errorView/);
+  });
 });

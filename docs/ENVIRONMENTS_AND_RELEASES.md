@@ -30,13 +30,24 @@ whether a WhatsApp session directory exists on this machine.
 * **Data**: production's database, behind production's authenticated backend, is the only authoritative copy of the businesses, customers and connection states. Nothing is
   exported, mirrored or snapshotted into other environments, and production alone owns the live WhatsApp sessions.
 
-### Seeing production's four accounts locally: the local window (`scripts/dev-proxy.cjs`)
+### The canonical local URL: the local window (`scripts/dev-proxy.cjs`)
+
+**`http://workspace.localhost:3100/dashboard`** is the one local address to use. Start it with the launcher, which checks port 3100 first, identifies
+whatever listens there by PID and command line, reuses a proxy of this checkout, refuses to touch anything else (a stale proxy from another checkout is
+reported and stopped only with `-Replace`), starts the proxy when needed, proves the window answers with this checkout's commit and that production is
+reachable, prints commit / mode / data source / "no local storage", and opens the browser. `http://localhost:3000` is the ISOLATED backend (next section),
+a different mode with different data; the launcher reports what listens there and leaves it alone.
 
 ```powershell
-node scripts/dev-proxy.cjs                         # read-only window, http://workspace.localhost:3100/dashboard
-node scripts/dev-proxy.cjs --write-business-data   # additionally allows editing business content (profile, offers, templates, knowledge, ...)
-node scripts/dev-proxy.cjs --check                 # prints what it would do and exits
+pwsh scripts/local-window.ps1            # canonical: read-only window on production's data, opens the browser
+pwsh scripts/local-window.ps1 -Write     # the proxy allows the approved business-content writes (--write-business-data)
+pwsh scripts/local-window.ps1 -Stop      # stops the proxy this checkout started (a positively identified one only)
+npm run window                           # the bare proxy (same as node scripts/dev-proxy.cjs), for other shells
+node scripts/dev-proxy.cjs --check       # prints what it would do and exits
 ```
+
+When production cannot be reached the proxy answers `502 upstream_unreachable` and the dashboard shows that error; it never falls back to local data
+(there is none in this mode). The `.claude/launch.json` preview configurations are `local-window` (canonical) and `isolated-backend`.
 
 Sign in with your normal production account. The proxy serves the dashboard files from **this checkout** (so your uncommitted UI work is what you see) and forwards the
 `/api/dashboard/...` calls to production's backend over HTTPS. The four businesses, their company information and their **live** connection status are therefore production's, read

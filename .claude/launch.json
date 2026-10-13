@@ -2,12 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev",
+      "name": "local-window",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev-proxy.cjs"],
+      "port": 3100,
+      "url": "http://workspace.localhost:3100"
+    },
+    {
+      "name": "isolated-backend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev"
-      ],
+      "runtimeArgs": ["run", "dev"],
       "port": 3000
     }
   ]

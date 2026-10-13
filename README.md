@@ -47,13 +47,18 @@ from for design rationale.
 
 ## 3. Local development
 
-> **Ports.** This application (API + dashboard + WhatsApp linked-device runtime) listens on **http://localhost:3000** (`PORT`). Anything on **localhost:3005** is the separate Antigravity/reference application and is not part of this project — do not use it for health checks, logs, or verification of this app.
-
+> **Two local modes, one canonical URL.** The everyday local URL is **http://workspace.localhost:3100/dashboard** — the *local window*: this
+> checkout's dashboard on **production's live data** (accounts, connection states, customers, messages) through production's own login, read-only by
+> default, no local database, no local WhatsApp session, nothing copied. Start it with `pwsh scripts/local-window.ps1` (reuses a running proxy, never
+> duplicates it, opens the browser) or `npm run window`. The *isolated backend* on **http://localhost:3000** (`npm run dev`) is a separate mode with its own
+> `data/app.db` and its own test accounts; its banner says so and names the window URL. Anything on **localhost:3005** is another project — never use it.
+> Details: `docs/ENVIRONMENTS_AND_RELEASES.md`.
 
 ```bash
 npm install
 cp .env.example .env      # fill in real or test values, see section 4
-npm run dev                # tsx watch — auto-restarts on file changes
+pwsh scripts/local-window.ps1   # the local window on production data (canonical)
+npm run dev                     # OR the isolated backend on its own database (tsx watch, port 3000)
 ```
 
 Run the test suite (fully mocked — no real credentials needed):

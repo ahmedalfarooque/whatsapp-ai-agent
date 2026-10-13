@@ -367,8 +367,35 @@ document.querySelector('#logout-btn').addEventListener('click', async () => {
 
 /** Runs once at page load and again right after a successful sign-in: checks
  * auth status and either boots the real app or forces the login screen. */
+/**
+ * The auth status, or an error when the server (production, through the local window) cannot be reached. A failed or non-JSON answer is NEVER read as
+ * "not signed in" or "no administrator yet": that used to turn an unreachable upstream into the first-run "Set up your workspace" screen.
+ */
+async function authStatus() {
+  let response;
+  try {
+    response = await fetch('/api/dashboard/auth/status', { credentials: 'include', cache: 'no-store' });
+  } catch (error) {
+    throw new Error(`The application server cannot be reached (${error.message}). Nothing is shown from a cache or a local copy.`);
+  }
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try { const body = await response.json(); if (body && (body.message || body.error)) detail = `${body.message || body.error}`; } catch { /* not JSON */ }
+    throw new Error(`The application server cannot be reached (${detail}). Nothing is shown from a cache or a local copy.`);
+  }
+  const status = await response.json();
+  if (!status || typeof status.authenticated !== 'boolean') throw new Error('The application server gave an unexpected answer. Nothing is shown from a cache or a local copy.');
+  return status;
+}
+
 async function boot() {
-  const status = await fetch('/api/dashboard/auth/status', { credentials: 'include' }).then((r) => r.json());
+  let status;
+  try {
+    status = await authStatus();
+  } catch (error) {
+    document.querySelector('#view').innerHTML = errorView(error.message, boot);
+    return;
+  }
   if (!status.authenticated) {
     document.querySelector('#logout-btn').style.display = 'none';
     if (location.hash !== '#/login') location.hash = '#/login';
@@ -396,7 +423,13 @@ async function boot() {
 // ---------------------------------------------------------------------
 
 async function renderLogin(view) {
-  const status = await fetch('/api/dashboard/auth/status', { credentials: 'include' }).then((r) => r.json());
+  let status;
+  try {
+    status = await authStatus();
+  } catch (error) {
+    view.innerHTML = errorView(error.message, () => renderRoute());
+    return;
+  }
   const isSetup = !status.hasAdmin;
 
   const ICON = {
