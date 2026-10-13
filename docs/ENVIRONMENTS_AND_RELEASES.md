@@ -94,8 +94,19 @@ To get a copy of the *shape* of production data for testing, use fabricated or a
 ## Release procedure (code only)
 
 A *static* release changes only `dashboard/`, `docs/`, `tests/`, a few text files and the deploy/release/proxy scripts; it needs no build, restart or migration (details and the
-server facts in `docs/DEPLOYMENT_STATIC_UI.md`). Anything that touches `src/`, migrations, packages or configuration is a full release with its own rehearsal, build and restart
-and is not covered by the static launcher. There is no auto-deploy: a release is something the owner runs, and the permission gate in front of production is respected, not bypassed.
+server facts in `docs/DEPLOYMENT_STATIC_UI.md`). Anything that touches `src/`, migrations, packages or configuration is a **full release**: `scripts/release-full.sh`, run on
+the server (or streamed to it over ssh), with `--check-only` first. It verifies the repository, branch, base, target and fast-forward, takes a verified backup
+(`/home/ubuntu/whatsapp-backups/pre-full-release-<ts>`: database `.backup` + integrity, accounts/, baileys-auth/, uploads/, knowledge/, .env), fast-forwards, runs
+`npm ci` only when package files changed, builds, restarts **only** `whatsapp-ai-agent`, waits for health, and proves health/readiness/public URL, one listener on 3000
+and 3005 untouched, the applied migrations, and that the admin, credential, account, customer, message, upload, knowledge and WhatsApp-identity fingerprints are
+unchanged — rolling back to the base commit by itself if any proof fails. Migrations run at boot by the application; the script never executes SQL on the live
+database. Rehearse a migration first on a `/tmp` copy of the database (a `.backup` of it) with the archived target source, as described in the handoffs.
+
+```powershell
+# from the canonical checkout, read-only preconditions, then the release (the production-deploy gate applies to the agent; the owner runs the second line)
+Get-Content -Raw scripts\release-full.sh | ssh -i $env:USERPROFILE\.ssh\oracle-whatsapp-ai.key ubuntu@130.110.112.192 "tr -d '\r' | bash -s -- --base <live> --target <commit> --check-only"
+Get-Content -Raw scripts\release-full.sh | ssh -i $env:USERPROFILE\.ssh\oracle-whatsapp-ai.key ubuntu@130.110.112.192 "tr -d '\r' | bash -s -- --base <live> --target <commit>"
+``` There is no auto-deploy: a release is something the owner runs, and the permission gate in front of production is respected, not bypassed.
 
 **The single command** (run from the canonical checkout, on `master` == `origin/master`):
 

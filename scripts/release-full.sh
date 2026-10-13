@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# FULL production release of the WhatsApp AI Agent (code under src/, migrations, dashboard): run ON the Oracle server as ubuntu.
+#   bash scripts/release-full.sh --base <live commit> --target <commit on origin/master> [--check-only]
+# Order (docs/ENVIRONMENTS_AND_RELEASES.md): guards -> verified backup (database .backup + integrity, accounts/, baileys-auth/, uploads/,
+# knowledge/, .env) -> git merge --ff-only -> npm ci only if package files changed -> npm run build -> restart ONLY whatsapp-ai-agent ->
+# proof (health, readiness, port 3000 once, port 3005 untouched, migrations, admin/credential/knowledge/baileys-identity fingerprints).
+# Migrations run at boot by the application itself; this script never runs SQL against the live database.
+# Rollback (printed on failure): git checkout --detach <base> && npm run build && sudo systemctl restart whatsapp-ai-agent; a database
+# migration is additive and is NOT reverted (restore the backup only if the data itself is damaged, which this release does not touch).
+set -euo pipefail
+R=/home/ubuntu/whatsapp-ai-agent; D=/home/ubuntu/whatsapp-data; DB=$D/app.db; B=/home/ubuntu/whatsapp-backups; SVC=whatsapp-ai-agent; PORT=3000
+BASE=""; TARGET=""; CHECK=0
+while [ $# -gt 0 ]; do case "$1" in --base) BASE=$2; shift 2;; --target) TARGET=$2; shift 2;; --check-only) CHECK=1; shift;; *) echo "unknown arg $1"; exit 2;; esac; done
+abort() { echo "ABORT[$1]: $2"; exit 1; }
+[[ "$BASE" =~ ^[0-9a-f]{7,40}$ && "$TARGET" =~ ^[0-9a-f]{7,40}$ ]] || abort args "--base and --target must be commit hashes"
+[ "$PORT" = 3000 ] || abort port-guard "app port must be 3000"
+ss -ltn | grep -q ':3005 ' && echo "note: port 3005 belongs to another project and is left alone" || true
+[ "$(git -C $R remote get-url origin)" = "https://github.com/ahmedalfarooque/whatsapp-ai-agent.git" ] || abort repo "unexpected origin"
+[ "$(git -C $R branch --show-current)" = master ] || abort repo "checkout is not on master"
+[ -z "$(git -C $R status --porcelain --untracked-files=no)" ] || abort repo "live checkout has uncommitted changes"
+HEAD=$(git -C $R rev-parse HEAD); [[ "$HEAD" == "$BASE"* ]] || abort base "live HEAD ${HEAD:0:7} != --base"
+git -C $R fetch -q origin
+TFULL=$(git -C $R rev-parse --verify "$TARGET^{commit}") || abort target "unknown target"
+[ "$(git -C $R rev-parse origin/master)" = "$TFULL" ] || abort target "origin/master is not the target"
+git -C $R merge-base --is-ancestor "$HEAD" "$TFULL" || abort target "not a fast-forward"
+[ "$(systemctl is-active $SVC)" = active ] || abort service "$SVC is not active"
+[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health)" = 200 ] || abort health "health is not 200 before the release"
+[ "$(sqlite3 "file:$DB?mode=ro" 'PRAGMA integrity_check;')" = ok ] || abort database "integrity check failed before the release"
+NEED=$(du -sk $D | cut -f1); FREE=$(df -k --output=avail /home/ubuntu | tail -1); [ "$FREE" -gt $((NEED * 3)) ] || abort space "not enough free space for a backup"
+PKG=$(git -C $R diff --name-only "$HEAD" "$TFULL" -- package.json package-lock.json | wc -l)
+MIG=$(git -C $R diff --name-only "$HEAD" "$TFULL" -- src/memory/migrations | tr '\n' ' ')
+fp() { echo "admins=$(sqlite3 "file:$DB?mode=ro" 'SELECT id,username,role,password_hash FROM admin_users ORDER BY id;' | sha256sum | cut -c1-16) creds=$(sqlite3 "file:$DB?mode=ro" 'SELECT * FROM credential_overrides ORDER BY key;' | sha256sum | cut -c1-16) accounts=$(sqlite3 "file:$DB?mode=ro" 'SELECT id,name,enabled,phone_number,jid FROM whatsapp_accounts ORDER BY id;' | sha256sum | cut -c1-16) customers=$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM customers;') messages=$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM conversation_messages;') baileys_identity=$(for f in $D/baileys-auth/creds.json $D/accounts/*/baileys-auth/creds.json; do [ -f "$f" ] && python3 -c "import json;d=json.load(open('$f'));print('$f',d.get('registrationId'),(d.get('me') or {}).get('id'))"; done | sha256sum | cut -c1-16) baileys_files=$(find $D -path '*baileys-auth*' -type f | wc -l) uploads=$(find $D -path '*uploads*' -type f | wc -l) knowledge=$(find $R/knowledge -type f \( -name '*.md' -o -name '*.json' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"; }
+BEFORE=$(fp)
+echo "preconditions ok: ${HEAD:0:7} -> ${TFULL:0:7}; package files changed: $PKG; migrations added: ${MIG:-none}"
+echo "fingerprints before: $BEFORE"
+if [ "$CHECK" = 1 ]; then echo "CHECK-ONLY OK: nothing was written"; exit 0; fi
+
+# ---- backup (verified)
+TS=$(date -u +%Y%m%d-%H%M%S); OUT=$B/pre-full-release-$TS
+sudo -n install -d -o ubuntu -g ubuntu -m 750 "$OUT" || abort backup "cannot create $OUT"
+sqlite3 "file:$DB?mode=ro" ".backup $OUT/app.db"
+[ "$(sqlite3 $OUT/app.db 'PRAGMA integrity_check;')" = ok ] || abort backup "backup database integrity failed"
+[ "$(sqlite3 $OUT/app.db 'SELECT count(*) FROM whatsapp_accounts;')" = "$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM whatsapp_accounts;')" ] || abort backup "backup account count differs"
+for d in accounts baileys-auth uploads; do [ -e "$D/$d" ] && cp -a "$D/$d" "$OUT/" ; done
+cp -a $R/knowledge "$OUT/knowledge"; cp -p $R/.env "$OUT/env.backup"; chmod 600 "$OUT/env.backup"
+diff -rq $R/knowledge "$OUT/knowledge" >/dev/null || abort backup "knowledge copy differs"
+echo "backup: $OUT ($(du -sh $OUT | cut -f1))"
+
+# ---- code
+git -C $R merge --ff-only "$TFULL" >/dev/null || abort merge "fast-forward failed"
+rollback() { echo "ROLLING BACK to ${HEAD:0:7}"; git -C $R checkout -q --detach "$HEAD"; (cd $R && npm run build --silent) || true; sudo systemctl restart $SVC || true; echo "rolled back (database migration, if any, is additive and kept; backup at $OUT)"; }
+if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --omit=dev --silent) || { rollback; abort deps "npm ci failed"; }; fi
+(cd $R && npm run build --silent) || { rollback; abort build "build failed"; }
+sudo systemctl restart $SVC
+for i in $(seq 1 30); do sleep 1; [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health)" = 200 ] && break; done
+
+# ---- proof
+H=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health); RD=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/readiness)
+PUB=$(curl -s -o /dev/null -w '%{http_code}' https://whatsapp.alfarooque.com/health)
+L3000=$(ss -ltn | grep -c ":$PORT "); L3005=$(ss -ltn | grep -c ':3005 ')
+AFTER=$(fp)
+echo "after: health=$H readiness=$RD public=$PUB listen3000=$L3000 listen3005=$L3005 service=$(systemctl is-active $SVC) head=$(git -C $R rev-parse --short HEAD) migrations=$(sqlite3 "file:$DB?mode=ro" 'SELECT count(*) FROM schema_migrations;') last=$(sqlite3 "file:$DB?mode=ro" 'SELECT id FROM schema_migrations ORDER BY id DESC LIMIT 1;')"
+echo "fingerprints after:  $AFTER"
+[ "$H" = 200 ] && [ "$RD" = 200 ] && [ "$L3000" = 1 ] && [ "$(systemctl is-active $SVC)" = active ] || { rollback; abort proof "post-release check failed"; }
+# the baileys identity fingerprint must be unchanged (a restart rotates pre-keys, never the identity); everything else must be identical
+for k in admins creds accounts customers messages baileys_identity uploads knowledge; do
+  [ "$(echo "$BEFORE" | tr ' ' '\n' | grep "^$k=")" = "$(echo "$AFTER" | tr ' ' '\n' | grep "^$k=")" ] || { rollback; abort proof "fingerprint $k changed"; }
+done
+echo "RELEASED: $(git -C $R rev-parse --short HEAD) is live on port $PORT; backup $OUT"
