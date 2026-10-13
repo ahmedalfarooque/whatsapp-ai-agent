@@ -291,12 +291,13 @@ describe('pictures respect the same boundaries as text', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('documents and voice notes are still stored for staff and never answered', async () => {
+  it('documents and voice notes are stored for staff and never analysed or answered by the AI: the customer gets ONE acknowledgement that they cannot be read', async () => {
     provider(() => answer(CAMRY));
     const waId = nextWa();
     await processInboundMessage({ waId, messageId: `wamid.doc.${++counter}`, timestamp: Date.now(), type: 'document', text: 'my invoice', accountId: AUTO, media: media({ kind: 'document', mimeType: 'application/pdf' }) }, { knowledge: LAND_CRUISER_KB });
     await processInboundMessage({ waId, messageId: `wamid.voice.${++counter}`, timestamp: Date.now(), type: 'voice', accountId: AUTO }, { knowledge: LAND_CRUISER_KB });
-    expect(sent()).toEqual([]);
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]).toMatch(/voice notes, videos or files/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

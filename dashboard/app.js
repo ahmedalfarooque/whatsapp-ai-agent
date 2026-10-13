@@ -242,10 +242,27 @@ function renderAccountList() {
 }
 
 /** Loads the accounts the signed-in admin may see and settles the selection (remembered id when still valid, else the server default). */
+const liveSync = { lastOkAt: 0, failures: 0, lastSnapshotAt: '', signature: '', timer: null };
+function renderSyncStatus() {
+  const el = document.querySelector('#sync-status');
+  if (!el) return;
+  const label = window.UiKit.syncLabel({ ...liveSync, hidden: document.hidden });
+  el.textContent = window.I18N && window.I18N.t ? window.I18N.t(label.text) : label.text;
+  el.dataset.tone = label.tone;
+  el.title = liveSync.lastOkAt ? `Accounts and connection states are re-read from the server every 10 s while this tab is visible (60 s hidden). Last successful sync: ${new Date(liveSync.lastOkAt).toLocaleTimeString()}` : '';
+}
 async function loadAccounts() {
   try {
     const data = await api('/api/dashboard/accounts');
+    // A slow response from an earlier poll must never overwrite a newer snapshot.
+    if (!window.UiKit.isNewerSnapshot(liveSync.lastSnapshotAt, data.generatedAt)) return;
+    liveSync.lastSnapshotAt = data.generatedAt || liveSync.lastSnapshotAt;
+    liveSync.lastOkAt = Date.now();
+    liveSync.failures = 0;
     const previousIds = knownAccounts.map((a) => a.id).join(',');
+    const signature = window.UiKit.accountsSignature(data.accounts || []);
+    const changed = signature !== liveSync.signature;
+    liveSync.signature = signature;
     knownAccounts = data.accounts || [];
     registerAccountNames(knownAccounts);
     // The accounts this user may open changed (access granted or revoked): re-read who they are, so permissions and branding never go stale.
@@ -256,11 +273,15 @@ async function loadAccounts() {
       try { if (selectedAccountId) localStorage.setItem(ACCOUNT_STORAGE_KEY, String(selectedAccountId)); } catch { /* storage unavailable */ }
     }
     renderAccountList();
+    renderSyncStatus();
     if (assignmentChanged) loadMe().catch(() => {}).finally(() => renderRoute());
-    document.dispatchEvent(new CustomEvent('workspace:accounts', { detail: { accounts: knownAccounts, selected: selectedAccountId } }));
+    document.dispatchEvent(new CustomEvent('workspace:accounts', { detail: { accounts: knownAccounts, selected: selectedAccountId, changed } }));
   } catch (error) {
+    // The list already on screen stays (it is the last known truth); the footer says the sync is failing and the retry backs off.
+    liveSync.failures += 1;
+    renderSyncStatus();
     const host = document.querySelector('#account-list');
-    if (host) host.innerHTML = `<span class="muted">${esc(error.message)}</span>`;
+    if (host && !knownAccounts.length) host.innerHTML = `<span class="muted">${esc(error.message)}</span>`;
   }
 }
 
@@ -281,12 +302,18 @@ function selectAccount(accountId, opts = {}) {
   if (changed) loadMe().catch(() => {}).finally(() => renderRoute());
 }
 
-let accountsTimer;
+/**
+ * Live sync of the account inventory and connection states: bounded polling (10 s visible, 60 s hidden, exponential backoff on failure,
+ * immediate refresh when the tab becomes visible again). Through the local production window this is the same loop against production's API,
+ * so a new, disabled, renamed, connected or disconnected account shows up within one interval. The footer shows the last sync and any failure.
+ */
 async function pollAccounts() {
-  clearTimeout(accountsTimer);
+  clearTimeout(liveSync.timer);
   await loadAccounts();
-  accountsTimer = setTimeout(pollAccounts, 10000);
+  liveSync.timer = setTimeout(pollAccounts, window.UiKit.syncDelay({ hidden: document.hidden, failures: liveSync.failures }));
 }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && me) pollAccounts(); });
+setInterval(renderSyncStatus, 5000);
 
 // ---------------------------------------------------------------------
 // Small-screen navigation drawer (the sidebar is off-canvas at <= 900px)
@@ -358,8 +385,9 @@ async function boot() {
   }
   await loadHeader();
   document.dispatchEvent(new Event('workspace:authenticated'));
-  clearTimeout(accountsTimer);
-  accountsTimer = setTimeout(pollAccounts, 10000);
+  // The accounts were just loaded by boot; the live sync continues from here (10 s visible / 60 s hidden, see pollAccounts).
+  clearTimeout(liveSync.timer);
+  liveSync.timer = setTimeout(pollAccounts, window.UiKit.syncDelay({ hidden: document.hidden, failures: 0 }));
   await renderRoute();
 }
 

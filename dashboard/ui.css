@@ -642,3 +642,10 @@ select.input,.field select{width:100%;height:40px;padding:0 12px;border-radius:v
 body.palette-open{overflow:hidden}
 @media (max-width:480px){.palette-foot{display:none}.palette{padding-top:10px}}
 @media (prefers-reduced-motion:reduce){.pulse{animation:none}.bar-track i{transition:none}}
+
+/* footer live-sync indicator: fresh / stale / failing, never colour alone (the text says it) */
+.sync-status{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--color-text-subtle);white-space:nowrap}
+.sync-status::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--color-text-subtle)}
+.sync-status[data-tone="ok"]{color:var(--color-success)}.sync-status[data-tone="ok"]::before{background:var(--color-success)}
+.sync-status[data-tone="stale"]{color:var(--color-warning)}.sync-status[data-tone="stale"]::before{background:var(--color-warning)}
+.sync-status[data-tone="error"]{color:var(--color-danger)}.sync-status[data-tone="error"]::before{background:var(--color-danger)}

@@ -11,7 +11,8 @@ vi.mock('../../../src/llm/agentLoop', () => ({
 
 import { sendTextMessage, sendInteractiveMessage } from '../../../src/whatsapp/client';
 import { runAgentLoop } from '../../../src/llm/agentLoop';
-import { processInboundMessage } from '../../../src/pipeline/processInboundMessage';
+import { processInboundMessage, resetMediaAcknowledgementThrottle } from '../../../src/pipeline/processInboundMessage';
+import { listReplyActivity } from '../../../src/automation/settingsRepo';
 import { getCustomerByWaId } from '../../../src/memory/customerRepo';
 import { getOrCreateActiveConversation, getRecentMessages } from '../../../src/memory/conversationRepo';
 import { listCustomerRequests } from '../../../src/memory/customerRequestRepo';
@@ -217,36 +218,54 @@ describe('processInboundMessage — language-first guided menu (templates are th
     deleteOffer(offer.id, 'test');
   });
 
-  describe('N: media and files are never answered automatically', () => {
-    const MEDIA = ['voice', 'audio', 'image', 'video', 'document', 'sticker', 'location', 'contact', 'reaction', 'poll', 'other', 'unsupported'];
+  describe('N: media and files are never answered by the AI or the menu; unreadable media gets ONE honest acknowledgement per window', () => {
+    // voice/audio/video/document/sticker/location/contact: the customer is told once (template `unsupported_message`) that it cannot be read.
+    // image: answered only through the vision path (tests/integration/imageUnderstanding); without media bytes it is stored silently.
+    // reaction/poll/other/unsupported: silent, as before.
+    const ACKED = ['voice', 'audio', 'video', 'document', 'sticker', 'location', 'contact'];
+    const SILENT = ['image', 'reaction', 'poll', 'other', 'unsupported'];
+    const MEDIA = [...ACKED, ...SILENT];
     const media = (waId: string, type: string, text?: string): InboundMessage => ({ waId, messageId: `wamid.${Math.random()}`, timestamp: Date.now(), type, ...(text ? { text } : {}) });
-    const silent = () => {
-      expect(sendTextMessage).not.toHaveBeenCalled();
+    const noAutomation = () => {
       expect(sendInteractiveMessage).not.toHaveBeenCalled();
       expect(runAgentLoop).not.toHaveBeenCalled();
     };
+    const silent = () => { expect(sendTextMessage).not.toHaveBeenCalled(); noAutomation(); };
+    beforeEach(() => resetMediaAcknowledgementThrottle());
 
-    it.each(MEDIA)('a %s message from a brand-new customer produces ZERO outbound messages', async (type) => {
+    it.each(ACKED)('a %s message from a brand-new customer gets exactly one acknowledgement (no AI, no menu)', async (type) => {
+      await processInboundMessage(media(`1555100${MEDIA.indexOf(type) + 10}`, type), { knowledge: KNOWLEDGE });
+      noAutomation();
+      expect(sent()).toHaveLength(1);
+      expect(sent()[0]).toMatch(/voice notes, videos or files|الرسائل الصوتية/);
+    });
+
+    it.each(SILENT)('a %s message from a brand-new customer produces ZERO outbound messages', async (type) => {
       await processInboundMessage(media(`1555100${MEDIA.indexOf(type) + 10}`, type), { knowledge: KNOWLEDGE });
       silent();
     });
 
-    it.each(MEDIA)('a %s message from a customer already in the menu produces ZERO outbound messages and keeps the menu state', async (type) => {
+    it.each(MEDIA)('a %s message from a customer already in the menu never triggers the AI or the menu and keeps the menu state', async (type) => {
       const waId = `1555200${MEDIA.indexOf(type) + 10}`;
       await selectEnglish(waId);
       await processInboundMessage(textMsg(waId, '1'), { knowledge: KNOWLEDGE });
       vi.clearAllMocks();
       await processInboundMessage(media(waId, type), { knowledge: KNOWLEDGE });
-      silent();
+      noAutomation();
+      expect(sendTextMessage).toHaveBeenCalledTimes(ACKED.includes(type) ? 1 : 0);
       expect(getCustomerByWaId(waId)?.menu_state).toBe('SUBMENU_AUDIO');
       expect(getCustomerByWaId(waId)?.language).toBe('en');
     });
 
-    it('the old "I can currently only read text messages" reply is never sent', async () => {
+    it('a second voice note inside the window is NOT acknowledged again (recorded as suppressed), so nobody is spammed', async () => {
       const waId = '15550000014';
       await processInboundMessage(media(waId, 'voice'), { knowledge: KNOWLEDGE });
-      expect(sent().join(' ')).not.toMatch(/only read text|قراءة الرسائل النصية/);
-      silent();
+      await processInboundMessage(media(waId, 'voice'), { knowledge: KNOWLEDGE });
+      await processInboundMessage(media(waId, 'document'), { knowledge: KNOWLEDGE });
+      expect(sendTextMessage).toHaveBeenCalledTimes(1);
+      const activity = listReplyActivity({ limit: 10 }).filter((a) => a.waId === waId).map((a) => a.kind);
+      expect(activity.filter((k) => k === 'rule')).toHaveLength(1);
+      expect(activity.filter((k) => k === 'suppressed')).toHaveLength(2);
     });
 
     it('a caption under a photo is shown to staff but is NOT answered as customer text', async () => {
@@ -268,7 +287,8 @@ describe('processInboundMessage — language-first guided menu (templates are th
       const stored = getRecentMessages(conversation.id, 10).map((m) => m.content);
       expect(stored).toEqual(expect.arrayContaining(['[voice]', '[document]']));
       expect(stored).not.toContain('[reaction]');
-      silent();
+      noAutomation();
+      expect(sendTextMessage).toHaveBeenCalledTimes(1); // one acknowledgement for the voice note; the document inside the window is silent
     });
 
     it('media does not break the very next text message: it is answered normally', async () => {
@@ -277,7 +297,7 @@ describe('processInboundMessage — language-first guided menu (templates are th
       await processInboundMessage(media(waId, 'voice'), { knowledge: KNOWLEDGE });
       await processInboundMessage(textMsg(waId, 'Do you have Pioneer speakers?'), { knowledge: KNOWLEDGE });
       expect(runAgentLoop).toHaveBeenCalledOnce();
-      expect(sendTextMessage).toHaveBeenCalledTimes(1);
+      expect(sendTextMessage).toHaveBeenCalledTimes(2); // the voice-note acknowledgement, then the AI answer
     });
 
     it('media while a human has taken over, or while automatic replies are off, is still silent', async () => {

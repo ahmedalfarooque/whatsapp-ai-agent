@@ -1,5 +1,7 @@
 import express, { Router, type Request, type Response } from 'express';
 import path from 'node:path';
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import rateLimit from 'express-rate-limit';
 import { logger } from '../logger';
 import {
@@ -141,6 +143,22 @@ const UNAUTHENTICATED_AUTH_ROUTES = ['/auth/status', '/auth/setup', '/auth/login
 export function createDashboardRouter(): Router {
   const router = Router();
   const dashboardDir = path.join(__dirname, '..', '..', 'dashboard');
+  // Stamp for a checkout that has no release stamp: this process's own commit, computed once. It is an isolated environment by definition
+  // (the release scripts always write the file on production), and it says so, with the documented way to look at production's data.
+  let localStamp: Record<string, unknown> | null = null;
+  function localBuildInfo(): Record<string, unknown> {
+    if (!localStamp) {
+      let fullCommit = '';
+      let branch = '';
+      try {
+        const root = path.join(__dirname, '..', '..');
+        fullCommit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        branch = execFileSync('git', ['-C', root, 'branch', '--show-current'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      } catch { /* not a git checkout (e.g. a packaged copy): the stamp still names the environment */ }
+      localStamp = { commit: fullCommit ? fullCommit.slice(0, 7) : 'unknown', fullCommit: fullCommit || null, branch: branch || null, environment: 'local-isolated', dataSource: 'local-database', stamped: false, productionWindow: 'http://workspace.localhost:3100/dashboard', generatedAt: new Date().toISOString() };
+    }
+    return localStamp;
+  }
 
   router.use('/api/dashboard', express.json({ limit: '256kb' }));
 
@@ -391,6 +409,8 @@ export function createDashboardRouter(): Router {
         return detailed ? view : { ...view, lastError: null };
       }),
       selected: req.accountId,
+      /** Server time of this snapshot: the dashboard's live sync keeps only the newest snapshot it has seen (a slow, older response never overwrites a newer one). */
+      generatedAt: new Date().toISOString(),
     });
   });
   router.post('/api/dashboard/accounts', (req, res) => {
@@ -1323,6 +1343,14 @@ export function createDashboardRouter(): Router {
   // redirects a bare directory-mount request ("/dashboard") to add a trailing
   // slash before it will serve an index file, which would break this exact URL.
   router.get('/dashboard', (_req, res) => res.sendFile(path.join(dashboardDir, 'index.html')));
+  // The build stamp: the file the release scripts write (production), else a stamp generated from this checkout that says plainly this is an
+  // ISOLATED local environment on its own database. Never cached, so a release is visible on the next load.
+  router.get('/dashboard/build-info.json', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const stampPath = path.join(dashboardDir, 'build-info.json');
+    if (fs.existsSync(stampPath)) { res.sendFile(stampPath); return; }
+    res.json(localBuildInfo());
+  });
   router.use('/dashboard', express.static(dashboardDir));
   router.get('/', (_req, res: Response) => res.redirect('/dashboard'));
 

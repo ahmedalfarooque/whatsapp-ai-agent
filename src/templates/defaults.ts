@@ -56,7 +56,7 @@ const LANGUAGE_SWITCH_PROMPT =
 const RESTART_CONFIRMATION = "Done — I've started a fresh conversation. / تم — بدأنا محادثة جديدة.";
 
 const UNSUPPORTED =
-  'I can currently only read text messages — could you send that as text? / أستطيع قراءة الرسائل النصية فقط حالياً، يرجى إرسالها كنص.';
+  'I can read text messages and photos, but not voice notes, videos or files yet — could you type your question, or reply "agent" to reach the team? / أستطيع قراءة الرسائل النصية والصور، لكن ليس الرسائل الصوتية أو الفيديو أو الملفات بعد — يرجى كتابة سؤالك، أو الرد بكلمة "موظف" للتواصل مع الفريق.';
 
 export const TEMPLATE_DEFAULTS: TemplateDefault[] = [
   // ------------------------------------------------------------------ Greeting

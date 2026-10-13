@@ -54,6 +54,15 @@ account or session; showing a pairing QR code; sending any WhatsApp message (rep
 Own database, own sessions, no production data. The banner says `Isolated local environment · Own local database, not production data`.
 If you pair a **development** WhatsApp number there, it is labelled as such by being on this machine's database only; never pair a production number here.
 
+### Live sync of accounts and connection states
+
+Every dashboard (production itself and the local window alike) re-reads `/api/dashboard/accounts` every **10 s while the tab is visible** and every
+**60 s while hidden**, refreshes at once when the tab becomes visible again, doubles the delay after each failure (up to 2 min) and resets on success, and
+applies a response only when it is newer than the last one applied (`generatedAt`). The footer shows `Live · synced N s ago`, `Stale — …` (no good sync for
+30 s) or `Sync error — …, retrying`; the sidebar list, the header identity and the Accounts page redraw themselves when the inventory or a state
+changes. So a business created, disabled, renamed, paired or disconnected on production appears in the local window within one interval; nothing is
+copied and nothing flows back. The server has no push channel; this is bounded polling, not instantaneous.
+
 ### Which one is which
 
 | You see | It is |
@@ -61,6 +70,7 @@ If you pair a **development** WhatsApp number there, it is labelled as such by b
 | Footer `Build 2ebc5bd · Production`, no banner | production |
 | Banner `Local window · UI from commit … · Data: PRODUCTION (live), read-only` | the proxy: this checkout's UI on production's data |
 | Banner `Isolated local environment · Own local database` | a local backend |
+| Footer `Build <commit> · Isolated local environment` + banner naming `workspace.localhost:3100` | a local backend whose stamp the server generated itself (no release file) |
 | Footer `Build: not stamped` | a release made before build stamps existed (the next release adds the stamp) |
 
 The stamp is `dashboard/build-info.json`, written by the release script on the server (and by the proxy for itself), never committed. The same commit shown on two environments means they run the same code.

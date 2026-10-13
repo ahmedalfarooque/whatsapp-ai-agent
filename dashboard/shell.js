@@ -314,9 +314,9 @@ async function renderBuildInfo() {
     if (env === 'production') { banner.hidden = true; return; }
     const parts = [`${label}`, `UI from commit ${info.commit}${info.branch ? ` (${info.branch})` : ''}${info.uncommittedChanges ? ' + uncommitted changes' : ''}`];
     if (env === 'local-ui') parts.push(info.mode === 'business-data' ? 'Data: PRODUCTION (live), business content editable' : 'Data: PRODUCTION (live), read-only');
-    else parts.push('Own local database, not production data');
+    else parts.push('Own local database, not production data', info.productionWindow ? `For production's accounts open ${info.productionWindow} (node scripts/dev-proxy.cjs)` : '');
     banner.className = `env-banner ${env === 'local-ui' ? (info.mode === 'business-data' ? 'write' : 'read') : 'isolated'}`;
-    banner.textContent = parts.join(' · ');
+    banner.textContent = parts.filter(Boolean).join(' · ');
     banner.hidden = false;
   }
 }

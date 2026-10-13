@@ -720,6 +720,17 @@ describe('dashboard', () => {
     await agent.post('/api/dashboard/ai/configure').send({ model: 'openrouter/free' });
   });
 
+  it('the build stamp is served even without a release file: it names an ISOLATED local environment and the production window, never cached; the accounts list carries its server time', async () => {
+    const stamp = await request(app).get('/dashboard/build-info.json');
+    expect(stamp.status).toBe(200);
+    expect(stamp.headers['cache-control']).toContain('no-store');
+    expect(stamp.body).toMatchObject({ environment: 'local-isolated', dataSource: 'local-database', stamped: false, productionWindow: 'http://workspace.localhost:3100/dashboard' });
+    expect(typeof stamp.body.commit).toBe('string');
+    const accounts = await agent.get('/api/dashboard/accounts');
+    expect(accounts.status).toBe(200);
+    expect(Date.parse(accounts.body.generatedAt)).not.toBeNaN();
+  });
+
   it('AI configure also sets the per-business vision model and reply-language override, validates them, and an empty override returns to the shared rule', async () => {
     const res = await agent.post('/api/dashboard/ai/configure').send({ visionModel: 'vendor/sees-pictures', replyLanguage: 'ar' });
     expect(res.status).toBe(200);

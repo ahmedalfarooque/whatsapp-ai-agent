@@ -51,6 +51,8 @@ git -C $R merge --ff-only "$TFULL" >/dev/null || abort merge "fast-forward faile
 rollback() { echo "ROLLING BACK to ${HEAD:0:7}"; git -C $R checkout -q --detach "$HEAD"; (cd $R && npm run build --silent) || true; sudo systemctl restart $SVC || true; echo "rolled back (database migration, if any, is additive and kept; backup at $OUT)"; }
 if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --omit=dev --silent) || { rollback; abort deps "npm ci failed"; }; fi
 (cd $R && npm run build --silent) || { rollback; abort build "build failed"; }
+# the build stamp the dashboard footer shows (ignored by Git; same shape the static launcher writes)
+printf '{"commit":"%s","fullCommit":"%s","branch":"master","environment":"production","releasedAt":"%s","writtenBy":"scripts/release-full.sh"}\n' "$(git -C $R rev-parse --short HEAD)" "$(git -C $R rev-parse HEAD)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > $R/dashboard/build-info.json
 sudo systemctl restart $SVC
 for i in $(seq 1 30); do sleep 1; [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/health)" = 200 ] && break; done
 

@@ -213,10 +213,11 @@ describe('customer history, documents, reports and the quotation API', () => {
   });
 
   describe('documents', () => {
-    it('a received document is stored once with its metadata and linked to the message; re-delivery never duplicates it; the customer gets NO reply', async () => {
+    it('a received document is stored once with its metadata and linked to the message; re-delivery never duplicates it; the customer gets one acknowledgement, never an AI reply', async () => {
       const c = await customerWithInquiry(A, 'Doc Customer');
       const first = await receiveFile(A, c.waId);
-      expect(first.replies).toEqual([]); // non-text inbound stays silent
+      expect(first.replies).toHaveLength(1); // the one-time 'cannot read files' acknowledgement (template unsupported_message)
+      expect(first.replies[0]).toMatch(/voice notes, videos or files/);
       expect(vi.mocked(runAgentLoop)).not.toHaveBeenCalled();
       expect(first.file).toMatchObject({ direction: 'inbound', kind: 'document', status: 'stored', original_name: 'purchase-order.pdf', mime_type: 'application/pdf', caption: 'see attached', whatsapp_account_id: A });
       expect(first.file!.message_row_id).toBeGreaterThan(0);

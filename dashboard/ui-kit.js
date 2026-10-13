@@ -90,5 +90,38 @@
     return { need, headline: need === 0 ? 'Everything is running' : need === 1 ? '1 thing needs attention' : need + ' things need attention' };
   }
 
-  root.UiKit = { menuNavIndex, menuTypeAhead, rankCommands, groupFlags, segmentWidths, barPercent, attentionSummary, fold };
+  // ---- live sync of the account inventory / connection states (bounded polling; the server has no push channel)
+  // Visible tab: every 10 s. Hidden tab: every 60 s (states still refresh, at a fraction of the load). After a failure the delay doubles up to
+  // 2 min, and the first success resets it. The numbers are the measured refresh interval the UI promises — nothing faster is claimed.
+  function syncDelay(opts) {
+    const o = opts || {};
+    const base = o.hidden ? (o.hiddenBase || 60000) : (o.base || 10000);
+    const failures = Math.max(0, o.failures || 0);
+    return Math.min(o.max || 120000, base * Math.pow(2, Math.min(failures, 4)));
+  }
+  /** A snapshot is applied only when it is newer than the last one applied (a slow earlier response arriving late must not win). */
+  function isNewerSnapshot(previousIso, nextIso) {
+    if (!nextIso) return !previousIso;
+    if (!previousIso) return true;
+    const a = Date.parse(previousIso), b = Date.parse(nextIso);
+    if (Number.isNaN(a) || Number.isNaN(b)) return true;
+    return b >= a;
+  }
+  /** What the footer says: fresh / stale / failing, with the age of the last good sync. `stale` after 3x the current interval (30 s visible, 3 min hidden). */
+  function syncLabel(state, now) {
+    const t = now || Date.now();
+    const s = state || {};
+    if (!s.lastOkAt) return s.failures ? { tone: 'error', text: 'Sync failed — retrying' } : { tone: 'pending', text: 'Syncing…' };
+    const age = Math.max(0, Math.round((t - s.lastOkAt) / 1000));
+    const agoText = age < 5 ? 'just now' : age < 60 ? age + ' s ago' : Math.round(age / 60) + ' min ago';
+    if (s.failures) return { tone: 'error', text: 'Sync error — last synced ' + agoText + ', retrying' };
+    if (age > (s.hidden ? 180 : 30)) return { tone: 'stale', text: 'Stale — last synced ' + agoText };
+    return { tone: 'ok', text: 'Live · synced ' + agoText };
+  }
+  /** A compact signature of what the sidebar/cards show, so pages redraw only when something actually changed. */
+  function accountsSignature(accounts) {
+    return (accounts || []).map(function (a) { return [a.id, a.name, a.enabled ? 1 : 0, a.uiStatus, a.phoneNumber || '', a.displayName || '', a.businessCategory || ''].join('\u001f'); }).join('\u001e');
+  }
+
+  root.UiKit = { menuNavIndex, menuTypeAhead, rankCommands, groupFlags, segmentWidths, barPercent, attentionSummary, fold, syncDelay, isNewerSnapshot, syncLabel, accountsSignature };
 })(typeof window !== 'undefined' ? window : globalThis);

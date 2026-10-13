@@ -143,6 +143,22 @@ function withoutSensitiveValues(msg: InboundMessage): InboundMessage {
 /** Protocol-level noise (reactions, edits, receipts): not worth a row in the conversation or the activity list. */
 const SILENT_UNSTORED_TYPES = new Set(['reaction', 'other']);
 
+/** Media the assistant cannot read: the customer is told so once per window instead of hearing nothing. */
+const ACKNOWLEDGED_MEDIA = new Set(['voice', 'audio', 'video', 'document', 'sticker', 'location', 'contact']);
+const MEDIA_ACK_WINDOW_MS = 6 * 60 * 60_000;
+const lastMediaAck = new Map<string, number>();
+function allowMediaAcknowledgement(accountId: number, waId: string, now = Date.now()): boolean {
+  const key = `${accountId}:${waId}`;
+  const last = lastMediaAck.get(key);
+  if (last !== undefined && now - last < MEDIA_ACK_WINDOW_MS) return false;
+  lastMediaAck.set(key, now);
+  if (lastMediaAck.size > 5000) for (const [k, t] of lastMediaAck) if (now - t > MEDIA_ACK_WINDOW_MS) lastMediaAck.delete(k);
+  return true;
+}
+export function resetMediaAcknowledgementThrottle(): void {
+  lastMediaAck.clear();
+}
+
 /** While the AI key is unusable, each customer hears the generic apology at most once per window. */
 const CREDENTIAL_FALLBACK_COOLDOWN_MS = 10 * 60_000;
 const lastCredentialFallback = new Map<string, number>();
@@ -185,7 +201,16 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     logger.info({ waId: maskedId, type: msg.type }, 'non-text inbound message recorded; no automatic reply');
     if (!SILENT_UNSTORED_TYPES.has(msg.type)) {
       storeInbound(conversation.id, msg);
-      recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: `${msg.type} message — not answered automatically` });
+      // Silence was the most common "no reply" in production (voice notes, files). A media kind the assistant cannot read gets ONE honest,
+      // editable acknowledgement (template `unsupported_message`) per customer per window — never while staff hold the customer, never with
+      // automatic replies off, and never for a picture the assistant could not answer for another reason (that path has its own reply).
+      // Staff switch the acknowledgement off for a business by blanking the template.
+      const ackText = ACKNOWLEDGED_MEDIA.has(msg.type) && settings.autoRepliesEnabled && !getHold(customer.id) ? resolveTemplate('unsupported_message', ctx.language, { name: customer.display_name ?? msg.contactName ?? '' }).trim() : '';
+      if (ackText && allowMediaAcknowledgement(currentAccountId(), msg.waId)) {
+        await reply(ctx, ackText, 'rule', 'unsupported_message', `${msg.type} message — cannot be read automatically; the customer was told once`);
+      } else {
+        recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: `${msg.type} message — not answered automatically${ACKNOWLEDGED_MEDIA.has(msg.type) && settings.autoRepliesEnabled && !getHold(customer.id) ? ' (acknowledgement already sent recently)' : ''}` });
+      }
     }
     return;
   }

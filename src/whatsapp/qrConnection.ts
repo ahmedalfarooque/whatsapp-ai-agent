@@ -17,6 +17,7 @@ import { loadKnowledgeBase, type KnowledgeBase } from '../knowledge/loader';
 import { knowledgeDirForAccount } from '../knowledge/paths';
 import { processInboundMessage } from '../pipeline/processInboundMessage';
 import type { InboundMedia } from '../webhook/parseInboundPayload';
+import { noteInbound, noteProcessed } from '../health/heartbeat';
 import { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } from '../pipeline/idempotency';
 import { getCustomerByWaId, setCustomerReplyJid } from '../memory/customerRepo';
 import { canonicalJid, getPnForLid, rememberLidMapping } from '../memory/lidMapRepo';
@@ -665,6 +666,7 @@ class QrConnection {
     }
 
     const transport = this.buildTransport(instance, run, replyJid);
+    noteInbound(this.accountId);
     await runWithAccount(this.accountId, () =>
       replyTransport.run(transport, async () => {
         try {
@@ -690,6 +692,7 @@ class QrConnection {
           // A file the customer sent is kept with that customer. Never awaited: it cannot delay or break the conversation (a picture the
           // assistant answered was downloaded once already; the capture reuses those bytes).
           this.keepCustomerFile(media, messageId, customerJid, Boolean(phoneJid) || !isLidJid(customerJid), classified.caption);
+          noteProcessed(this.accountId);
           logger.info({ account: this.accountId, customer: maskWaId(customerJid) }, '[WA-INBOUND] processInboundMessage completed');
         } catch (error) {
           markWebhookEventFailed(messageId, 'QR message processing failed');

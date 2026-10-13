@@ -279,3 +279,14 @@ Object.assign(window.I18N_AR, {
   'The model that is shown the actual photo a customer sends, so the assistant identifies what is in it (a car, a part, a label) before answering. It must accept image input. Saving tests it with one tiny picture; if it cannot take pictures, photos are not analysed and the assistant says it could not open them instead of guessing.': 'النموذج الذي تُعرض عليه الصورة الفعلية التي يرسلها العميل ليحدّد المساعد ما فيها (سيارة، قطعة، ملصق) قبل الإجابة. يجب أن يقبل إدخال الصور. يختبره الحفظ بصورة صغيرة جداً؛ وإن لم يقبل الصور فلن تُحلَّل الصور وسيقول المساعد إنه تعذّر فتحها بدلاً من التخمين.',
   'Leave EMPTY for the shared rule every business uses: the assistant answers in the language of the customer\'s latest message (Arabic, English, Malayalam, Chinese, French, …) and switches when the customer switches. Enter a code such as ar or en only if this business must always reply in that one language.': 'اتركه فارغاً للقاعدة المشتركة بين جميع الأنشطة: يجيب المساعد بلغة آخر رسالة للعميل (العربية، الإنجليزية، المالايالامية، الصينية، الفرنسية، …) ويتحوّل حين يتحوّل العميل. أدخل رمزاً مثل ar أو en فقط إذا كان هذا النشاط يجب أن يرد دائماً بلغة واحدة.'
 });
+
+// Live sync footer and the isolated-environment banner.
+Object.assign(window.I18N_AR, {
+  'Syncing…': 'جارٍ المزامنة…', 'Sync failed — retrying': 'فشلت المزامنة — تجري إعادة المحاولة',
+  'Isolated local environment': 'بيئة محلية معزولة'
+});
+window.I18N_AR_PATTERNS.push(
+  [/^Live · synced (just now|\d+ s ago|\d+ min ago)$/, function (when) { var m = /^(\d+) (s|min) ago$/.exec(when); return 'مباشر · تمت المزامنة ' + (when === 'just now' ? 'الآن' : 'منذ ' + m[1] + (m[2] === 's' ? ' ث' : ' د')); }],
+  [/^Stale — last synced (just now|\d+ s ago|\d+ min ago)$/, function (when) { var m = /^(\d+) (s|min) ago$/.exec(when); return 'قديم — آخر مزامنة ' + (when === 'just now' ? 'الآن' : 'منذ ' + m[1] + (m[2] === 's' ? ' ث' : ' د')); }],
+  [/^Sync error — last synced (just now|\d+ s ago|\d+ min ago), retrying$/, function (when) { var m = /^(\d+) (s|min) ago$/.exec(when); return 'خطأ في المزامنة — آخر مزامنة ' + (when === 'just now' ? 'الآن' : 'منذ ' + m[1] + (m[2] === 's' ? ' ث' : ' د')) + '، تجري إعادة المحاولة'; }]
+);

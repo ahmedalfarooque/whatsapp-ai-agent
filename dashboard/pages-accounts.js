@@ -7,6 +7,14 @@
 route('#/accounts', 'WhatsApp Accounts', 'Every business this workspace answers for. Select one to work on it; each has its own WhatsApp number, session and data.', async (view) => {
   let editing = null;
 
+  // The cards follow the live sync: when the inventory or a connection state changes (any environment, production's data through the local
+  // window included) the page redraws itself, unless a card is being edited.
+  const onLive = (e) => {
+    if (!document.contains(view)) { document.removeEventListener('workspace:accounts', onLive); return; }
+    if (e.detail && e.detail.changed && editing === null) draw();
+  };
+  document.addEventListener('workspace:accounts', onLive);
+
   async function draw() {
     let data;
     try { data = await api('/api/dashboard/accounts'); } catch (error) { view.innerHTML = `<section class="panel"><p class="form-error">${esc(error.message)}</p></section>`; return; }

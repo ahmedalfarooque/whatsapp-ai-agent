@@ -6,6 +6,9 @@ import { resumeQrConnection, closeQrConnection } from './whatsapp/qrConnection';
 import { seedBusinessProfileDefaults } from './config/businessSettings';
 import { flushOutbox } from './notifications/outbox';
 import { expireDueQuotations } from './quotations/quotationExpiry';
+import { recoverInterruptedEvents } from './memory/webhookEventRepo';
+import { recordReplyActivity } from './automation/settingsRepo';
+import { LEGACY_ACCOUNT_ID } from './accounts/accountContext';
 
 // Ensure the database is initialized (and migrations applied) at boot,
 // before the server starts accepting traffic.
@@ -13,6 +16,13 @@ getDb();
 {
   const seeded = seedBusinessProfileDefaults();
   if (seeded.length) logger.info({ columns: seeded }, 'business profile defaults seeded for columns the dashboard had not set');
+  // A message whose processing was cut short by the previous shutdown is recorded as a failure (visible to staff), never left as silence.
+  const interrupted = recoverInterruptedEvents();
+  for (const messageId of interrupted) {
+    const account = /^qr:(\d+):/.exec(messageId)?.[1];
+    recordReplyActivity({ accountId: account ? Number(account) : LEGACY_ACCOUNT_ID, channel: messageId.startsWith('qr') ? 'qr' : 'cloud', kind: 'error', detail: 'Message processing was interrupted by a restart before a reply was recorded — not answered; check the conversation' });
+  }
+  if (interrupted.length) logger.warn({ count: interrupted.length }, 'inbound events interrupted by the previous shutdown were marked failed');
 }
 
 if (env.loginOtpEnabled && !(env.RESEND_API_KEY && env.RESEND_FROM_EMAIL)) {

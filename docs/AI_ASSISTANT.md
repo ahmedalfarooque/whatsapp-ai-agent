@@ -82,6 +82,17 @@ notes and video are unchanged (stored for staff only). The mock provider never p
 "Save & Test AI" on the Providers page probes the vision model with a 1x1 image and says whether it accepts pictures; the activity log records
 `picture analysed in N s (model, confidence)` or `picture not analysed (reason)` and the total answer time for every AI reply.
 
+## Every message ends in a recorded outcome
+
+Each inbound message is claimed once (`webhook_events`, per account), serialised per customer, and leaves the pipeline as one of: replied
+(`ai` / `rule` / `human_handoff` activity), intentionally suppressed (with the reason), or failed with the reason. Voice notes, audio, video, files,
+stickers, locations and contacts cannot be read by the assistant: the customer is told so **once per 6 hours** with the editable
+`unsupported_message` template (blank the template on the Templates page to switch this off for a business); further such messages in the window are
+recorded as suppressed, never acknowledged again, and none of them ever reaches the AI or the menu. Pictures take the vision path above. At boot,
+events claimed before a restart but never finished are marked failed ("interrupted by a restart") and an error row is written to the activity log,
+so a cut-off message is visible to staff instead of silent. `/readiness` reports every enabled account's connection state (`degraded` when one
+cannot receive messages) and the worker heartbeat (last inbound / last processed, per account), so "up but not working" is visible without logs.
+
 ## Models
 
 The model is stored per account (`business_settings.open_router_model`). It must support tool calling **and**, if your OpenRouter account
