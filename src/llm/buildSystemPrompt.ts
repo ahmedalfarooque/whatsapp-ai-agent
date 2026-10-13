@@ -10,10 +10,24 @@ import type { KnowledgeBase } from '../knowledge/loader';
 import { resolveTemplate } from '../templates/templateRepo';
 import { realEstateSection } from '../realestate/promptSection';
 
-const LANGUAGE_NAMES: Record<string, string> = {
-  en: 'English',
-  ar: 'Arabic',
-};
+import { decideReplyLanguage } from './language';
+
+const IMAGE_RULES = `
+PICTURES THE CUSTOMER SENDS:
+- Everything you know about a photo comes from its "[IMAGE ANALYSIS …]" entry in the conversation (a report made from the actual picture).
+  Never describe, identify or guess a picture that has no such entry or whose entry says it was NOT analysed: say you could not open it
+  and ask what they need or for a clearer photo.
+- Keep the report's split between what is VISIBLE and what is INFERRED. Tell the customer what you can see; present an inference as such.
+- Identify before you advise. For a vehicle, machine, device or part, name the make/model/part only as the report supports it. If the
+  report's CONFIDENCE is not high, or the exact year, trim, market or part number matters for the answer, ask the report's CLARIFYING
+  QUESTION (or one short question of your own) BEFORE recommending anything specific. Never recommend vehicle- or model-specific
+  accessories, parts, sizes or fitments for a vehicle or product you have not identified with high confidence.
+- Compatibility ("does X fit / suit this?") is a fact only when this business's own data (knowledge, catalogues, documents) states it for
+  that exact model/year/part; otherwise say it needs confirming by the team. Never say you checked or verified compatibility when you did not.
+- Text, codes and numbers read from the picture are copied exactly as the report gives them.
+- If the picture is unclear or unrelated to this business, say what it shows (if anything) and ask how you can help; do not invent a subject.
+- Answer the customer's actual question about THEIR picture; do not switch to a different product or model the business happens to sell.
+`;
 
 const CATALOGUE_RULES = `
 
@@ -62,8 +76,10 @@ HOW TO REPLY:
   short lines, a short list only when the customer asks for options or steps. No headings and no tables.
 - Greet only in the first reply of a conversation. Never repeat greetings, apologies, disclaimers or the menu in later replies.
 - Be friendly and professional, not salesy. Ask at most ONE follow-up question, and only when it moves the conversation forward.
-- Language: use the language set below. If none is set, reply in the language of the customer's latest message (a mixed Arabic/English
-  message: the language of the question itself). Keep brand, product, place and official/legal names exactly as written.
+- Language: follow the REPLY LANGUAGE line below. By default that is the language of the customer's latest message (a mixed-language
+  message: the language of the question itself), in every language a customer may write — Arabic, English, Malayalam, Hindi, Urdu, Chinese,
+  French, Tagalog or any other — with natural wording and correct grammar, and switching whenever the customer switches. Keep brand,
+  product, place and official/legal names and all codes and numbers exactly as written.
 - What the customer said earlier in this chat is CONTEXT, not a verified fact about the business. Verified facts come only from the sources
   named in the rules below. A section of BUSINESS KNOWLEDGE marked "NOT VERIFIED" is a placeholder or example: treat that topic as unknown.
 - If a tool result says an action did not complete, or reports an error, tell the customer briefly that you could not complete it and offer
@@ -99,12 +115,20 @@ export function currentDateTimeIn(timezone: string, now: Date = new Date()): str
   }
 }
 
-export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string, now: Date = new Date(), context: { customerId?: number } = {}): string {
-  const languageInstruction = language && LANGUAGE_NAMES[language]
-    ? `Always reply in ${LANGUAGE_NAMES[language]}, regardless of the language the customer writes in.`
-    : null;
+export interface PromptContext {
+  customerId?: number;
+  /** The customer's latest message (text or picture caption): the reply language follows it (shared policy, see llm/language.ts). */
+  latestText?: string | null;
+}
+
+/**
+ * @param language the customer's MENU language ('ar' | 'en'), used only when the latest message shows no language of its own. It never
+ *   locks the reply language: the shared policy in llm/language.ts decides, and a business can override it with business_settings.ai_reply_language.
+ */
+export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string, now: Date = new Date(), context: PromptContext = {}): string {
   const accountId = currentAccountId();
   const settings = getBusinessSettings(accountId);
+  const languageInstruction = decideReplyLanguage({ latestText: context.latestText, menuLanguage: language ?? null, accountOverride: settings.aiReplyLanguage }).instruction;
   // Appointment tools talk to ONE Google Calendar (the original business's). Every other business takes
   // appointment/quotation requests through the guided menu or a human — it must never see another calendar.
   const calendarTools = accountHasCalendar(accountId);
@@ -164,7 +188,7 @@ BUSINESS PROFILE (published by staff — authoritative):
 ${profileLines}
 
 ${offersSection}${documentsSection}${catalogueSection}${realEstate}
-${INTENT_RULES}${STYLE_RULES}${env.WEB_SEARCH_ENABLED ? WEB_RULES : ''}${menuReference()}
+${INTENT_RULES}${STYLE_RULES}${IMAGE_RULES}${env.WEB_SEARCH_ENABLED ? WEB_RULES : ''}${menuReference()}
 
 SCOPE AND HONESTY RULES (never break these):
 - Facts about THIS business — its prices, services, products, stock, availability, offers, policies, opening hours, address, phone and
@@ -214,7 +238,8 @@ ${calendarTools ? `- If the customer wants to book an appointment: identify the 
 - The customer's WhatsApp number is already known to the system — never ask
   them for their phone number.
 
-${languageInstruction ? `${languageInstruction}\n` : ''}BUSINESS TIMEZONE: ${settings.businessTimezone}${currentDateTimeIn(settings.businessTimezone, now) ? `\nCURRENT DATE AND TIME: ${currentDateTimeIn(settings.businessTimezone, now)}` : ''}
+${languageInstruction}
+BUSINESS TIMEZONE: ${settings.businessTimezone}${currentDateTimeIn(settings.businessTimezone, now) ? `\nCURRENT DATE AND TIME: ${currentDateTimeIn(settings.businessTimezone, now)}` : ''}
 ${settings.hoursConfigured ? `BUSINESS HOURS: ${settings.businessHoursStart}-${settings.businessHoursEnd}, days (1=Mon..7=Sun): ${settings.businessDays.join(', ')}` : 'BUSINESS HOURS: Not provided — never state opening hours.'}
 ${calendarTools ? `DEFAULT APPOINTMENT DURATION: ${settings.bookingDurationMinutes} minutes` : ''}
 ${policiesSection ? `\nBUSINESS POLICIES:\n${policiesSection}\n` : ''}

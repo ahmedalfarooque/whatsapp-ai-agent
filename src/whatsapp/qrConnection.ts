@@ -16,6 +16,7 @@ import { logger, maskWaId } from '../logger';
 import { loadKnowledgeBase, type KnowledgeBase } from '../knowledge/loader';
 import { knowledgeDirForAccount } from '../knowledge/paths';
 import { processInboundMessage } from '../pipeline/processInboundMessage';
+import type { InboundMedia } from '../webhook/parseInboundPayload';
 import { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } from '../pipeline/idempotency';
 import { getCustomerByWaId, setCustomerReplyJid } from '../memory/customerRepo';
 import { canonicalJid, getPnForLid, rememberLidMapping } from '../memory/lidMapRepo';
@@ -536,9 +537,26 @@ class QrConnection {
 
   // ---- inbound
 
-  /** Starts keeping the picture / document of an inbound message (customer files). Fire-and-forget; every failure is recorded for staff, never thrown. */
-  private keepCustomerFile(instance: WASocket, message: WAMessage, messageId: string, customerJid: string, identityCertain: boolean, caption: string): void {
+  /**
+   * The picture/file behind a media message with ONE memoised download: the vision step (which answers a picture) and the file capture
+   * (which keeps it for staff) share the same bytes, so a customer's photo is fetched from WhatsApp at most once. Null for non-media.
+   */
+  private inboundMedia(instance: WASocket, message: WAMessage): InboundMedia | null {
     const media = describeMedia(message);
+    if (!media) return null;
+    let pending: Promise<Buffer> | null = null;
+    const download = (): Promise<Buffer> => {
+      if (!pending) {
+        pending = (downloadMediaMessage(message, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: instance.updateMediaMessage }) as Promise<Buffer>)
+          .catch((error: unknown) => { pending = null; throw error; }); // a failed fetch may be retried by the next caller
+      }
+      return pending;
+    };
+    return { ...media, download };
+  }
+
+  /** Starts keeping the picture / document of an inbound message (customer files). Fire-and-forget; every failure is recorded for staff, never thrown. */
+  private keepCustomerFile(media: InboundMedia | null, messageId: string, customerJid: string, identityCertain: boolean, caption: string): void {
     if (!media) return;
     void runWithAccount(this.accountId, () =>
       captureInboundFile({
@@ -548,7 +566,7 @@ class QrConnection {
         media,
         caption,
         identityCertain,
-        download: () => downloadMediaMessage(message, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: instance.updateMediaMessage }) as Promise<Buffer>,
+        download: media.download,
       }),
     );
   }
@@ -636,10 +654,11 @@ class QrConnection {
       logger.info({ id: messageId }, '[WA-INBOUND] duplicate — already processed');
       return;
     }
+    const media = this.inboundMedia(instance, message);
     if (Date.now() - sentAt > STALE_MESSAGE_MS) {
       // Offline backlog delivered on (re)connect: never auto-answer old messages.
       markWebhookEventProcessed(messageId);
-      this.keepCustomerFile(instance, message, messageId, customerJid, Boolean(phoneJid) || !isLidJid(customerJid), classified.caption);
+      this.keepCustomerFile(media, messageId, customerJid, Boolean(phoneJid) || !isLidJid(customerJid), classified.caption);
       recordReplyActivity({ waId: customerJid, channel: QR_CHANNEL, kind: 'suppressed', detail: 'Stale message delivered after reconnect — not auto-answered', accountId: this.accountId });
       logger.info({ account: this.accountId, customer: maskWaId(customerJid), ageSeconds: Math.round((Date.now() - sentAt) / 1000) }, '[WA-INBOUND] filtered stale');
       return;
@@ -656,19 +675,21 @@ class QrConnection {
               messageId,
               timestamp: sentAt,
               type: classified.kind,
-              // A caption under media is kept for staff to read, but it is not a message the assistant answers.
+              // A caption under media is the customer's words about the picture (the assistant uses it with the picture's analysis).
               text: text || classified.caption || undefined,
               contactName: message.pushName ?? undefined,
               channel: QR_CHANNEL,
               accountId: this.accountId,
+              media: media ?? undefined,
             },
             { knowledge: this.knowledge() },
           );
           const customer = getCustomerByWaId(customerJid, undefined, this.accountId);
           if (customer) setCustomerReplyJid(customer.id, replyJid);
           markWebhookEventProcessed(messageId);
-          // A file the customer sent is kept with that customer. Never answered, never awaited: it cannot delay or break the conversation.
-          this.keepCustomerFile(instance, message, messageId, customerJid, Boolean(phoneJid) || !isLidJid(customerJid), classified.caption);
+          // A file the customer sent is kept with that customer. Never awaited: it cannot delay or break the conversation (a picture the
+          // assistant answered was downloaded once already; the capture reuses those bytes).
+          this.keepCustomerFile(media, messageId, customerJid, Boolean(phoneJid) || !isLidJid(customerJid), classified.caption);
           logger.info({ account: this.accountId, customer: maskWaId(customerJid) }, '[WA-INBOUND] processInboundMessage completed');
         } catch (error) {
           markWebhookEventFailed(messageId, 'QR message processing failed');

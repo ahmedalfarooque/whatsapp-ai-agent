@@ -72,7 +72,7 @@ import { registerHandoffRoutes } from './handoffRoutes';
 import { registerInboxRoutes } from './inboxRoutes';
 import { HandoffError, returnToAi, getHold, getOpenHandoff, takeOverCustomer, type HandoffActor } from '../handoff/handoffRepo';
 import { buildOverview, getAiState, OVERVIEW_RANGES, type OverviewRange } from './overview';
-import { ensureProviderHealth, refreshModelHealth } from '../llm/aiProviderHealth';
+import { ensureProviderHealth, refreshModelHealth, refreshVisionHealth } from '../llm/aiProviderHealth';
 import { accountUiStatus } from '../accounts/accountStatus';
 import { canManageConfiguration, canManageConnections, featureLevel, levelAtLeast, type AuthUser } from './permissions';
 import { runWithAccount } from '../accounts/accountContext';
@@ -1195,7 +1195,10 @@ export function createDashboardRouter(): Router {
     // a model-only save never touches the key, and a blank model never overwrites the account's current one.
     const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : '';
     const model = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
-    if (!apiKey && !model) {
+    // The VISION model (the one given customer pictures) and the reply-language override are per business too; both optional.
+    const visionModel = typeof req.body?.visionModel === 'string' ? req.body.visionModel.trim() : '';
+    const replyLanguage = typeof req.body?.replyLanguage === 'string' ? req.body.replyLanguage.trim().toLowerCase() : undefined;
+    if (!apiKey && !model && !visionModel && replyLanguage === undefined) {
       res.status(400).json({ error: 'validation_failed', fields: ['apiKey', 'model'] });
       return;
     }
@@ -1203,11 +1206,22 @@ export function createDashboardRouter(): Router {
       res.status(400).json({ error: 'validation_failed', fields: ['model'] });
       return;
     }
+    if (visionModel && !/^[A-Za-z0-9._:/-]{1,100}$/.test(visionModel)) {
+      res.status(400).json({ error: 'validation_failed', fields: ['visionModel'] });
+      return;
+    }
+    if (replyLanguage !== undefined && replyLanguage !== '' && !/^[a-z]{2,3}$/.test(replyLanguage)) {
+      res.status(400).json({ error: 'validation_failed', fields: ['replyLanguage'] });
+      return;
+    }
     if (apiKey) setSecret('OPENROUTER_API_KEY', apiKey, req.adminUserId as number);
     if (model) updateBusinessSettings({ openRouterModel: model });
+    if (visionModel) updateBusinessSettings({ openRouterVisionModel: visionModel });
+    if (replyLanguage !== undefined) updateBusinessSettings({ aiReplyLanguage: replyLanguage || null }); // '' = back to the shared policy
     try {
       const result = await testConnection('OPENROUTER_API_KEY');
-      const effectiveModel = getBusinessSettings(req.accountId as number).openRouterModel;
+      const settings = getBusinessSettings(req.accountId as number);
+      const effectiveModel = settings.openRouterModel;
       // A valid key is not a usable model: ask the model itself (one tiny completion) before reporting success.
       const probe = result.ok ? await refreshModelHealth(effectiveModel) : null;
       const modelDetail = probe
@@ -1215,7 +1229,20 @@ export function createDashboardRouter(): Router {
           ? `Model ${effectiveModel} answered.`
           : `Model ${effectiveModel} did not answer (${probe.status === 'empty' ? 'empty answer' : probe.status === 'rate_limited' ? 'rate limited' : probe.status === 'unavailable' ? `refused, HTTP ${probe.httpStatus}` : 'provider error'}).`
         : '';
-      res.json({ ok: result.ok && (!probe || probe.status === 'usable'), detail: [result.detail, modelDetail].filter(Boolean).join(' '), model: effectiveModel, modelStatus: probe?.status ?? null });
+      // And a usable chat model is not a model that accepts pictures: the vision model is probed with a 1x1 image.
+      const visionProbe = result.ok ? await refreshVisionHealth(settings.openRouterVisionModel) : null;
+      const visionDetail = visionProbe
+        ? visionProbe.status === 'usable'
+          ? `Vision model ${settings.openRouterVisionModel} accepts pictures.`
+          : `Vision model ${settings.openRouterVisionModel} does not accept pictures (${visionProbe.status === 'empty' ? 'empty answer' : visionProbe.status === 'rate_limited' ? 'rate limited' : visionProbe.status === 'unavailable' ? `refused, HTTP ${visionProbe.httpStatus}` : 'provider error'}); customers' photos will not be analysed until a model that takes image input is set.`
+        : '';
+      res.json({
+        ok: result.ok && (!probe || probe.status === 'usable'),
+        detail: [result.detail, modelDetail, visionDetail].filter(Boolean).join(' '),
+        model: effectiveModel, modelStatus: probe?.status ?? null,
+        visionModel: settings.openRouterVisionModel, visionStatus: visionProbe?.status ?? null,
+        replyLanguage: settings.aiReplyLanguage,
+      });
     } catch (error) {
       logger.error({ error }, 'dashboard: AI configure/test threw unexpectedly');
       res.status(500).json({ ok: false, detail: 'internal_server_error' });

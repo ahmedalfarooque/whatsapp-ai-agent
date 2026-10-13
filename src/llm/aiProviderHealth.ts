@@ -172,6 +172,71 @@ export function refreshModelHealth(model: string): Promise<ModelHealth | null> {
   return run;
 }
 
+// ---------------------------------------------------------------- the VISION model (a usable chat model does not mean pictures are accepted)
+
+/** A 1x1 transparent PNG: enough to prove the model accepts image input; it carries no business or customer data. */
+const PROBE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+const visionCache = new Map<string, ModelHealth & { fingerprint: string }>();
+const visionInFlight = new Map<string, Promise<ModelHealth | null>>();
+
+export function getCachedVisionHealth(model: string, now: number = Date.now()): (ModelHealth & { stale: boolean }) | null {
+  const entry = visionCache.get(model);
+  if (!entry) return null;
+  const key = getEffectiveCredential('OPENROUTER_API_KEY');
+  if (!isUsableApiKey(key) || fingerprintOf(key) !== entry.fingerprint) return null;
+  const ttl = entry.status === 'usable' ? MODEL_OK_TTL_MS : MODEL_FAIL_TTL_MS;
+  return { status: entry.status, model: entry.model, checkedAt: entry.checkedAt, httpStatus: entry.httpStatus, latencyMs: entry.latencyMs, stale: now - entry.checkedAt > ttl };
+}
+
+/**
+ * Whether the configured VISION model actually accepts a picture: one tiny real completion with a 1x1 image attached (the same request
+ * shape the customer-picture analysis uses). 'unavailable' here means the model (or the account's data policy) rejects image input,
+ * so customer pictures would NOT be analysed and the assistant would say it could not open them.
+ */
+export function refreshVisionHealth(model: string): Promise<ModelHealth | null> {
+  if (env.shouldUseMockProviders) return Promise.resolve(null);
+  const key = getEffectiveCredential('OPENROUTER_API_KEY');
+  if (!isUsableApiKey(key)) return Promise.resolve(null);
+  const existing = visionInFlight.get(model);
+  if (existing) return existing;
+  const fingerprint = fingerprintOf(key);
+  const run = (async (): Promise<ModelHealth> => {
+    const started = Date.now();
+    let result: ModelHealth;
+    try {
+      const response = await fetchWithTimeout(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model, max_tokens: 8, temperature: 0,
+            messages: [{ role: 'user', content: [{ type: 'text', text: 'Reply with the single word: ok' }, { type: 'image_url', image_url: { url: `data:image/png;base64,${PROBE_PNG}` } }] }],
+          }),
+        },
+        env.VISION_TIMEOUT_MS,
+      );
+      let text: string | null = null;
+      if (response.ok) {
+        const body = (await response.json().catch(() => null)) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+        const content = body?.choices?.[0]?.message?.content;
+        text = typeof content === 'string' && content.trim() ? content.trim() : Array.isArray(content) && content.length ? 'ok' : null;
+      }
+      result = { status: classifyModelResponse(response.status, text), model, checkedAt: Date.now(), httpStatus: response.status, latencyMs: Date.now() - started };
+    } catch (error) {
+      logger.warn({ errorName: (error as Error)?.name, model }, 'ai vision health: could not reach the provider');
+      result = { status: 'error', model, checkedAt: Date.now(), httpStatus: null, latencyMs: Date.now() - started };
+    }
+    if (fingerprintOf(getEffectiveCredential('OPENROUTER_API_KEY')) === fingerprint) visionCache.set(model, { ...result, fingerprint });
+    return result;
+  })().finally(() => {
+    visionInFlight.delete(model);
+  });
+  visionInFlight.set(model, run);
+  return run;
+}
+
 /**
  * Makes sure fresh verdicts exist — for the key and, when a model is given, for that model — waiting at most `waitMs` in total.
  * The model is probed only after the key is known to be accepted, and only when its cached probe has expired.
@@ -194,4 +259,6 @@ export function resetProviderHealthForTests(): void {
   inFlight = null;
   modelCache.clear();
   modelInFlight.clear();
+  visionCache.clear();
+  visionInFlight.clear();
 }

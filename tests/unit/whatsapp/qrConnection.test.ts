@@ -236,6 +236,34 @@ describe('Baileys QR connection lifecycle', () => {
     expect(kept.every((k) => k.customerWaId === '966500000001@s.whatsapp.net' || k.customerWaId === '966500000001')).toBe(true);
   });
 
+  it('a picture reaches the pipeline WITH its media (mime, size, one memoised download shared with the file capture), and a duplicate event is dropped', async () => {
+    const baileys = await import('@whiskeysockets/baileys');
+    const bytes = Buffer.from('fake-jpeg-bytes');
+    vi.mocked(baileys.downloadMediaMessage).mockResolvedValue(bytes as never);
+    const qr = await import('../../../src/whatsapp/qrConnection');
+    await qr.startQrConnection();
+    const socket = fixtures.sockets[0]!;
+    socket.user = { id: '966558190545@s.whatsapp.net' };
+    emit(socket, 'connection.update', { connection: 'open' });
+    const picture = { key: { remoteJid: '966500000002@s.whatsapp.net', fromMe: false, id: 'p1' }, message: { imageMessage: { caption: 'what fits this car?', mimetype: 'image/jpeg', fileLength: 123456 } }, messageTimestamp: Math.floor(Date.now() / 1000) };
+    emit(socket, 'messages.upsert', { type: 'notify', messages: [picture] });
+    await tick(); await tick();
+    expect(fixtures.inbound).toHaveBeenCalledTimes(1);
+    const inbound = fixtures.inbound.mock.calls[0]![0] as { type: string; text?: string; media?: { kind: string; mimeType: string; fileLength: number | null; download: () => Promise<Buffer> } };
+    expect(inbound).toMatchObject({ type: 'image', text: 'what fits this car?', media: { kind: 'image', mimeType: 'image/jpeg', fileLength: 123456 } });
+    // the pipeline (vision) and the file capture share ONE download: the bytes are fetched from WhatsApp once
+    const captured = fixtures.capture.mock.calls.find((c) => (c[0] as { whatsappMessageId: string }).whatsappMessageId === 'qr:p1')![0] as { download: () => Promise<Buffer> };
+    expect(await inbound.media!.download()).toBe(bytes);
+    expect(await captured.download()).toBe(bytes);
+    expect(await inbound.media!.download()).toBe(bytes);
+    expect(baileys.downloadMediaMessage).toHaveBeenCalledTimes(1);
+    // the same WhatsApp message delivered again (reconnect replay) is claimed once and never processed twice
+    fixtures.claimed.mockReturnValueOnce(false);
+    emit(socket, 'messages.upsert', { type: 'notify', messages: [picture] });
+    await tick(); await tick();
+    expect(fixtures.inbound).toHaveBeenCalledTimes(1);
+  });
+
   it('spreadsheets, Word files, ZIP archives, stickers, locations, contacts and message edits are media/other too: nothing is sent back and none becomes customer text', async () => {
     const qr = await import('../../../src/whatsapp/qrConnection');
     await qr.startQrConnection();

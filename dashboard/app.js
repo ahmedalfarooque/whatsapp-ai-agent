@@ -961,6 +961,8 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
           ${autofillDecoy()}
           ${pwField('apiKey', 'OpenRouter API Key', null, openRouterSaved)}
           ${textField('model', 'Model for this business', 'Applies to the selected business only; the key above is shared by all of them. Leave the key empty to change only the model. openrouter/free costs nothing but is often rate limited, refused by your OpenRouter privacy settings, or answers empty — for dependable replies name a specific model, for example openai/gpt-4o-mini (paid). Saving tests the model with one tiny request.', aiConfig.model)}
+          ${textField('visionModel', 'Vision model (customer pictures)', 'The model that is shown the actual photo a customer sends, so the assistant identifies what is in it (a car, a part, a label) before answering. It must accept image input. Saving tests it with one tiny picture; if it cannot take pictures, photos are not analysed and the assistant says it could not open them instead of guessing.', aiConfig.visionModel)}
+          ${textField('replyLanguage', 'Reply language override', 'Leave EMPTY for the shared rule every business uses: the assistant answers in the language of the customer\'s latest message (Arabic, English, Malayalam, Chinese, French, …) and switches when the customer switches. Enter a code such as ar or en only if this business must always reply in that one language.', aiConfig.replyLanguage || '')}
           <div class="toolbar" style="margin-top:8px">
             <button type="submit" class="btn primary">Save &amp; Test AI</button>
           </div>
@@ -1045,7 +1047,7 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
 
     view.querySelector('#ai-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const payload = readFormFields(e.target, ['apiKey', 'model']);
+      const payload = readFormFields(e.target, ['apiKey', 'model', 'visionModel', 'replyLanguage']);
       const result = view.querySelector('#ai-result');
       result.textContent = 'Testing…';
       try {

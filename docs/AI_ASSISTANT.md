@@ -54,6 +54,34 @@ error (after at most 2 retries; an empty answer is retried once), an exhausted t
 neutral fallback message (and the human-hold rules still apply); the activity log records `AI failed; fallback sent (category, HTTP status,
 model)`; the status pill turns red. Logs never contain the key, the prompt or the customer's words.
 
+## Reply language (shared by every business)
+
+The assistant answers in the language of the customer's **latest** message — Arabic, English, Malayalam, Hindi, Urdu, Chinese, French, Tagalog
+or any other — and switches whenever the customer switches. A mixed message is answered in the main language of the question; brand, product,
+model and place names, codes, part and phone numbers are never translated. The language a customer picks from the menu (`customers.language`,
+`ar`/`en`) only selects the **menu and template texts**; it never locks the assistant's reply language (it used to: a customer who chose English
+and then wrote Malayalam got English). The decision is made in `src/llm/language.ts` (`decideReplyLanguage`, script-based detection, no model
+call) and written into the prompt as a `REPLY LANGUAGE:` line. A business that must always reply in one language sets
+`business_settings.ai_reply_language` (Providers page, "Reply language override"); leaving it empty — the default for every new business — keeps
+the shared rule.
+
+## Pictures a customer sends
+
+A photo is answered only after an image-capable model has looked at the actual picture: `src/llm/vision.ts` downloads the bytes once (the same
+download also keeps the file for staff), sends them as a data URL to the account's **vision model** (`business_settings.open_router_vision_model`,
+default `OPENROUTER_VISION_MODEL`) with a fixed analyst prompt, and stores the structured report (subject, identification, confidence, evidence,
+visible text, uncertainties, clarifying question) beside the customer's message as a hidden `image_analysis` row. That report is the assistant's
+only knowledge of the picture, in that turn and in follow-up questions ("and for the front bumper?") — the picture is never analysed twice. The
+prompt's picture rules apply to every business: identify before advising, never recommend vehicle- or model-specific parts for a vehicle not
+identified with high confidence, ask the clarifying question when year/trim/part number matters, never claim compatibility was verified, copy
+codes and numbers exactly, and never guess a picture that was not analysed. If the download, the model, a timeout or a rate limit fails, the
+stored note says the picture was NOT analysed and the assistant tells the customer it could not open it (one reply, nothing invented). Pictures
+sent inside a guided request, while staff hold the customer, or with the assistant off are stored and not answered, as before. Documents, voice
+notes and video are unchanged (stored for staff only). The mock provider never pretends to see a picture.
+
+"Save & Test AI" on the Providers page probes the vision model with a 1x1 image and says whether it accepts pictures; the activity log records
+`picture analysed in N s (model, confidence)` or `picture not analysed (reason)` and the total answer time for every AI reply.
+
 ## Models
 
 The model is stored per account (`business_settings.open_router_model`). It must support tool calling **and**, if your OpenRouter account

@@ -1,5 +1,5 @@
 import { logger } from '../logger';
-import type { ChatCompletionResponse, ChatMessage } from './types';
+import { contentText, type ChatCompletionResponse, type ChatMessage } from './types';
 
 /**
  * Mock LLM provider used whenever env.shouldUseMockProviders is true (i.e.
@@ -14,7 +14,9 @@ export async function chatCompletionMock(
   messages: ChatMessage[],
 ): Promise<ChatCompletionResponse> {
   const lastUser = [...messages].reverse().find((m) => m.role === 'user');
-  const preview = typeof lastUser?.content === 'string' ? lastUser.content : '';
+  // A picture in the last turn is acknowledged, never described: the mock has not seen it and must not pretend to.
+  const parts = Array.isArray(lastUser?.content) ? lastUser.content : [];
+  const preview = contentText(lastUser?.content ?? '') + (parts.some((p) => p.type === 'image_url') ? ' [image attached — not analysed by the mock]' : '');
 
   logger.info(
     { preview },

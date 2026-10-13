@@ -43,6 +43,9 @@ export const businessSettingsInputSchema = z
     humanEscalationInfo: z.string().max(2000).nullable(),
     supportedLanguages: csvOf((l) => /^[a-zA-Z]{2,8}$/.test(l)).nullable(),
     openRouterModel: z.string().min(1).max(100).nullable(),
+    /** null = the shared default (reply in the language of the customer's latest message); a code = always reply in that language. */
+    aiReplyLanguage: z.string().regex(/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/, 'must be a language code such as ar or en').nullable(),
+    openRouterVisionModel: z.string().min(1).max(100).nullable(),
     // ---- business profile & location (dashboard-editable, one resolver for WhatsApp/preview/AI)
     businessNameAr: z.string().max(200).nullable(),
     businessCategory: z.string().max(200).nullable(),
@@ -86,6 +89,10 @@ export interface BusinessSettings {
   humanEscalationInfo: string | null;
   supportedLanguages: string[];
   openRouterModel: string;
+  /** null = shared default policy: reply in the language of the customer's latest message. A code = this business always replies in it. */
+  aiReplyLanguage: string | null;
+  /** The image-capable model that receives a customer's picture. */
+  openRouterVisionModel: string;
   businessNameAr: string | null;
   businessCategory: string | null;
   descriptionAr: string | null;
@@ -144,6 +151,8 @@ interface BusinessSettingsRow {
   human_escalation_info: string | null;
   supported_languages: string | null;
   open_router_model: string | null;
+  ai_reply_language: string | null;
+  open_router_vision_model: string | null;
   business_name_ar: string | null;
   business_category: string | null;
   description_ar: string | null;
@@ -171,7 +180,7 @@ function readRow(accountId: number): BusinessSettingsRow {
             business_days, booking_duration_minutes, booking_buffer_minutes,
             restart_keywords, conversation_history_limit, welcome_message,
             fallback_message, cancellation_policy, human_escalation_info, supported_languages,
-            open_router_model,
+            open_router_model, ai_reply_language, open_router_vision_model,
             business_name_ar, business_category, description_ar, description_en, address_ar, address_en,
             google_maps_url, latitude, longitude, friday_hours_start, friday_hours_end,
             location_notes_ar, location_notes_en, logo_document_id, staff_whatsapp_number,
@@ -223,6 +232,8 @@ export function getBusinessSettings(accountId: number = currentAccountId()): Bus
     humanEscalationInfo: row.human_escalation_info,
     supportedLanguages: row.supported_languages ? csvToList(row.supported_languages) : [],
     openRouterModel: row.open_router_model ?? env.OPENROUTER_MODEL,
+    aiReplyLanguage: row.ai_reply_language,
+    openRouterVisionModel: row.open_router_vision_model ?? env.OPENROUTER_VISION_MODEL,
     businessNameAr: row.business_name_ar,
     businessCategory: row.business_category,
     descriptionAr: row.description_ar,
@@ -317,6 +328,8 @@ export function getBusinessSettingsOverrides(accountId: number = currentAccountI
     humanEscalationInfo: row.human_escalation_info !== null,
     supportedLanguages: row.supported_languages !== null,
     openRouterModel: row.open_router_model !== null,
+    aiReplyLanguage: row.ai_reply_language !== null,
+    openRouterVisionModel: row.open_router_vision_model !== null,
     businessNameAr: row.business_name_ar !== null,
     businessCategory: row.business_category !== null,
     descriptionAr: row.description_ar !== null,
@@ -355,6 +368,8 @@ const COLUMN_MAP: Record<keyof BusinessSettingsPatch, string> = {
   humanEscalationInfo: 'human_escalation_info',
   supportedLanguages: 'supported_languages',
   openRouterModel: 'open_router_model',
+  aiReplyLanguage: 'ai_reply_language',
+  openRouterVisionModel: 'open_router_vision_model',
   businessNameAr: 'business_name_ar',
   businessCategory: 'business_category',
   descriptionAr: 'description_ar',

@@ -5,7 +5,8 @@ import { AiResponseError } from './aiResponseError';
 import { canonicalArguments, validateToolArguments } from './toolArgs';
 import { toolRegistry, toolSchemasForAccount } from '../tools';
 import { currentAccountId } from '../accounts/accountContext';
-import type { ChatMessage } from './types';
+import { contentText, type ChatMessage } from './types';
+import { IMAGE_ANALYSIS_TOOL } from './vision';
 import type { ChatMessageForLlm } from '../memory/conversationRepo';
 
 export interface GeneratedMessage {
@@ -28,9 +29,12 @@ export interface AgentLoopResult {
  */
 export function historyToChatMessages(history: ChatMessageForLlm[]): ChatMessage[] {
   return history
-    .filter((h) => h.role !== 'tool' && !(h.role === 'assistant' && h.content.startsWith('[requested tools:')))
-    .map((h) => ({ role: h.role, content: h.content }));
+    .filter((h) => (h.role !== 'tool' || h.tool_name === IMAGE_ANALYSIS_TOOL) && !(h.role === 'assistant' && h.content.startsWith('[requested tools:')))
+    // A picture's analysis is stored beside the customer's message (hidden from the inbox) and shown to the model as context on the
+    // customer's side of the conversation: it is what the assistant knows about that photo, now and in later turns.
+    .map((h) => (h.role === 'tool' ? { role: 'user' as const, content: h.content } : { role: h.role, content: h.content }));
 }
+
 
 /** Parses the model's argument string. `null` means it was not valid JSON: that is reported to the model, never silently turned into {}. */
 function parseArgs(raw: string | undefined): unknown | null {
@@ -92,7 +96,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
     if (toolCalls.length === 0) {
       // An empty answer is a FAILED answer (the client already rejects it; this guards any other caller): it must never be stored or
       // counted as a successful AI reply.
-      const finalText = assistantMessage.content?.trim();
+      const finalText = contentText(assistantMessage.content).trim();
       if (!finalText) throw new AiResponseError('empty_response', null, null);
       generatedMessages.push({ role: 'assistant', content: finalText });
       return { finalText, generatedMessages };

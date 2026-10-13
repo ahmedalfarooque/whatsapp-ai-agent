@@ -16,6 +16,12 @@ export interface ChatCompletionRequest {
   maxTokens?: number;
   /** Epoch ms after which no new attempt may start (the whole AI loop's time budget). */
   deadline?: number;
+  /** Overrides the business's chat model for this one call (the vision step uses the image-capable model). */
+  model?: string;
+  /** Overrides the per-attempt timeout (ms); still capped by the deadline. */
+  timeoutMs?: number;
+  /** Fewer retries for a step that has its own fallback (the vision step: one retry on a rate limit / provider error). */
+  retries?: number;
 }
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -91,7 +97,9 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
   if (env.shouldUseMockProviders) {
     return chatCompletionMock(request.messages);
   }
-  const model = getBusinessSettings().openRouterModel;
+  // Images are sent as data URLs (the bytes themselves, base64). They are never logged; this is the only place the request leaves the process.
+  const model = request.model ?? getBusinessSettings().openRouterModel;
+  const perAttemptMs = request.timeoutMs ?? env.OPENROUTER_TIMEOUT_MS;
   // Retries are bounded: at most 2 more attempts for a rate limit or provider failure, and ONE more for an empty answer. A bad model
   // or policy refusal (400-404) is never retried — asking again cannot help and would only cost money.
   let emptyRetries = 0;
@@ -118,7 +126,7 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
               max_tokens: request.maxTokens ?? 600,
             }),
           },
-          request.deadline ? Math.max(1000, Math.min(env.OPENROUTER_TIMEOUT_MS, request.deadline - Date.now())) : env.OPENROUTER_TIMEOUT_MS,
+          request.deadline ? Math.max(1000, Math.min(perAttemptMs, request.deadline - Date.now())) : perAttemptMs,
         );
       } catch (error) {
         throw new AiResponseError('provider_error', null, model, `${(error as Error)?.name ?? 'network error'}`);
@@ -142,7 +150,7 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
       return validateCompletion(parsed, model);
     },
     {
-      retries: 2,
+      retries: request.retries ?? 2,
       isRetryable: (error) => {
         if (error instanceof AiCredentialError) return false;
         if (request.deadline && Date.now() + 2000 > request.deadline) return false; // no time left for another attempt

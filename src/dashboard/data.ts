@@ -143,6 +143,10 @@ export interface AiConfigView {
   mode: 'development' | 'production' | 'test';
   providerMode: 'mock' | 'production';
   model: string;
+  /** The image-capable model given customer pictures (per business; env default). */
+  visionModel: string;
+  /** null = the shared policy (reply in the customer's latest language); a code = this business always replies in it. */
+  replyLanguage: string | null;
   maxToolRounds: number;
   conversationHistoryLimit: number;
   toolsEnabled: string[];
@@ -154,6 +158,8 @@ export function getAiConfig(): AiConfigView {
     mode: env.NODE_ENV,
     providerMode: env.shouldUseMockProviders ? 'mock' : 'production',
     model: getBusinessSettings().openRouterModel,
+    visionModel: getBusinessSettings().openRouterVisionModel,
+    replyLanguage: getBusinessSettings().aiReplyLanguage,
     maxToolRounds: env.MAX_TOOL_ROUNDS,
     conversationHistoryLimit: getBusinessSettings().conversationHistoryLimit,
     toolsEnabled: ['check_availability', 'book_appointment'],

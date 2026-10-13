@@ -720,6 +720,19 @@ describe('dashboard', () => {
     await agent.post('/api/dashboard/ai/configure').send({ model: 'openrouter/free' });
   });
 
+  it('AI configure also sets the per-business vision model and reply-language override, validates them, and an empty override returns to the shared rule', async () => {
+    const res = await agent.post('/api/dashboard/ai/configure').send({ visionModel: 'vendor/sees-pictures', replyLanguage: 'ar' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ visionModel: 'vendor/sees-pictures', replyLanguage: 'ar', model: 'openrouter/free' });
+    expect((await agent.get('/api/dashboard/ai')).body).toMatchObject({ visionModel: 'vendor/sees-pictures', replyLanguage: 'ar', model: 'openrouter/free' });
+    expect((await agent.post('/api/dashboard/ai/configure').send({ visionModel: 'bad model; drop' })).body.fields).toEqual(['visionModel']);
+    expect((await agent.post('/api/dashboard/ai/configure').send({ replyLanguage: 'english!' })).body.fields).toEqual(['replyLanguage']);
+    const back = await agent.post('/api/dashboard/ai/configure').send({ replyLanguage: '' });
+    expect(back.status).toBe(200);
+    expect(back.body.replyLanguage).toBeNull();
+    expect((await agent.get('/api/dashboard/ai')).body.replyLanguage).toBeNull();
+  });
+
   it('AI configure persists the key/model and returns a real (non-fabricated) connection result', async () => {
     const res = await agent.post('/api/dashboard/ai/configure').send({ apiKey: 'sk-or-fake-test-key', model: 'openrouter/free' });
     expect(res.status).toBe(200);

@@ -71,6 +71,12 @@ const envSchema = z
 
     OPENROUTER_API_KEY: z.string().optional().default(''),
     OPENROUTER_MODEL: z.string().default('openrouter/free'),
+    /** The model that receives the actual image bytes when a customer sends a picture. Must accept image input (openrouter/free does: it routes to an image-capable free model). */
+    OPENROUTER_VISION_MODEL: z.string().default('openrouter/free'),
+    /** One image-analysis call may take this long (the whole message still obeys AI_LOOP_TIMEOUT_MS). */
+    VISION_TIMEOUT_MS: z.coerce.number().int().positive().default(25000),
+    /** Pictures larger than this are not analysed (WhatsApp images are usually well under 2 MB). */
+    VISION_MAX_IMAGE_BYTES: z.coerce.number().int().positive().default(6 * 1024 * 1024),
     OPENROUTER_SITE_URL: z.string().optional().default(''),
     OPENROUTER_APP_NAME: z.string().optional().default('WhatsApp AI Agent'),
 

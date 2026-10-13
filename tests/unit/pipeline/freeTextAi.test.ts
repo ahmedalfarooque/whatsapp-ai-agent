@@ -71,7 +71,7 @@ describe('ordinary text goes to the AI, with the right business context', () => 
     expect(sent()).toEqual(['AI answer']);
     expect(sent().join(' ')).not.toContain(runWithAccount(PAINT, () => resolveTemplate('language_selection', 'en')));
     expect(runWithAccount(PAINT, () => getCustomerByWaId(waId, undefined, PAINT))?.language).toBe('en');
-    expect(firstCall().system).toContain('Always reply in English');
+    expect(firstCall().system).toContain('REPLY LANGUAGE: English');
   });
 
   it('the same in Arabic: the customer is set to Arabic and the AI is told to answer in Arabic', async () => {
@@ -79,7 +79,7 @@ describe('ordinary text goes to the AI, with the right business context', () => 
     await processInboundMessage(msg(PAINT, waId, 'هل عندكم دهان خارجي للجدران؟'), { knowledge: PAINT_KB });
     expect(chatCompletion).toHaveBeenCalledTimes(1);
     expect(runWithAccount(PAINT, () => getCustomerByWaId(waId, undefined, PAINT))?.language).toBe('ar');
-    expect(firstCall().system).toContain('Always reply in Arabic');
+    expect(firstCall().system).toContain('REPLY LANGUAGE: Arabic');
   });
 
   it('a bare greeting, or a short fragment, still gets the welcome and language choice — not the AI', async () => {

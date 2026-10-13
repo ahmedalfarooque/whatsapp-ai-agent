@@ -26,6 +26,7 @@ import { renderPublishedProjects } from '../realestate/realEstateRepo';
 import { redactSensitiveText } from '../realestate/leadFields';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { runAgentLoop } from '../llm/agentLoop';
+import { IMAGE_ANALYSIS_TOOL, analyzeImage, imageContextLine, type ImageAnalysis } from '../llm/vision';
 import fs from 'node:fs';
 import { sendTextMessage, sendDocumentMessage, sendImageMessage, ImageDeliveryUnsupportedError, DocumentDeliveryUnsupportedError } from '../whatsapp/client';
 import { customerOfferMedia, MAX_IMAGE_CAPTION_CHARS, type OfferMediaItem } from '../offers/offerMedia';
@@ -173,9 +174,14 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   const language: CustomerLanguage = customer.language ?? 'en';
   const ctx: ReplyContext = { msg, customer, conversationId: conversation.id, channel, language };
 
-  // Only plain text (and menu taps) enters the automatic conversation. A voice note, audio, photo, video, document, sticker,
-  // location, reaction... is recorded for the team and NEVER answered: no apology, no menu, no AI. Staff can still reply by hand.
-  if (msg.type !== 'text' && msg.type !== 'interactive') {
+  // Plain text, menu taps and — when the assistant is on — a PICTURE enter the automatic conversation. A picture is answered only through
+  // the AI path after the vision model has looked at the actual image (never through the menu, and never inside a guided request, where
+  // a typed answer is expected). A voice note, audio, video, document, sticker, location, reaction... is recorded for the team and NEVER
+  // answered: no apology, no menu, no AI. Staff can still reply by hand.
+  const picture = msg.type === 'image' && msg.media?.kind === 'image' && settings.autoRepliesEnabled && settings.aiRepliesEnabled && !inGuidedFlow(customer.menu_state)
+    ? msg.media
+    : null;
+  if (msg.type !== 'text' && msg.type !== 'interactive' && !picture) {
     logger.info({ waId: maskedId, type: msg.type }, 'non-text inbound message recorded; no automatic reply');
     if (!SILENT_UNSTORED_TYPES.has(msg.type)) {
       storeInbound(conversation.id, msg);
@@ -249,9 +255,10 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     }
   }
 
-  // A brand-new customer whose very first message is a real question gets an ANSWER (in the language they wrote), not a language prompt.
-  if (msg.type === 'text' && !customer.language && settings.aiRepliesEnabled && isSubstantiveFreeText(msg.text)) {
-    const detected = detectLanguageFromScript(msg.text);
+  // A brand-new customer whose very first message is a real question (or a picture) gets an ANSWER (in the language they wrote), not a
+  // language prompt. The language stored here only selects the MENU texts; the assistant itself follows the customer's latest message.
+  if (!customer.language && settings.aiRepliesEnabled && (picture || (msg.type === 'text' && isSubstantiveFreeText(msg.text)))) {
+    const detected = detectLanguageFromScript(msg.text) ?? (picture ? 'en' : undefined);
     if (detected) {
       customer = setCustomerLanguage(customer.id, detected);
       customer = setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
@@ -260,7 +267,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     }
   }
 
-  if (settings.ruleRepliesEnabled) {
+  if (settings.ruleRepliesEnabled && !picture) {
     const route = routeMenu({ text: msg.text, interactiveId: msg.interactiveId, customer });
     if (route) {
       await applyRoute(ctx, route);
@@ -274,18 +281,30 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     return;
   }
 
+  // A picture is looked at ONCE, by the vision model, before the assistant answers; its report is stored beside the customer's message
+  // (hidden from the inbox, visible to the model now and in later turns), so a follow-up question about "this car" is answered from the
+  // same photo and the photo is never analysed twice. A failed analysis is stored as an honest note, never as a guess.
+  const startedAt = Date.now();
+  let analysis: ImageAnalysis | null = null;
+  if (picture) {
+    analysis = await analyzeImage({ mimeType: picture.mimeType, fileLength: picture.fileLength, download: picture.download, caption: msg.text, deadline: startedAt + env.AI_LOOP_TIMEOUT_MS });
+    appendMessage(conversation.id, { role: 'tool', toolName: IMAGE_ANALYSIS_TOOL, content: imageContextLine(analysis), whatsappMessageId: msg.messageId, metadata: { ok: analysis.ok, reason: analysis.ok ? undefined : analysis.reason, model: analysis.ok ? analysis.model : undefined, confidence: analysis.ok ? analysis.confidence : undefined, durationMs: analysis.durationMs } });
+  }
+
   // The model's memory of this customer in this business: this conversation only, the latest N messages, and nothing older than
   // CONVERSATION_MEMORY_HOURS (docs/AI_ASSISTANT.md). The stored conversation is untouched.
   const history = getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS);
-  const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id });
+  const systemPrompt = buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText: msg.text });
 
   let finalText = '';
   let kind: 'ai' | 'error' = 'ai';
   let failureDetail = 'AI failed; fallback sent';
   let verdict: 'send' | 'ai_handoff' | 'dropped' = 'send';
   let heldBy: Handoff | null = null;
+  const visionNote = analysis ? (analysis.ok ? `picture analysed in ${(analysis.durationMs / 1000).toFixed(1)} s (${analysis.model}, confidence ${analysis.confidence})` : `picture not analysed (${analysis.reason})`) : null;
   try {
     const loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
+    logger.info({ waId: maskedId, account: currentAccountId(), totalMs: Date.now() - startedAt, visionMs: analysis?.durationMs ?? 0, picture: Boolean(picture), rounds: loopResult.generatedMessages.filter((g) => g.content.startsWith('[requested tools:')).length + 1 }, 'AI reply ready');
     finalText = loopResult.finalText;
     // The model took a while: ownership may have changed meanwhile. Decide from the database NOW, before anything is stored or sent.
     heldBy = getHold(customer.id);
@@ -352,7 +371,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
 
   try {
     await sendTextMessage(msg.waId, finalText);
-    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? failureDetail : undefined });
+    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? [failureDetail, visionNote].filter(Boolean).join(' · ') : [`answered in ${((Date.now() - startedAt) / 1000).toFixed(1)} s`, visionNote].filter(Boolean).join(' · ') });
   } catch (error) {
     recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: 'Reply could not be sent' });
     logger.error({ waId: maskedId, error }, 'failed to send reply to customer after processing');

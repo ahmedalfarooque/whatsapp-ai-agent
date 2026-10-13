@@ -40,10 +40,23 @@ describe('reply rules in the prompt', () => {
     ]) expect(prompt, rule).toContain(rule);
   });
 
-  it('a set language is an instruction; no language leaves the "reply in the customer\'s language" rule', () => {
+  it('the menu language never locks the reply language: the latest message decides, and a menu choice only fills a silent message', () => {
     getDb();
-    expect(buildSystemPrompt(EMPTY_KNOWLEDGE, 'ar')).toContain('Always reply in Arabic');
-    expect(buildSystemPrompt(EMPTY_KNOWLEDGE, 'en')).toContain('Always reply in English');
-    expect(buildSystemPrompt(EMPTY_KNOWLEDGE)).not.toContain('Always reply in');
+    // the customer chose English from the menu but writes Malayalam: the reply is Malayalam
+    expect(buildSystemPrompt(EMPTY_KNOWLEDGE, 'en', new Date(), { latestText: 'ഈ കാറിന് ആക്സസറികൾ ഉണ്ടോ?' })).toContain('REPLY LANGUAGE: Malayalam');
+    expect(buildSystemPrompt(EMPTY_KNOWLEDGE, 'ar', new Date(), { latestText: 'Combien coûte la teinture des vitres ?' })).toContain('REPLY LANGUAGE: French');
+    // a message with no language of its own (a number) falls back to the menu choice
+    expect(buildSystemPrompt(EMPTY_KNOWLEDGE, 'ar', new Date(), { latestText: '2' })).toContain('REPLY LANGUAGE: Arabic for this message');
+    expect(buildSystemPrompt(EMPTY_KNOWLEDGE)).toContain("REPLY LANGUAGE: the language of the customer's latest message");
+    for (const prompt of [buildSystemPrompt(EMPTY_KNOWLEDGE, 'ar'), buildSystemPrompt(EMPTY_KNOWLEDGE, 'en')]) {
+      expect(prompt).not.toContain('regardless of the language');
+      expect(prompt).toContain('if they switch language, switch with them');
+    }
+  });
+
+  it('the picture rules every account shares: identify before advising, no invented identification, no unverified compatibility', () => {
+    getDb();
+    const prompt = buildSystemPrompt(EMPTY_KNOWLEDGE);
+    for (const rule of ['PICTURES THE CUSTOMER SENDS', 'Never describe, identify or guess a picture that has no such entry', 'Identify before you advise', 'Never recommend vehicle- or model-specific', 'Never say you checked or verified compatibility', 'do not switch to a different product or model']) expect(prompt, rule).toContain(rule);
   });
 });

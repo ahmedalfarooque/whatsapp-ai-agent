@@ -24,6 +24,14 @@ function productionLikeDatabase(): Database.Database {
   return db;
 }
 
+/** Applies exactly the migrations whose file name starts with the given prefix (the way runMigrations would, one by one). */
+function applyOnly(db: Database.Database, prefix: string): void {
+  for (const file of fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql') && f.startsWith(prefix)).sort()) {
+    db.exec(fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8'));
+    db.prepare('INSERT INTO schema_migrations (id) VALUES (?)').run(file);
+  }
+}
+
 function fingerprint(db: Database.Database): string {
   const parts: unknown[] = [];
   for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'real_estate_%' AND name <> 'schema_migrations' ORDER BY name").all() as { name: string }[]) {
@@ -36,7 +44,7 @@ describe('migration 023 — real estate add-on (additive)', () => {
   it('changes no existing table or row; it only adds the four real estate tables, all empty', () => {
     const db = productionLikeDatabase();
     const before = fingerprint(db);
-    runMigrations(db);
+    applyOnly(db, '023'); // 023 alone: later additive migrations (024 adds two business_settings columns) have their own test
     expect(fingerprint(db)).toBe(before);
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
     for (const t of NEW_TABLES) {

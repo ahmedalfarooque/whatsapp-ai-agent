@@ -3,6 +3,7 @@ import { env } from '../config/env';
 import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { getBusinessSettings } from '../config/businessSettings';
 import { chatCompletion } from '../llm/openRouterClient';
+import { contentText } from '../llm/types';
 import { logger } from '../logger';
 import { runWithAccount, LEGACY_ACCOUNT_ID } from '../accounts/accountContext';
 import { collectSources, type SetupSources, type TextSource } from './sources';
@@ -164,7 +165,7 @@ async function defaultAiExtractor(sources: SetupSources): ReturnType<AiExtractor
       temperature: 0,
       maxTokens: 4000,
     });
-    const content = response.choices[0]?.message.content ?? '';
+    const content = contentText(response.choices[0]?.message.content ?? '');
     const parsed = aiResult.parse(parseJsonObject(content));
     const { extracted, dropped } = groundAiResult(parsed, sources);
     return { extracted, dropped, model: getBusinessSettings().openRouterModel };

@@ -13,6 +13,17 @@ export interface InboundMessage {
   accountId?: number;
   /** Transport the message arrived on: 'cloud' (Meta webhook, default) or 'qr' (linked device). */
   channel?: string;
+  /** The picture/file behind a media message, fetched on demand (the QR transport supplies it; the Cloud webhook does not). */
+  media?: InboundMedia;
+}
+
+/** A customer's picture or file as WhatsApp describes it, with one shared, memoised download (fetched at most once per message). */
+export interface InboundMedia {
+  kind: 'image' | 'document' | 'video' | 'audio' | 'voice' | 'sticker';
+  mimeType: string;
+  fileName: string;
+  fileLength: number | null;
+  download: () => Promise<Buffer>;
 }
 
 /**
