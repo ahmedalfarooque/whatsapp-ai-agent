@@ -59,7 +59,15 @@ describe('release-full.ps1 (the full-release wrapper) and release-full.sh (the s
     expect(c).toMatch(/--check-only/);
     expect(c.indexOf('--check-only')).toBeLessThan(c.indexOf('if (-not $Apply)'));
     expect(c).toMatch(/REHEARSAL FAILED[^\n]*exit 1/);
-    expect(c.indexOf('REHEARSAL PASSED')).toBeLessThan(c.indexOf('Ssh "bash $Remote --base $baseFull --target $targetFull"\n'));
+    expect(c.indexOf('REHEARSAL PASSED')).toBeLessThan(c.indexOf('Invoke-Server "bash $Remote --base $baseFull --target $targetFull"\n'));
+  });
+  it('REGRESSION 2026-10-13: never defines a function whose body calls the bare command `ssh` (PowerShell names are case-insensitive: `function Ssh { & ssh }` recursed until "call depth overflow"); the client is resolved once as an application', () => {
+    const functions = [...c.matchAll(/function\s+([A-Za-z-]+)\b[^\n]*\{([^\n]*)\}/g)];
+    for (const [, name, body] of functions) expect({ name, callsBareSsh: /&\s*ssh\b/.test(body) }).toEqual({ name, callsBareSsh: false });
+    expect(c).not.toMatch(/function\s+ssh\b/i);
+    expect(c).toMatch(/Get-Command ssh -CommandType Application/);
+    expect(c).toMatch(/&\s*\$SshExe\b/);
+    expect(c).not.toMatch(/&\s+ssh\s/);
   });
   it('takes the target from master == origin/master only, and the base from production itself (ssh live HEAD, cross-checked with the published stamp)', () => {
     expect(c).toMatch(/differ; push or reconcile first/);

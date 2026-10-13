@@ -33,7 +33,11 @@ $Root = (& git -C $PSScriptRoot rev-parse --show-toplevel 2>$null)
 if (-not $Root) { Write-Error 'ABORT[repo]: not inside a git repository'; exit 1 }
 if ((& git -C $Root remote get-url origin) -notmatch 'ahmedalfarooque/whatsapp-ai-agent') { Write-Error 'ABORT[repo]: origin is not the WhatsApp AI Agent repository'; exit 1 }
 if (-not (Test-Path (Join-Path $Root 'scripts\release-full.sh'))) { Write-Error 'ABORT[repo]: scripts/release-full.sh is missing'; exit 1 }
-function Ssh([string]$Command) { & ssh -i $KeyPath -o BatchMode=yes -o ConnectTimeout=20 $Server $Command }
+# The OpenSSH client is resolved ONCE as an application: PowerShell command names are case-insensitive, so a function
+# named Ssh that ran `& ssh` would call itself until the call depth overflowed (seen on the first rehearsal of cc31bc4).
+$SshExe = (Get-Command ssh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+if (-not $SshExe) { Write-Error 'ABORT[ssh]: the OpenSSH client (ssh.exe) is not installed'; exit 1 }
+function Invoke-Server([string]$Command) { & $SshExe -i $KeyPath -o BatchMode=yes -o ConnectTimeout=20 $Server $Command }
 
 # ---- 1. the target: this checkout's master, identical to GitHub
 $branch = (& git -C $Root branch --show-current)
@@ -52,7 +56,7 @@ Write-Host "target = $($targetFull.Substring(0,7)) (master == origin/master)"
 if (-not (Test-Path $KeyPath)) { Write-Error "ABORT[ssh]: key not found: $KeyPath"; exit 1 }
 $stampCommit = $null
 try { $stamp = Invoke-RestMethod -Uri "$Site/dashboard/build-info.json" -TimeoutSec 20 -Headers @{ 'Cache-Control' = 'no-cache' }; $stampCommit = [string]($stamp.fullCommit ?? $stamp.commit) } catch { Write-Host "note: the published build stamp could not be read ($($_.Exception.Message))" }
-$liveHead = (Ssh "git -C $ServerRepo rev-parse HEAD" 2>$null | Select-Object -First 1)
+$liveHead = (Invoke-Server "git -C $ServerRepo rev-parse HEAD" 2>$null | Select-Object -First 1)
 if ($liveHead -notmatch '^[0-9a-f]{40}$') { Write-Error "ABORT[base]: could not read production's live commit over ssh (is the key loaded and the server reachable?)"; exit 1 }
 if ($stampCommit -and -not $liveHead.StartsWith($stampCommit)) { Write-Error "ABORT[base]: production's checkout is $($liveHead.Substring(0,7)) but its published stamp says $($stampCommit.Substring(0,7)); inspect before releasing"; exit 1 }
 if ($Base -and -not $liveHead.StartsWith($Base)) { Write-Error "ABORT[base]: -Base $Base does not match production's live commit $($liveHead.Substring(0,7))"; exit 1 }
@@ -65,10 +69,10 @@ $changes = (& git -C $Root diff --name-only $baseFull $targetFull)
 Write-Host "release = $($baseFull.Substring(0,7)) -> $($targetFull.Substring(0,7)): $($changes.Count) files; migrations: $(($changes | Where-Object { $_ -like 'src/memory/migrations/*' }) -join ', ')$(if (-not ($changes | Where-Object { $_ -like 'src/memory/migrations/*' })) { 'none' }); package files: $(($changes | Where-Object { $_ -in 'package.json','package-lock.json' }).Count)"
 
 # ---- 3. stage the script (CRLF stripped) and rehearse: --check-only writes nothing
-Get-Content -Raw (Join-Path $Root 'scripts\release-full.sh') | & ssh -i $KeyPath -o BatchMode=yes -o ConnectTimeout=20 $Server "tr -d '\r' > $Remote"
+Get-Content -Raw (Join-Path $Root 'scripts\release-full.sh') | & $SshExe -i $KeyPath -o BatchMode=yes -o ConnectTimeout=20 $Server "tr -d '\r' > $Remote"
 if ($LASTEXITCODE -ne 0) { Write-Error 'ABORT[stage]: could not stage the script on the server'; exit 1 }
 Write-Host "rehearsal: bash $Remote --base $($baseFull.Substring(0,7)) --target $($targetFull.Substring(0,7)) --check-only"
-Ssh "bash $Remote --base $baseFull --target $targetFull --check-only"
+Invoke-Server "bash $Remote --base $baseFull --target $targetFull --check-only"
 if ($LASTEXITCODE -ne 0) { Write-Error "REHEARSAL FAILED (exit $LASTEXITCODE): nothing was changed on production; read the ABORT line above"; exit 1 }
 Write-Host 'REHEARSAL PASSED: preconditions, fingerprints and fast-forward verified; nothing was written.'
 if (-not $Apply) {
@@ -79,7 +83,7 @@ if (-not $Apply) {
 
 # ---- 4. the release itself (backup, fast-forward, build, restart, proof, rollback are inside release-full.sh)
 Write-Host "release:   bash $Remote --base $($baseFull.Substring(0,7)) --target $($targetFull.Substring(0,7))"
-Ssh "bash $Remote --base $baseFull --target $targetFull"
+Invoke-Server "bash $Remote --base $baseFull --target $targetFull"
 $code = $LASTEXITCODE
 & (Join-Path $PSScriptRoot 'release-status.ps1')
 if ($code -ne 0) { Write-Error "RELEASE FAILED (exit $code): release-full.sh rolled back if it had changed anything; see its output and the status above"; exit 1 }
