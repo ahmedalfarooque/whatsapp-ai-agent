@@ -313,7 +313,10 @@ export function serveContentType(doc: BusinessDocument): string {
 }
 
 /** Text the AI may use: active documents marked ai_knowledge or customer with extracted text. */
-export function documentsForAiContext(db: Database.Database = getDb(), accountId: number = currentAccountId()): { title: string; text: string; customerVisible: boolean }[] {
+export function documentsForAiContext(db: Database.Database = getDb(), accountId: number = currentAccountId(), scale = 1): { title: string; text: string; customerVisible: boolean }[] {
+  // `scale` (0-1) shrinks both budgets when the provider's per-request token cap is below the usual prompt (llm/promptCap.ts).
+  const count = scale >= 1 ? env.DOCUMENTS_PROMPT_COUNT : Math.max(1, Math.round(env.DOCUMENTS_PROMPT_COUNT * scale));
+  const chars = scale >= 1 ? env.DOCUMENT_PROMPT_CHARS : Math.max(400, Math.floor(env.DOCUMENT_PROMPT_CHARS * scale));
   // Catalogue PDFs are large and are answered from through the search tool (src/catalogues), not pasted into every prompt.
   let catalogueDocs = new Set<number>();
   try {
@@ -326,8 +329,8 @@ export function documentsForAiContext(db: Database.Database = getDb(), accountId
   return listDocuments({ status: 'active', accountId }, db)
     .filter((d) => !catalogueDocs.has(d.id))
     .filter((d) => (d.visibility === 'ai_knowledge' || d.visibility === 'customer') && d.extracted_text)
-    .slice(0, env.DOCUMENTS_PROMPT_COUNT)
-    .map((d) => ({ title: d.title || d.original_name, text: d.extracted_text!.slice(0, env.DOCUMENT_PROMPT_CHARS), customerVisible: d.visibility === 'customer' }));
+    .slice(0, count)
+    .map((d) => ({ title: d.title || d.original_name, text: d.extracted_text!.slice(0, chars), customerVisible: d.visibility === 'customer' }));
 }
 
 /** Titles of documents customers may be told about (never internal ones). */

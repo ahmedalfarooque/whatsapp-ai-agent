@@ -32,7 +32,7 @@ import { buildSystemPrompt } from '../llm/buildSystemPrompt';
 import { renderPublishedProjects } from '../realestate/realEstateRepo';
 import { redactSensitiveText } from '../realestate/leadFields';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
-import { runAgentLoop } from '../llm/agentLoop';
+import { runAgentLoop, CONTEXT_TOOL_ROWS } from '../llm/agentLoop';
 import { IMAGE_ANALYSIS_TOOL, analyzeImage, imageContextLine, type ImageAnalysis } from '../llm/vision';
 import fs from 'node:fs';
 import { sendTextMessage, sendDocumentMessage, sendImageMessage, ImageDeliveryUnsupportedError, DocumentDeliveryUnsupportedError } from '../whatsapp/client';
@@ -376,16 +376,19 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   // When the provider's cap is lower than usual (credit nearly gone) the budgets shrink by the scale learned from its last 402 (llm/promptCap.ts).
   const promptAccountId = currentAccountId();
   let promptScale = currentPromptScale(promptAccountId);
-  const buildPrompt = (scale: number) => ({
-    history: trimHistoryToBudget(getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS), Math.floor(env.HISTORY_PROMPT_CHARS * scale)),
-    systemPrompt: buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText, knowledgeScale: scale }),
-  });
+  const buildPrompt = (scale: number) => {
+    const history = trimHistoryToBudget(getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS), Math.floor(env.HISTORY_PROMPT_CHARS * scale));
+    // The long media rules are needed only when a picture, voice note or file is part of this conversation.
+    const mediaInPlay = Boolean(picture || analysis || transcript || documentText || video) || history.some((h) => h.tool_name != null && CONTEXT_TOOL_ROWS.has(h.tool_name));
+    return { history, systemPrompt: buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText, knowledgeScale: scale, compactMediaRules: !mediaInPlay }) };
+  };
   let { history, systemPrompt } = buildPrompt(promptScale);
 
   let finalText = '';
   let kind: 'ai' | 'error' = 'ai';
   let failureDetail = 'AI failed; fallback sent';
   let verdict: 'send' | 'ai_handoff' | 'dropped' = 'send';
+  let replacedByAfterHours: 'notice' | 'menu' | null = null;
   let heldBy: Handoff | null = null;
   const visionNote = [analysis ? (analysis.ok ? `picture analysed in ${(analysis.durationMs / 1000).toFixed(1)} s (${analysis.model}, confidence ${analysis.confidence})` : `picture not analysed (${analysis.reason})`) : null, ...mediaNotes].filter(Boolean).join(' · ') || null;
   try {
@@ -395,11 +398,11 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     } catch (firstError) {
       // HTTP 402 "Prompt tokens limit exceeded: N > CAP": send less (same model, no extra cost) and try ONCE more; anything else rethrows.
       const cap = firstError instanceof AiResponseError && firstError.reason === 'payment_required' && !firstError.afterToolCalls ? parsePromptCap(firstError.providerMessage) : null;
-      const shrunk = cap ? Math.max(0.15, promptScale * scaleForCap(cap)) : promptScale;
+      const shrunk = cap ? Math.max(0.1, promptScale * scaleForCap(cap)) : promptScale;
       if (!cap || shrunk >= promptScale) throw firstError;
       promptScale = shrunk;
       rememberPromptScale(promptAccountId, promptScale);
-      logger.warn({ waId: maskedId, account: promptAccountId, promptTokens: cap.used, tokenCap: cap.cap, scale: Number(promptScale.toFixed(2)) }, 'provider token cap is below the prompt size; retrying once with a smaller prompt');
+      logger.warn({ waId: maskedId, account: promptAccountId, promptTokens: cap.used, tokenCap: cap.cap, scale: Number(promptScale.toFixed(2)), systemChars: systemPrompt.length, historyChars: history.reduce((n, h) => n + (h.content?.length ?? 0), 0), historyMessages: history.length }, 'provider token cap is below the prompt size; retrying once with a smaller prompt');
       ({ history, systemPrompt } = buildPrompt(promptScale));
       loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
     }
@@ -442,7 +445,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     if (responseProblem?.reason === 'payment_required') {
       // The OpenRouter credit is exhausted (or too low for this prompt): every message fails the same way until it is topped up. The customer
       // hears the apology once per window; the activity names the real cause for staff (the dashboard shows "AI credits exhausted").
-      if (!allowCredentialFallback(currentAccountId(), msg.waId)) {
+      if (!allowCredentialFallback(currentAccountId(), msg.waId) && afterHoursInsteadMode(ctx) === null) {
         recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: 'OpenRouter credits exhausted (HTTP 402) — apology already sent recently; top up at openrouter.ai/settings/credits' });
         return;
       }
@@ -450,7 +453,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     }
     if (credentialProblem) {
       // The provider key is unusable: every message would fail the same way. Tell the customer once in a while, not on every message.
-      if (!allowCredentialFallback(currentAccountId(), msg.waId)) {
+      if (!allowCredentialFallback(currentAccountId(), msg.waId) && afterHoursInsteadMode(ctx) === null) {
         recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: `AI credential problem (${credentialProblem.reason}) — apology already sent recently` });
         return;
       }
@@ -461,8 +464,13 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
       verdict = 'dropped';
     } else {
       kind = 'error';
-      finalText = resolveTemplate('fallback_error', language);
-      appendMessage(conversation.id, { role: 'assistant', content: finalText, direction: MESSAGE_DIRECTION.OUTBOUND });
+      // Closed and the assistant is unavailable: a bare "something went wrong" helps nobody; the closed notice with the callback / staff
+      // message choices (all handled without the AI) is sent instead, below. Otherwise the neutral fallback as before.
+      replacedByAfterHours = afterHoursInsteadMode(ctx);
+      if (!replacedByAfterHours) {
+        finalText = resolveTemplate('fallback_error', language);
+        appendMessage(conversation.id, { role: 'assistant', content: finalText, direction: MESSAGE_DIRECTION.OUTBOUND });
+      }
     }
   }
 
@@ -475,6 +483,16 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   if (verdict === 'dropped') {
     suppressedByHandoff(ctx, heldBy);
     return;
+  }
+
+  if (replacedByAfterHours) {
+    if (await sendAfterHoursInstead(ctx, replacedByAfterHours)) {
+      recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: [failureDetail, 'business closed: the closed notice and callback / message choices were sent instead', visionNote].filter(Boolean).join(' · ') });
+      return;
+    }
+    // The choices could not be sent: fall back to the neutral apology so the customer is never left without an answer.
+    finalText = resolveTemplate('fallback_error', language);
+    appendMessage(conversation.id, { role: 'assistant', content: finalText, direction: MESSAGE_DIRECTION.OUTBOUND });
   }
 
   try {
@@ -490,15 +508,45 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
 
 /** Once per window while the business is closed: the closed notice (hours, next opening) and the follow-up choices, then the menu state waits for a choice. */
 const AFTER_HOURS_WINDOW_MS = 6 * 60 * 60_000;
-async function maybeAfterHoursNotice(ctx: ReplyContext): Promise<void> {
+/**
+ * What the customer can be offered while the business is closed and after-hours help is on (language known, no guided flow, no staff hold):
+ * 'notice' = the closed notice plus the follow-up menu; 'menu' = they are already in that menu, so just the menu again; null = neither.
+ */
+function afterHoursInsteadMode(ctx: ReplyContext): 'notice' | 'menu' | null {
   const biz = getBusinessSettings();
-  if (!biz.afterHoursEnabled || !biz.hoursConfigured || isOutsideBusinessHours(biz) !== true) return;
+  if (!biz.afterHoursEnabled || !biz.hoursConfigured || isOutsideBusinessHours(biz) !== true) return null;
   const fresh = getCustomerById(ctx.customer.id, undefined, null);
-  if (!fresh || !fresh.language || inGuidedFlow(fresh.menu_state) || isFollowupState(fresh.menu_state) || getHold(fresh.id)) return;
+  if (!fresh || !fresh.language || inGuidedFlow(fresh.menu_state) || getHold(fresh.id)) return null;
+  if (fresh.menu_state === FOLLOWUP_STATES.MENU) return 'menu';
+  return isFollowupState(fresh.menu_state) ? null : 'notice';
+}
+
+/** The AI could not answer and the business is closed: offer the callback / staff-message choices (handled without the AI). True when they were sent. */
+async function sendAfterHoursInstead(ctx: ReplyContext, mode: 'notice' | 'menu'): Promise<boolean> {
+  if (mode === 'notice') return maybeAfterHoursNotice(ctx, true);
+  const fresh = getCustomerById(ctx.customer.id, undefined, null);
+  if (!fresh?.language) return false;
+  try {
+    const nextCtx: ReplyContext = { ...ctx, customer: fresh, language: fresh.language };
+    await replyTemplate(nextCtx, 'followup_invalid_option', 'rule', {}, 'AI unavailable while closed: asked the customer to pick a follow-up option');
+    const menu = followupMenuSend(getBusinessSettings(), fresh.language);
+    await replyTemplate(nextCtx, menu.key, 'rule', menu.vars ?? {});
+    return true;
+  } catch (error) {
+    logger.warn({ waId: maskWaId(ctx.msg.waId), error: String((error as Error).message) }, 'could not re-send the follow-up menu');
+    return false;
+  }
+}
+
+/** `force` skips the once-per-window rule: used when the AI could not answer, so the customer gets the callback / message choices instead of a bare error. Returns true when they were sent. */
+async function maybeAfterHoursNotice(ctx: ReplyContext, force = false): Promise<boolean> {
+  if (afterHoursInsteadMode(ctx) !== 'notice') return false;
+  const biz = getBusinessSettings();
+  const fresh = getCustomerById(ctx.customer.id, undefined, null)!;
   const last = fresh.after_hours_notified_at ? Date.parse(fresh.after_hours_notified_at) : 0;
-  if (Number.isFinite(last) && Date.now() - last < AFTER_HOURS_WINDOW_MS) return;
+  if (!force && Number.isFinite(last) && Date.now() - last < AFTER_HOURS_WINDOW_MS) return false;
   setCustomerAfterHoursNotified(fresh.id);
-  const language: CustomerLanguage = fresh.language;
+  const language = fresh.language as CustomerLanguage; // afterHoursInsteadMode() has checked it is known
   const nextCtx: ReplyContext = { ...ctx, customer: fresh, language };
   try {
     const notice = afterHoursNoticeSend(biz, language);
@@ -506,8 +554,10 @@ async function maybeAfterHoursNotice(ctx: ReplyContext): Promise<void> {
     await replyTemplate(nextCtx, notice.key, 'rule', notice.vars ?? {}, 'Outside opening hours: closed notice and follow-up choices sent once');
     await replyTemplate(nextCtx, menu.key, 'rule', menu.vars ?? {});
     setCustomerMenuState(fresh.id, FOLLOWUP_STATES.MENU, null);
+    return true;
   } catch (error) {
     logger.warn({ waId: maskWaId(ctx.msg.waId), error: String((error as Error).message) }, 'could not send the after-hours notice');
+    return false;
   }
 }
 

@@ -38,6 +38,11 @@ VOICE NOTES, FILES AND VIDEOS THE CUSTOMER SENDS:
 - Answer the customer's actual question about THEIR picture; do not switch to a different product or model the business happens to sell.
 `;
 
+/** The short form of IMAGE_RULES, used only while the provider's token cap forces a smaller prompt AND this conversation has no picture, voice note or file in it. */
+const COMPACT_MEDIA_RULES = `
+PICTURES, VOICE NOTES AND FILES: you know the content of a customer's photo, voice note or file only from its "[IMAGE ANALYSIS …]", "[VOICE NOTE TRANSCRIPT …]" or "[DOCUMENT TEXT …]" entry in the conversation. Never describe or guess content that has no such entry or whose entry says NOT analysed / NOT transcribed / NOT read: say you could not open it and ask for what they need. Never state compatibility or fitment unless this business's own data says so.
+`;
+
 const CATALOGUE_RULES = `
 
 CATALOGUES AND OFFICIAL SOURCES (this business has a library of official catalogues and linked official web pages):
@@ -128,8 +133,10 @@ export interface PromptContext {
   customerId?: number;
   /** The customer's latest message (text or picture caption): the reply language follows it (shared policy, see llm/language.ts). */
   latestText?: string | null;
-  /** Multiplies KNOWLEDGE_PROMPT_CHARS (0-1): the provider's token cap is lower than usual (llm/promptCap.ts). */
+  /** Multiplies the knowledge and business-document budgets (0-1): the provider's token cap is lower than usual (llm/promptCap.ts). */
   knowledgeScale?: number;
+  /** With a reduced knowledgeScale and no picture, voice note or file in this conversation, the long media rules are replaced by a short form. */
+  compactMediaRules?: boolean;
 }
 
 /**
@@ -182,7 +189,7 @@ export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string, n
   try {
     const offers = listCustomerVisibleOffers();
     if (offers.length) offersSection = `CURRENT OFFERS (the ONLY offers you may mention; never invent others):\n${offers.map((o) => renderOfferLine(o, 'en')).join('\n\n')}`;
-    const docs = documentsForAiContext();
+    const docs = documentsForAiContext(undefined, accountId, context.knowledgeScale ?? 1);
     if (docs.length) documentsSection = `\nBUSINESS DOCUMENTS (uploaded by staff; ${docs.filter((d) => d.customerVisible).length} may be mentioned to customers by title):\n${docs.map((d) => `--- ${d.title}${d.customerVisible ? ' (customer-visible)' : ' (internal reference only)'} ---\n${d.text}`).join('\n')}`;
   } catch {
     /* offers/documents tables may not exist in very old test databases */
@@ -199,7 +206,7 @@ BUSINESS PROFILE (published by staff — authoritative):
 ${profileLines}
 
 ${offersSection}${documentsSection}${catalogueSection}${realEstate}
-${INTENT_RULES}${STYLE_RULES}${IMAGE_RULES}${env.WEB_SEARCH_ENABLED ? WEB_RULES : ''}${menuReference()}
+${INTENT_RULES}${STYLE_RULES}${context.compactMediaRules && (context.knowledgeScale ?? 1) < 1 ? COMPACT_MEDIA_RULES : IMAGE_RULES}${env.WEB_SEARCH_ENABLED ? WEB_RULES : ''}${menuReference()}
 
 SCOPE AND HONESTY RULES (never break these):
 - Facts about THIS business — its prices, services, products, stock, availability, offers, policies, opening hours, address, phone and

@@ -5,8 +5,8 @@
  */
 
 const CAP_PATTERN = /prompt tokens limit exceeded:\s*(\d+)\s*>\s*(\d+)/i;
-const SAFETY = 0.8; // aim below the cap: the estimate is rough and the fixed part of the prompt does not shrink
-const MIN_SCALE = 0.2;
+const SAFETY = 0.7; // aim well below the cap: the estimate is rough and the fixed part of the prompt (rules, profile, tools) does not shrink
+const MIN_SCALE = 0.1;
 const REMEMBER_MS = 30 * 60 * 1000;
 
 export interface PromptCap { used: number; cap: number }

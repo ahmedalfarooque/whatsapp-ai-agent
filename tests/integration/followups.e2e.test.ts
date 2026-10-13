@@ -17,6 +17,7 @@ import { createAccount } from '../../src/accounts/accountRepo';
 import { runWithAccount } from '../../src/accounts/accountContext';
 import { getCustomerByWaId, setCustomerMenuState } from '../../src/memory/customerRepo';
 import { updateBusinessSettings } from '../../src/config/businessSettings';
+import { AiResponseError } from '../../src/llm/aiResponseError';
 import { activeFollowupsForCustomer, getFollowup, listFollowupEvents, type FollowupRequest } from '../../src/followups/followupRepo';
 import { callWindow, cancelFollowup, completeFollowup, createFollowup, FollowupError, recordCallOpened, registerFollowupJobs, rescheduleFollowup, telUrlFor } from '../../src/followups/followupService';
 import { listJobsFor, runDueJobs, resetJobHandlersForTests } from '../../src/jobs/scheduler';
@@ -42,6 +43,7 @@ const CLOSED_NOW = new Date('2026-10-07T20:00:00Z'); // Wednesday 23:00 Riyadh �
 const OPEN_NOW = new Date('2026-10-08T07:00:00Z'); // Thursday 10:00 Riyadh — open
 const riyadh = (iso: string) => DateTime.fromISO(iso, { zone: 'Asia/Riyadh' });
 const db = () => getDb();
+const activityKinds = (waId: string): string[] => (db().prepare('SELECT kind FROM reply_activity WHERE wa_id = ? ORDER BY id').all(waId) as { kind: string }[]).map((r) => r.kind);
 const customerOf = (waId: string) => runWithAccount(ACC, () => getCustomerByWaId(waId, undefined, ACC))!;
 const newWa = () => `96655${String(++counter).padStart(7, '0')}`;
 
@@ -87,6 +89,39 @@ describe('after hours: the customer is told once, offered the follow-up choices,
     expect(sent()).toHaveLength(5);
     expect(String(vi.mocked(chatCompletion).mock.calls[0]![0].messages[0]!.content)).toMatch(/BUSINESS STATUS NOW: CLOSED \(reopens tomorrow at 9:00 AM\)/);
     expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU); // the choices stay available
+  });
+
+  it('SCREENSHOTS: while closed and the assistant is unavailable (HTTP 402), the customer gets the closed notice and the callback choices — never "something went wrong" — and can still finish a callback', async () => {
+    const waId = await englishCustomer(); // closed: notice + menu sent, menu state waiting
+    vi.mocked(chatCompletion).mockRejectedValue(new AiResponseError('payment_required', 402, 'openai/gpt-4.1-mini', 'Insufficient credits'));
+    vi.mocked(sendTextMessage).mockClear();
+    // in the follow-up menu, free text goes to the assistant; it is down, so the menu is offered again (not silence, not an error)
+    await processInboundMessage(msg(waId, 'Call me back please'), { knowledge: KB });
+    expect(sent().join('\n')).not.toMatch(/went wrong/i);
+    expect(sent().join('\n')).toMatch(/1️⃣ Request a phone callback[\s\S]*6️⃣ Cancel an existing request/);
+    expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
+    expect(activityKinds(waId)).toContain('error'); // staff still see the genuine failure
+    // the whole callback still works without the assistant
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB });
+    await processInboundMessage(msg(waId, '2'), { knowledge: KB });
+    expect(lastSent()).toMatch(/Your request is saved\./);
+    expect(customerOf(waId).menu_state).toBe('MAIN_MENU');
+    // back in the main menu with the assistant still down: the closed notice and choices are sent again, once per message, not an error
+    vi.mocked(sendTextMessage).mockClear();
+    await processInboundMessage(msg(waId, 'any news about my tinting?'), { knowledge: KB });
+    expect(sent().join('\n')).not.toMatch(/went wrong/i);
+    expect(sent().join('\n')).toMatch(/currently closed/);
+    expect(sent().join('\n')).toMatch(/1️⃣ Request a phone callback/);
+  });
+
+  it('when the business is OPEN and the assistant is unavailable, the neutral apology is still sent (nothing else can help)', async () => {
+    vi.setSystemTime(OPEN_NOW);
+    const waId = await englishCustomer();
+    vi.mocked(chatCompletion).mockRejectedValue(new AiResponseError('payment_required', 402, 'openai/gpt-4.1-mini', 'Insufficient credits'));
+    vi.mocked(sendTextMessage).mockClear();
+    await processInboundMessage(msg(waId, 'how much is tinting?'), { knowledge: KB });
+    expect(lastSent()).toMatch(/went wrong/i);
+    expect(sent().join('\n')).not.toMatch(/currently closed/);
   });
 
   it('callback → appointment type → saved as pending until the business opens; staff get a persistent notification, a WhatsApp alert and a durable job', async () => {

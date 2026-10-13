@@ -14,9 +14,9 @@ describe('provider prompt-token cap', () => {
     expect(parsePromptCap('Prompt tokens limit exceeded: 100 > 200')).toBeNull();
   });
 
-  it('shrinks to about 80% of the cap, never below the floor and never above 0.9', () => {
-    expect(scaleForCap({ used: 6666, cap: 6196 })).toBeCloseTo(0.743, 2);
-    expect(scaleForCap({ used: 20000, cap: 1000 })).toBe(0.2);
+  it('shrinks to about 70% of the cap, never below the floor and never above 0.9', () => {
+    expect(scaleForCap({ used: 6666, cap: 6196 })).toBeCloseTo(0.651, 2);
+    expect(scaleForCap({ used: 20000, cap: 1000 })).toBe(0.1);
     expect(scaleForCap({ used: 4000, cap: 6200 })).toBe(0.9);
   });
 
