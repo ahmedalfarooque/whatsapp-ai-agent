@@ -7,13 +7,6 @@
       "runtimeArgs": ["run", "dev", "--", "--no-open"],
       "port": 3000,
       "url": "http://localhost:3000"
-    },
-    {
-      "name": "preview-disposable",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["scripts/preview-disposable.cjs", "--port", "3400"],
-      "port": 3400,
-      "url": "http://localhost:3400"
     }
   ]
 }
