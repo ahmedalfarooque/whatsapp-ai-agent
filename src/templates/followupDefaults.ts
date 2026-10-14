@@ -25,6 +25,7 @@ export const FOLLOWUP_TEMPLATE_KEYS = [
   'followup_cancel_list', 'followup_cancel_none', 'followup_cancelled', 'followup_save_failed', 'followup_direct_call', 'followup_invalid_option',
   'followup_staff_alert', 'followup_staff_reminder', 'followup_staff_overdue', 'followup_staff_eligible',
   'assistant_unavailable_closed', 'assistant_unavailable_open', 'assistant_unavailable_again', 'human_support_closed',
+  'followup_callback_prompt', 'followup_manage_prompt', 'followup_rescheduled', 'followup_call_closed',
 ] as const;
 
 export const FOLLOWUP_TEMPLATES: FollowupTemplateDefault[] = [
@@ -33,13 +34,13 @@ export const FOLLOWUP_TEMPLATES: FollowupTemplateDefault[] = [
   // follow-up choices (callback, staff message, agreed time), which work without the AI.
   {
     key: 'assistant_unavailable_closed', category: CAT, titleAr: 'المساعد غير متاح (مغلق)', titleEn: 'Assistant Unavailable (closed)',
-    ar: '🤖 رد تلقائي: لا يستطيع المساعد الذكي الإجابة بالتفصيل الآن.\n\n🕒 {business} مغلق حالياً وسنعود {next_open}.\n\nيمكنك اختيار إحدى الطرق التالية وسيتواصل معك فريقنا:',
-    en: '🤖 Automated reply: our smart assistant cannot answer in detail right now.\n\n🕒 {business} is currently closed; we will be back {next_open}.\n\nChoose one of the options below and our team will get back to you:',
+    ar: '🤖 رد تلقائي: لا يستطيع المساعد الإجابة الآن. {business} مغلق حالياً وسنعود {next_open}.\n\n{options}\n\nأرسل رقم الخيار.',
+    en: '🤖 Automated reply: our assistant cannot answer right now. {business} is closed; we will be back {next_open}.\n\n{options}\n\nReply with the option number.',
   },
   {
     key: 'assistant_unavailable_open', category: CAT, titleAr: 'المساعد غير متاح (مفتوح)', titleEn: 'Assistant Unavailable (open)',
-    ar: '🤖 رد تلقائي: لا يستطيع المساعد الذكي الإجابة بالتفصيل الآن، لكن فريقنا متاح.\n\nاختر إحدى الطرق التالية وسنتواصل معك:',
-    en: '🤖 Automated reply: our smart assistant cannot answer in detail right now, but our team is available.\n\nChoose one of the options below and we will get back to you:',
+    ar: '🤖 رد تلقائي: لا يستطيع المساعد الإجابة الآن، لكن فريقنا متاح لمساعدتك.\n\n{options}\n\nأرسل رقم الخيار.',
+    en: '🤖 Automated reply: our assistant cannot answer right now, but our team can help.\n\n{options}\n\nReply with the option number.',
   },
   {
     key: 'assistant_unavailable_again', category: CAT, titleAr: 'المساعد لا يزال غير متاح', titleEn: 'Assistant Still Unavailable',
@@ -48,8 +49,8 @@ export const FOLLOWUP_TEMPLATES: FollowupTemplateDefault[] = [
   },
   {
     key: 'human_support_closed', category: CAT, titleAr: 'طلب موظف خارج ساعات العمل', titleEn: 'Staff Requested (closed)',
-    ar: 'لا يوجد موظف متاح الآن: {business} مغلق حالياً وسنعود {next_open}.\n\nأبلغنا الفريق بطلبك. اختر كيف تحب أن نتابع معك، أو اكتب سؤالك وسيساعدك المساعد الآن:',
-    en: 'No one from our team is available right now: {business} is currently closed; we will be back {next_open}.\n\nThe team has been notified of your request. Choose how you would like us to follow up, or type your question and the assistant will help you now:',
+    ar: 'لا يوجد موظف متاح الآن: {business} مغلق حالياً وسنعود {next_open}.\n\nأبلغنا الفريق بطلبك.\n\n{options}\n\nأرسل رقم الخيار أو اكتب سؤالك.',
+    en: 'No one from our team is available right now: {business} is currently closed; we will be back {next_open}.\n\nThe team has been notified of your request.\n\n{options}\n\nReply with the option number, or type your question.',
   },
   {
     key: 'after_hours_notice', category: CAT, titleAr: 'إشعار خارج ساعات العمل', titleEn: 'After-hours Notice',
@@ -57,11 +58,30 @@ export const FOLLOWUP_TEMPLATES: FollowupTemplateDefault[] = [
     en: '🕒 {business} is currently closed.\n\n⏰ Opening hours:\n{hours}\n\nWe will be back {next_open}.\n{promise}',
   },
   {
-    key: 'followup_menu', category: CAT, titleAr: 'خيارات المتابعة (مغلق)', titleEn: 'Follow-up Choices (closed)',
-    ar: 'كيف تحب أن نتابع معك؟\n\n1️⃣ طلب اتصال هاتفي\n2️⃣ طلب رسالة واتساب من الموظفين\n3️⃣ التواصل معي فور توفر الموظفين\n4️⃣ اختيار وقت للاتصال/الموعد\n5️⃣ الموقع والعروض والخدمات\n6️⃣ إلغاء طلب قائم\n\nأرسل رقم الخيار، أو اكتب سؤالك مباشرةً وسيجيبك المساعد الآن.\n0️⃣ القائمة الرئيسية',
-    en: 'How would you like us to follow up?\n\n1️⃣ Request a phone callback\n2️⃣ Request a WhatsApp message from staff\n3️⃣ Contact me as soon as staff are available\n4️⃣ Choose a callback / appointment time\n5️⃣ Location, offers and services\n6️⃣ Cancel an existing request\n\nReply with the option number, or just type your question and the assistant will answer now.\n0️⃣ Main Menu',
+    key: 'followup_menu', category: CAT, titleAr: 'خيارات المتابعة', titleEn: 'Follow-up Choices',
+    ar: 'كيف نستطيع مساعدتك؟\n\n{options}\n\nأرسل رقم الخيار، أو اكتب سؤالك مباشرةً.\n0️⃣ القائمة الرئيسية',
+    en: 'How can we help?\n\n{options}\n\nReply with the option number, or just type your question.\n0️⃣ Main Menu',
   },
   {
+    key: 'followup_callback_prompt', category: CAT, titleAr: 'موعد الاتصال', titleEn: 'Callback Timing',
+    ar: 'متى تفضل أن نتصل بك؟\n\n1️⃣ في أقرب وقت ممكن\n2️⃣ اختيار التاريخ والوقت\n\n0️⃣ رجوع',
+    en: 'When should we call you back?\n\n1️⃣ As soon as possible\n2️⃣ Choose a date and time\n\n0️⃣ Back',
+  },
+  {
+    key: 'followup_manage_prompt', category: CAT, titleAr: 'إدارة الطلب', titleEn: 'Manage a Request',
+    ar: '{request}\n\n1️⃣ إلغاء الطلب\n2️⃣ تغيير التاريخ والوقت\n\n0️⃣ رجوع',
+    en: '{request}\n\n1️⃣ Cancel this request\n2️⃣ Change the date and time\n\n0️⃣ Back',
+  },
+  {
+    key: 'followup_rescheduled', category: CAT, titleAr: 'تم تغيير الموعد', titleEn: 'Request Rescheduled',
+    ar: '✅ تم تغيير موعد طلبك {reference}.\n🗓️ الموعد الجديد: {when}',
+    en: '✅ Your request {reference} was rescheduled.\n🗓️ New time: {when}',
+  },
+  {
+    key: 'followup_call_closed', category: CAT, titleAr: 'الاتصال بنا (مغلق)', titleEn: 'Call Us (closed)',
+    ar: 'الفريق غير متاح الآن وسنعود {next_open}.\n📞 رقمنا: {phone}\n\nيمكنك أيضاً طلب اتصال وسنتواصل معك.',
+    en: 'Our team is not available right now; we will be back {next_open}.\n📞 Our number: {phone}\n\nYou can also request a callback and we will call you.',
+  },  {
     key: 'followup_menu_open', category: CAT, titleAr: 'خيارات المتابعة (مفتوح)', titleEn: 'Follow-up Choices (open)',
     ar: 'كيف تحب أن نتابع معك؟\n\n1️⃣ طلب اتصال هاتفي\n2️⃣ طلب رسالة واتساب من الموظفين\n3️⃣ التواصل معي في أقرب وقت\n4️⃣ اختيار وقت للاتصال/الموعد\n5️⃣ الموقع والعروض والخدمات\n6️⃣ إلغاء طلب قائم\n7️⃣ الاتصال بنا الآن: {phone}\n\nأرسل رقم الخيار.\n0️⃣ القائمة الرئيسية',
     en: 'How would you like us to follow up?\n\n1️⃣ Request a phone callback\n2️⃣ Request a WhatsApp message from staff\n3️⃣ Contact me as soon as possible\n4️⃣ Choose a callback / appointment time\n5️⃣ Location, offers and services\n6️⃣ Cancel an existing request\n7️⃣ Call us now: {phone}\n\nReply with the option number.\n0️⃣ Main Menu',
@@ -93,18 +113,18 @@ export const FOLLOWUP_TEMPLATES: FollowupTemplateDefault[] = [
   },
   {
     key: 'followup_confirm_scheduled', category: CAT, titleAr: 'تأكيد طلب الاتصال بوقت محدد', titleEn: 'Scheduled Request Confirmation',
-    ar: '✅ تم حفظ طلبك.\n\n📋 الرقم المرجعي: {reference}\n📌 الموضوع: {type}\n📞 الطريقة: {method}\n🕒 الوقت: {when}\n\nسيتواصل معك فريقنا في الوقت المتفق عليه (خلال {window}). لإلغاء الطلب أرسل "إلغاء".',
-    en: '✅ Your request is saved.\n\n📋 Reference: {reference}\n📌 About: {type}\n📞 Method: {method}\n🕒 Time: {when}\n\nOur team will contact you at the agreed time (within {window}). To cancel, reply "cancel".',
+    ar: '✅ تم حفظ طلبك.\n\n📋 الرقم المرجعي: {reference}\n📞 الطريقة: {method}\n🕒 الوقت: {when}\n\nسيتواصل معك فريقنا في الوقت المتفق عليه (خلال {window}). لإلغاء الطلب أرسل "إلغاء".',
+    en: '✅ Your request is saved.\n\n📋 Reference: {reference}\n📞 Method: {method}\n🕒 Time: {when}\n\nOur team will contact you at the agreed time (within {window}). To cancel, reply "cancel".',
   },
   {
     key: 'followup_confirm_asap_open', category: CAT, titleAr: 'تأكيد طلب التواصل (مفتوح)', titleEn: 'ASAP Confirmation (open)',
-    ar: '✅ تم حفظ طلبك وإبلاغ الفريق.\n\n📋 الرقم المرجعي: {reference}\n📌 الموضوع: {type}\n📞 الطريقة: {method}\n\nسيتواصل معك أحد الموظفين في أقرب وقت ممكن. {promise}\nلإلغاء الطلب أرسل "إلغاء".',
-    en: '✅ Your request is saved and the team has been notified.\n\n📋 Reference: {reference}\n📌 About: {type}\n📞 Method: {method}\n\nA member of staff will contact you as soon as possible. {promise}\nTo cancel, reply "cancel".',
+    ar: '✅ تم حفظ طلبك وإبلاغ الفريق.\n\n📋 الرقم المرجعي: {reference}\n📞 الطريقة: {method}\n\nسيتواصل معك أحد الموظفين في أقرب وقت ممكن. {promise}\nلإلغاء الطلب أرسل "إلغاء".',
+    en: '✅ Your request is saved and the team has been notified.\n\n📋 Reference: {reference}\n📞 Method: {method}\n\nA member of staff will contact you as soon as possible. {promise}\nTo cancel, reply "cancel".',
   },
   {
     key: 'followup_confirm_asap_closed', category: CAT, titleAr: 'تأكيد طلب التواصل (مغلق)', titleEn: 'ASAP Confirmation (closed)',
-    ar: '✅ تم حفظ طلبك.\n\n📋 الرقم المرجعي: {reference}\n📌 الموضوع: {type}\n📞 الطريقة: {method}\n\nالموظفون غير متاحين حالياً؛ سيتواصلون معك بعد عودتنا {next_open}. {promise}\nلإلغاء الطلب أرسل "إلغاء".',
-    en: '✅ Your request is saved.\n\n📋 Reference: {reference}\n📌 About: {type}\n📞 Method: {method}\n\nStaff are not available right now; they will contact you after we reopen {next_open}. {promise}\nTo cancel, reply "cancel".',
+    ar: '✅ تم حفظ طلبك.\n\n📋 الرقم المرجعي: {reference}\n📞 الطريقة: {method}\n\nالموظفون غير متاحين حالياً؛ سيتواصلون معك بعد عودتنا {next_open}. {promise}\nلإلغاء الطلب أرسل "إلغاء".',
+    en: '✅ Your request is saved.\n\n📋 Reference: {reference}\n📞 Method: {method}\n\nStaff are not available right now; they will contact you after we reopen {next_open}. {promise}\nTo cancel, reply "cancel".',
   },
   {
     key: 'followup_confirm_whatsapp', category: CAT, titleAr: 'تأكيد طلب رسالة واتساب', titleEn: 'WhatsApp Message Requested',
@@ -113,8 +133,8 @@ export const FOLLOWUP_TEMPLATES: FollowupTemplateDefault[] = [
   },
   {
     key: 'followup_cancel_list', category: CAT, titleAr: 'قائمة الطلبات للإلغاء', titleEn: 'Cancel Request List',
-    ar: 'طلباتك القائمة:\n\n{requests}\n\nأرسل رقم الطلب الذي تريد إلغاءه، أو 0 للرجوع.',
-    en: 'Your open requests:\n\n{requests}\n\nReply with the number of the request to cancel, or 0 to go back.',
+    ar: 'طلباتك القائمة:\n\n{requests}\n\nأرسل رقم الطلب لإلغائه أو تغيير موعده، أو 0 للرجوع.',
+    en: 'Your open requests:\n\n{requests}\n\nReply with the number of a request to cancel or reschedule it, or 0 to go back.',
   },
   {
     key: 'followup_cancel_none', category: CAT, titleAr: 'لا توجد طلبات قائمة', titleEn: 'No Open Requests',

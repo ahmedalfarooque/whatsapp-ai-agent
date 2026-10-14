@@ -206,28 +206,27 @@ describe('web search inside a real conversation', () => {
   });
 });
 
-describe('when the assistant cannot answer, customers get the local automated choices once per window and a short reminder after — never spam, never silence', () => {
-  const unavailable = () => runWithAccount(PAINT, () => resolveTemplate('assistant_unavailable_open', 'en'));
-  const again = () => runWithAccount(PAINT, () => resolveTemplate('assistant_unavailable_again', 'en'));
-  const menu = () => runWithAccount(PAINT, () => resolveTemplate('followup_menu', 'en')); // no contact phone on this business: no "call us now" line
+describe('when the assistant cannot answer, customers get ONE local automated message with the choices per window — never spam, never a second menu', () => {
+  const UNAVAILABLE = /^🤖 Automated reply: our assistant cannot answer right now, but our team can help\.\n\n1️⃣ Request a callback\n\nReply with the option number\.$/; // no contact phone on this business: no "call us now" line
   beforeEach(() => resetCredentialFallbackThrottle());
 
-  it('each customer gets the automated reply + choices once per window; further messages get the one-line reminder (not nothing); other customers still get theirs', async () => {
+  it('each customer gets the automated reply + choices ONCE per window as ONE message; further messages in the window repeat nothing; other customers still get theirs', async () => {
     vi.mocked(chatCompletion).mockRejectedValue(new AiCredentialError('OpenRouter refused the API key (HTTP 401).', 'rejected', 401));
     const a = '966511000601';
     const b = '966511000602';
     await processInboundMessage(msg(PAINT, a, 'Do you have exterior wall paint?'), { knowledge: PAINT_KB });
-    expect(sent()).toEqual([unavailable(), menu()]);
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]).toMatch(UNAVAILABLE);
     await processInboundMessage(msg(PAINT, a, 'Hello? Anyone there please'), { knowledge: PAINT_KB });
     await processInboundMessage(msg(PAINT, a, 'I need paint for my bedroom'), { knowledge: PAINT_KB });
-    expect(sent()).toEqual([unavailable(), menu(), again(), again()]); // the long reply is not repeated; the customer is never ignored
+    expect(sent()).toHaveLength(1); // the notice and the menu are not repeated
     await processInboundMessage(msg(PAINT, b, 'Do you have exterior wall paint?'), { knowledge: PAINT_KB });
-    expect(sent().slice(-2)).toEqual([unavailable(), menu()]);
+    expect(sent()).toHaveLength(2);
+    expect(sent()[1]).toMatch(UNAVAILABLE);
 
     const activity = listReplyActivity({ limit: 50, accountId: PAINT }).map((r) => `${r.kind}:${r.detail ?? ''}`);
-    expect(activity.some((x) => x.startsWith('error:AI credential problem (rejected): fallback sent') && x.includes('automated reply and callback / message choices sent instead'))).toBe(true);
-    expect(activity.some((x) => x.startsWith('error:AI credential problem (rejected): fallback sent') && x.includes('automated reminder of the callback / message choices sent'))).toBe(true);
-    expect(activity.some((x) => x.startsWith('suppressed:'))).toBe(false); // nothing is silently dropped any more
+    expect(activity.some((x) => x.startsWith('error:AI credential problem (rejected): fallback sent') && x.includes('ONE automated message with the callback choices'))).toBe(true);
+    expect(activity.some((x) => x.startsWith('error:AI credential problem (rejected): fallback sent') && x.includes('the earlier automated reply stands, nothing repeated'))).toBe(true); // staff still see every failure
   });
 
   it('the full automated reply is available again after the window', async () => {
@@ -237,26 +236,26 @@ describe('when the assistant cannot answer, customers get the local automated ch
     try {
       vi.setSystemTime(new Date('2030-01-01T10:00:00Z'));
       await processInboundMessage(msg(PAINT, waId, 'Do you have exterior wall paint?'), { knowledge: PAINT_KB });
-      expect(sent()).toHaveLength(2);
+      expect(sent()).toHaveLength(1);
       vi.setSystemTime(new Date('2030-01-01T10:05:00Z'));
       await processInboundMessage(msg(PAINT, waId, 'Still waiting for an answer please'), { knowledge: PAINT_KB });
-      expect(sent()).toHaveLength(3);
-      expect(sent()[2]).toBe(again());
+      expect(sent()).toHaveLength(1); // inside the window: nothing repeated
       vi.setSystemTime(new Date('2030-01-01T10:11:00Z'));
       await processInboundMessage(msg(PAINT, waId, 'Any update on my question now'), { knowledge: PAINT_KB });
-      expect(sent()).toHaveLength(5);
-      expect(sent()[3]).toBe(unavailable());
+      expect(sent()).toHaveLength(2);
+      expect(sent()[1]).toMatch(UNAVAILABLE);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('any kind of AI failure (not only a credential problem) follows the same rule: the choices once, then the reminder', async () => {
+  it('any kind of AI failure (not only a credential problem) follows the same rule: one message with the choices, nothing repeated', async () => {
     vi.mocked(chatCompletion).mockRejectedValue(new Error('upstream exploded'));
     const waId = '966511000604';
     await processInboundMessage(msg(PAINT, waId, 'Do you have exterior wall paint?'), { knowledge: PAINT_KB });
     await processInboundMessage(msg(PAINT, waId, 'Is anyone there to answer me'), { knowledge: PAINT_KB });
-    expect(sent()).toEqual([unavailable(), menu(), again()]);
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]).toMatch(UNAVAILABLE);
     expect(sent().join('\n')).not.toMatch(/went wrong|upstream exploded/i);
   });
 });

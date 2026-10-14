@@ -81,8 +81,8 @@ describe('after hours: the customer is told once, offered the follow-up choices,
     expect(texts[2]).toMatch(/9:00 AM - 6:00 PM/);
     expect(texts[2]).toMatch(/We will be back tomorrow at 9:00 AM/);
     expect(texts[2]).not.toMatch(/within/); // no response-time promise unless the business set one
-    expect(texts[3]).toMatch(/1️⃣ Request a phone callback[\s\S]*6️⃣ Cancel an existing request/);
-    expect(texts[3]).not.toMatch(/Call us now/); // closed: no direct call offered
+    expect(texts[3]).toMatch(/1️⃣ Request a callback\n2️⃣ Call us now: \+966112223344/);
+    expect(texts[3]).not.toMatch(/WhatsApp message|Choose a callback|appointment/); // short: callback, call, (manage only when a request exists)
     expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
     // a question while in the follow-up menu is answered by the assistant, and the notice is NOT repeated
     await processInboundMessage(msg(waId, 'how much is window tinting?'), { knowledge: KB });
@@ -96,25 +96,26 @@ describe('after hours: the customer is told once, offered the follow-up choices,
     const waId = await englishCustomer(); // closed: notice + menu sent, menu state waiting
     vi.mocked(chatCompletion).mockRejectedValue(new AiResponseError('payment_required', 402, 'openai/gpt-4.1-mini', 'Insufficient credits'));
     vi.mocked(sendTextMessage).mockClear();
-    // in the follow-up menu, free text goes to the assistant; it is down, so the menu is offered again (not silence, not an error)
+    // in the follow-up menu, free text goes to the assistant; it is down, so ONE automated message carries the closed notice and the choices
     await processInboundMessage(msg(waId, 'Call me back please'), { knowledge: KB });
+    expect(sent()).toHaveLength(1);
     expect(sent().join('\n')).not.toMatch(/went wrong/i);
-    expect(sent().join('\n')).toMatch(/1️⃣ Request a phone callback[\s\S]*6️⃣ Cancel an existing request/);
+    expect(sent()[0]).toMatch(/assistant cannot answer right now[\s\S]*is closed[\s\S]*1️⃣ Request a callback\n2️⃣ Call us now/);
     expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
     expect(activityKinds(waId)).toContain('error'); // staff still see the genuine failure
     // the whole callback still works without the assistant
-    await processInboundMessage(msg(waId, '1'), { knowledge: KB });
-    await processInboundMessage(msg(waId, '2'), { knowledge: KB });
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // request a callback
+    expect(lastSent()).toMatch(/When should we call you back\?[\s\S]*1️⃣ As soon as possible[\s\S]*2️⃣ Choose a date and time/);
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // as soon as possible
     expect(lastSent()).toMatch(/Your request is saved\./);
+    expect(lastSent()).toMatch(/Reference: CB-/);
+    expect(lastSent()).not.toMatch(/About:/); // the appointment type is no longer asked
     expect(customerOf(waId).menu_state).toBe('MAIN_MENU');
-    // back in the main menu with the assistant still down: NOT the long closed notice again (no duplicate closure messages) — the short
-    // automated reminder of the choices, and the choices still work
+    // with the assistant still down: the earlier automated reply stands — no second unavailable message, no second menu
     vi.mocked(sendTextMessage).mockClear();
     await processInboundMessage(msg(waId, 'any news about my tinting?'), { knowledge: KB });
-    expect(sent()).toHaveLength(1);
-    expect(sent().join('\n')).not.toMatch(/went wrong/i);
-    expect(sent().join('\n')).not.toMatch(/currently closed/);
-    expect(lastSent()).toMatch(/Automated reply: the assistant still cannot answer\. Send a follow-up option number \(1 callback, 2 WhatsApp message, 4 choose a time\) or 0 for the main menu/);
+    expect(sent()).toHaveLength(0);
+    expect(activityKinds(waId).filter((k) => k === 'error').length).toBeGreaterThanOrEqual(2); // staff still see every genuine failure
     expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
     await processInboundMessage(msg(waId, '0'), { knowledge: KB });
     expect(customerOf(waId).menu_state).toBe('MAIN_MENU');
@@ -128,8 +129,8 @@ describe('after hours: the customer is told once, offered the follow-up choices,
     await processInboundMessage(msg(waId, 'how much is tinting?'), { knowledge: KB });
     expect(sent().join('\n')).not.toMatch(/went wrong/i);
     expect(sent().join('\n')).not.toMatch(/currently closed/);
-    expect(sent()[0]).toMatch(/Automated reply: our smart assistant cannot answer in detail right now, but our team is available/);
-    expect(sent()[1]).toMatch(/7️⃣ Call us now: \+966112223344/); // open: the direct call is offered
+    expect(sent()).toHaveLength(1); // ONE message: the honest notice and the choices together
+    expect(sent()[0]).toMatch(/Automated reply: our assistant cannot answer right now, but our team can help[\s\S]*2️⃣ Call us now: \+966112223344/);
     expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
     // and a callback request completes without the assistant
     await processInboundMessage(msg(waId, '1'), { knowledge: KB });
@@ -142,23 +143,23 @@ describe('after hours: the customer is told once, offered the follow-up choices,
     const waId = await englishCustomer();
     vi.mocked(sendTextMessage).mockClear();
     await processInboundMessage(msg(waId, '1'), { knowledge: KB });
-    expect(lastSent()).toMatch(/What is it about\?[\s\S]*1️⃣ Consultation[\s\S]*4️⃣ Quotation discussion/);
-    expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.TYPE);
-    await processInboundMessage(msg(waId, '2'), { knowledge: KB });
+    expect(lastSent()).toMatch(/When should we call you back\?[\s\S]*1️⃣ As soon as possible[\s\S]*2️⃣ Choose a date and time/);
+    expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.CALLBACK);
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB });
     const confirmation = lastSent();
     expect(confirmation).toMatch(/Your request is saved\./);
     expect(confirmation).toMatch(/Reference: CB-/);
-    expect(confirmation).toMatch(/About: Service enquiry/);
+    expect(confirmation).not.toMatch(/About:/);
     expect(confirmation).toMatch(/Method: Phone call/);
     expect(confirmation).toMatch(/Staff are not available right now; they will contact you after we reopen tomorrow at 9:00 AM/);
     expect(customerOf(waId).menu_state).toBe('MAIN_MENU');
     const row = runWithAccount(ACC, () => activeFollowupsForCustomer(customerOf(waId).id))[0]!;
-    expect(row).toMatchObject({ status: 'pending', contact_method: 'call', appointment_type_key: 'service_enquiry', asap: 1, requested_at: null, source: 'customer' });
+    expect(row).toMatchObject({ status: 'pending', contact_method: 'call', asap: 1, requested_at: null, source: 'customer' });
     expect(DateTime.fromISO(row.eligible_at!).toUTC().toISO()).toBe(riyadh('2026-10-08T09:00:00').toUTC().toISO());
     const notifications = listStaffNotifications({ accountIds: [ACC], adminUserId: 1, status: 'open' });
     expect(notifications.filter((n) => n.followup_id === row.id)).toHaveLength(1);
     expect(notifications[0]).toMatchObject({ kind: 'followup_new', ring: 0, admin_user_id: null });
-    expect(notifications[0]!.body).toMatch(/Service enquiry[\s\S]*Phone call[\s\S]*when staff are back/);
+    expect(notifications[0]!.body).toMatch(/Phone call[\s\S]*when staff are back/);
     const outbox = db().prepare("SELECT target_jid, kind, body FROM notification_outbox WHERE dedupe_key = ?").get(`outbox:followup:new:${row.id}`) as { target_jid: string; kind: string; body: string };
     expect(outbox).toMatchObject({ target_jid: '966500000000@s.whatsapp.net', kind: 'staff_followup' });
     expect(outbox.body).toContain(`+${waId}`);
@@ -169,11 +170,9 @@ describe('after hours: the customer is told once, offered the follow-up choices,
 
   it('"as soon as staff are available" becomes actionable (and rings) when the business opens; "cancel" lists and cancels the request and stops the jobs', async () => {
     const waId = await englishCustomer();
-    await processInboundMessage(msg(waId, '3'), { knowledge: KB });
-    expect(lastSent()).toMatch(/How should we contact you\?/);
-    await processInboundMessage(msg(waId, '2'), { knowledge: KB }); // WhatsApp message
-    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // consultation
-    expect(lastSent()).toMatch(/A WhatsApp message from our staff has been requested \(not sent yet\)/);
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // request a callback
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // as soon as possible
+    expect(lastSent()).toMatch(/Your request is saved/);
     const row = runWithAccount(ACC, () => activeFollowupsForCustomer(customerOf(waId).id))[0]!;
     expect(row.status).toBe('pending');
     // the business opens: the eligibility job runs, the request becomes actionable and staff are alerted with a ring
@@ -184,7 +183,10 @@ describe('after hours: the customer is told once, offered the follow-up choices,
     // the customer cancels from WhatsApp
     vi.mocked(sendTextMessage).mockClear();
     await processInboundMessage(msg(waId, 'cancel'), { knowledge: KB });
-    expect(lastSent()).toMatch(new RegExp(`1️⃣ ${row.reference} · WhatsApp message · Consultation`));
+    expect(lastSent()).toMatch(new RegExp(`1️⃣ ${row.reference} · Phone call`));
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB });
+    expect(lastSent()).toMatch(/1️⃣ Cancel this request\n2️⃣ Change the date and time/);
+    expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MANAGE);
     await processInboundMessage(msg(waId, '1'), { knowledge: KB });
     expect(lastSent()).toMatch(new RegExp(`Request ${row.reference} has been cancelled and its reminders stopped`));
     const after = runWithAccount(ACC, () => getFollowup(row.id))!;
@@ -197,9 +199,8 @@ describe('after hours: the customer is told once, offered the follow-up choices,
 
   it('an agreed time is validated against the schedule (closed times refused, unreadable text re-asked) and confirmed with the callback window', async () => {
     const waId = await englishCustomer();
-    await processInboundMessage(msg(waId, '4'), { knowledge: KB });
-    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // phone call
-    await processInboundMessage(msg(waId, '4'), { knowledge: KB }); // quotation discussion
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // request a callback
+    await processInboundMessage(msg(waId, '2'), { knowledge: KB }); // choose a date and time
     expect(lastSent()).toMatch(/When suits you\?/);
     expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.TIME);
     await processInboundMessage(msg(waId, 'whenever'), { knowledge: KB });
@@ -212,7 +213,7 @@ describe('after hours: the customer is told once, offered the follow-up choices,
     expect(text).toMatch(/Time: tomorrow at 10:00 AM/);
     expect(text).toMatch(/within 30 minutes/);
     const row = runWithAccount(ACC, () => activeFollowupsForCustomer(customerOf(waId).id))[0]!;
-    expect(row).toMatchObject({ status: 'scheduled', asap: 0, appointment_type_key: 'quotation_discussion' });
+    expect(row).toMatchObject({ status: 'scheduled', asap: 0 });
     expect(DateTime.fromISO(row.requested_at!).toUTC().toISO()).toBe(riyadh('2026-10-08T10:00:00').toUTC().toISO());
     expect(DateTime.fromISO(row.window_end_at!).toUTC().toISO()).toBe(riyadh('2026-10-08T10:30:00').toUTC().toISO());
     expect(listJobsFor('followup', row.id).map((j) => j.kind).sort()).toEqual(['followup_overdue', 'followup_reminder']);
@@ -225,7 +226,7 @@ describe('the callback window, reminders, overdue and the staff actions (server 
   let waFor = '';
   beforeEach(async () => {
     waFor = await englishCustomer();
-    row = runWithAccount(ACC, () => createFollowup({ customerId: customerId(), contactMethod: 'call', appointmentTypeKey: 'consultation', requestedAt: riyadh('2026-10-08T10:00:00').toJSDate(), source: 'customer' }));
+    row = runWithAccount(ACC, () => createFollowup({ customerId: customerId(), contactMethod: 'call', appointmentTypeKey: null, requestedAt: riyadh('2026-10-08T10:00:00').toJSDate(), source: 'customer' }));
   });
 
   it('before the agreed time the call action is refused; inside the 30-minute window it is allowed and opens the ordinary dialler (tel:), not a WhatsApp call; after it the request is overdue', () => {
@@ -304,7 +305,7 @@ describe('while the business is open', () => {
     const waId = await englishCustomer();
     expect(sent()).toHaveLength(2); // language selection + main menu only
     runWithAccount(ACC, () => setCustomerMenuState(customerOf(waId).id, FOLLOWUP_STATES.MENU, null));
-    await processInboundMessage(msg(waId, '7'), { knowledge: KB });
+    await processInboundMessage(msg(waId, '2'), { knowledge: KB }); // Call us now
     expect(lastSent()).toMatch(/We are open now\. You can call us directly on \+966112223344 until today at 6:00 PM/);
     runWithAccount(ACC, () => setCustomerMenuState(customerOf(waId).id, FOLLOWUP_STATES.MENU, null));
     await processInboundMessage(msg(waId, '1'), { knowledge: KB });
@@ -337,10 +338,9 @@ describe('SCREENSHOT 2026-10-14: the assistant works 24/7; business hours decide
     const waId = await englishCustomer();
     vi.mocked(sendTextMessage).mockClear();
     await processInboundMessage(msg(waId, 'I want to talk to an agent'), { knowledge: KB });
-    expect(sent()).toHaveLength(2);
+    expect(sent()).toHaveLength(1); // one message: the honest hand-over and the choices
     expect(sent()[0]).toMatch(/No one from our team is available right now: Pearl Dental is currently closed; we will be back tomorrow at 9:00 AM/);
-    expect(sent()[0]).toMatch(/The team has been notified/);
-    expect(sent()[1]).toMatch(/1️⃣ Request a phone callback/);
+    expect(sent()[0]).toMatch(/The team has been notified[\s\S]*1️⃣ Request a callback/);
     expect(holdOf(waId)).toBeNull(); // not parked for the night
     expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
     const notes = listStaffNotifications({ accountIds: [ACC], adminUserId: 1, status: 'open' }).filter((n) => n.kind === 'handoff_after_hours' && n.customer_id === customerOf(waId).id);
@@ -356,7 +356,7 @@ describe('SCREENSHOT 2026-10-14: the assistant works 24/7; business hours decide
     await processInboundMessage(msg(waId, 'do you fit dash cams?'), { knowledge: KB });
     expect(lastSent()).toMatch(/Our tinting starts from the basic package/);
     await processInboundMessage(msg(waId, '1'), { knowledge: KB });
-    await processInboundMessage(msg(waId, '2'), { knowledge: KB });
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB });
     expect(lastSent()).toMatch(/Your request is saved/);
     expect(runWithAccount(ACC, () => activeFollowupsForCustomer(customerOf(waId).id))).toHaveLength(1);
   });
@@ -404,9 +404,8 @@ describe('SCREENSHOT 2026-10-14: the assistant works 24/7; business hours decide
   it('a request for a selected future time is validated against the business hours and timezone, persisted, and staff are notified', async () => {
     const waId = await englishCustomer();
     vi.mocked(sendTextMessage).mockClear();
-    await processInboundMessage(msg(waId, '4'), { knowledge: KB }); // choose a time
-    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // phone call
-    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // consultation
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // request a callback
+    await processInboundMessage(msg(waId, '2'), { knowledge: KB }); // choose a date and time
     await processInboundMessage(msg(waId, 'tomorrow 7am'), { knowledge: KB }); // before opening: rejected with the hours, still asked
     expect(lastSent()).toMatch(/outside|Opening hours/i);
     expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.TIME);

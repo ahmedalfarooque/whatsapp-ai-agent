@@ -36,6 +36,7 @@ import {
 import { LEGACY_ACCOUNT_ID, runWithAccount } from '../accounts/accountContext';
 import { recordReplyActivity } from '../automation/settingsRepo';
 import { replyTransport, type ReplyTransport } from './replyTransport';
+import type { ReplayRunner } from '../replay/replayWorker';
 import type { OutboundDocument } from './types';
 import { isDirectChatJid, isLidJid, jidToPhoneNumber, jidToUser } from './jid';
 import { classifyMessage, describeMedia } from './messageKind';
@@ -449,6 +450,18 @@ class QrConnection {
     const sent = await this.sock.sendMessage(jid, { text });
     this.rememberSent(sent?.key?.id);
     return sent?.key?.id ?? null;
+  }
+
+  /**
+   * Runs `fn` inside this account's live reply transport, so a reply produced later than the inbound handler (the replay of a message that
+   * was never answered) goes out through the same socket and the same connected-session guard. Throws when the session is not connected:
+   * the replay then stays queued.
+   */
+  async runReply(replyJid: string, fn: (knowledge: KnowledgeBase) => Promise<void>): Promise<void> {
+    const instance = this.sock;
+    if (!instance || this.phase !== 'connected') throw new NotConnectedError(this.accountId);
+    const transport = this.buildTransport(instance, this.generation, replyJid);
+    await replyTransport.run(transport, () => fn(this.knowledge()));
   }
 
   /**
@@ -1069,6 +1082,17 @@ export function getConnection(accountId: number = LEGACY_ACCOUNT_ID): QrConnecti
 }
 
 /** Accounts that currently have a connection object (started at least once this process). */
+/**
+ * Delivers a replayed answer through the account's live socket (src/replay/replayWorker.ts). A message that arrived over the Cloud API has
+ * no linked-device socket and uses the global sender.
+ */
+export const qrReplayRunner: ReplayRunner = {
+  async run(row, replyJid, fn) {
+    if (row.channel !== QR_CHANNEL) { await fn(undefined); return; }
+    await getConnection(row.whatsapp_account_id).runReply(replyJid ?? `${row.wa_id}@s.whatsapp.net`, fn);
+  },
+};
+
 export function listConnections(): QrStatus[] {
   return [...connections.values()].map((c) => c.status());
 }

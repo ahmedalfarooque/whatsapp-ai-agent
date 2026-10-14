@@ -149,3 +149,9 @@ export function followupCounts(db: Database.Database = getDb(), accountId: numbe
   for (const r of db.prepare('SELECT status, COUNT(*) AS n FROM followup_requests WHERE whatsapp_account_id = ? GROUP BY status').all(accountId) as { status: FollowupStatus; n: number }[]) out[r.status] = r.n;
   return out;
 }
+
+/** The contact method of this customer's most recent request (any status), or null when they never made one: the default for the next callback. */
+export function lastContactMethod(customerId: number, db: Database.Database = getDb(), accountId: number = currentAccountId()): ContactMethod | null {
+  const row = db.prepare(`SELECT contact_method FROM followup_requests WHERE customer_id = ? AND whatsapp_account_id = ? AND source = 'customer' ORDER BY id DESC LIMIT 1`).get(customerId, accountId) as { contact_method: ContactMethod } | undefined;
+  return row?.contact_method ?? null;
+}

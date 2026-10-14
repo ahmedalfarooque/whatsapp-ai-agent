@@ -206,6 +206,9 @@ export interface TemplateVars {
   type?: string;
   types?: string;
   requests?: string;
+  /** The numbered follow-up choices ({options}) and the one request being managed ({request}). */
+  options?: string;
+  request?: string;
   /** "30 minutes" — the callback window. */
   window?: string;
   /** The business's response-time promise; empty unless configured. */
@@ -313,11 +316,11 @@ function renderTemplateBody(text: string, vars: TemplateVars): string {
     service: vars.service ?? '', date: vars.date ?? '', time: vars.time ?? '', vehicle: vars.vehicle ?? '', details: vars.details ?? '',
     customer: vars.customer ?? '', status: vars.status ?? '', kind: vars.kind ?? '', actor: vars.actor ?? '',
     // after-hours / follow-up requests (followupDefaults.ts)
-    next_open: vars.next_open ?? '', when: vars.when ?? '', method: vars.method ?? '', type: vars.type ?? '', types: vars.types ?? '', requests: vars.requests ?? '',
+    next_open: vars.next_open ?? '', when: vars.when ?? '', method: vars.method ?? '', type: vars.type ?? '', types: vars.types ?? '', requests: vars.requests ?? '', options: vars.options ?? '', request: vars.request ?? '',
     window: vars.window ?? '', promise: vars.promise ?? (settings.responseTimePromise ?? ''),
   };
   return text
-    .replace(/\{(name|business|business_en|business_ar|maps|hours|address|notes|reference|offers|catalogues|projects|catalogue|service|date|time|vehicle|details|customer|status|kind|actor|description|phone|email|website|next_open|when|method|type|types|requests|window|promise)\}/g, (_, k: string) => values[k] || EMPTY_MARK)
+    .replace(/\{(name|business|business_en|business_ar|maps|hours|address|notes|reference|offers|catalogues|projects|catalogue|service|date|time|vehicle|details|customer|status|kind|actor|description|phone|email|website|next_open|when|method|type|types|requests|options|request|window|promise)\}/g, (_, k: string) => values[k] || EMPTY_MARK)
     // A line whose only content was an empty placeholder ("Location: ", "🅿️ ") is dropped so
     // customers never see dangling labels. Lines with real text keep their text.
     .split('\n')

@@ -11,6 +11,9 @@ import { AiResponseError } from '../llm/aiResponseError';
 import { getModelInfo } from '../llm/modelCatalog';
 import { createProvider, csv, deleteProvider, getProvider, listProvidersForAccount, PROVIDER_KINDS, providerApiKey, ProviderValidationError, recordProviderTest, setProviderEnabled, toView, updateProvider, type AiProviderInput, type ProviderKind } from '../llm/providerRepo';
 import { listRouteLog, routeStats } from '../llm/routeLog';
+import { pendingReplyCounts } from '../replay/pendingReplyRepo';
+import { listEscalations } from '../escalation/escalationService';
+import { voiceCallCapability } from '../escalation/voiceCall';
 
 /**
  * AI routing administration for the SELECTED account (authorize.ts: the "configuration" capability). Providers shared by every business
@@ -89,6 +92,12 @@ export function registerAiRoutingRoutes(router: Router): void {
         builtin,
         plan: { chat, vision, audio },
         cooldowns: activeCooldowns().map((c) => ({ ...c, untilIso: new Date(c.until).toISOString() })),
+        // Messages waiting for an AI answer / recovered / left for staff, the five-minute escalations, and the voice-call capability (never any customer text).
+        recovery: {
+          messages: pendingReplyCounts(accountId),
+          escalations: listEscalations(accountId, 10).map((e) => ({ id: e.id, kind: e.ref_kind, status: e.status, reason: e.reason, voiceCall: e.voice_call_status, voiceCallDetail: e.voice_call_detail, at: e.created_at, resolvedAt: e.resolved_at })),
+          voiceCall: voiceCallCapability(),
+        },
         history: listRouteLog(accountId, 60),
         stats: routeStats(accountId, 24),
         statsWeek: routeStats(accountId, 24 * 7),

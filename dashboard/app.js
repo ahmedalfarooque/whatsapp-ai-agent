@@ -1276,6 +1276,19 @@ function readProviderForm(form) {
   return { id: f.id, payload };
 }
 
+// Messages waiting for an AI answer, recovered ones and the five-minute escalations (counts only: never a customer's words).
+function recoveryHtml(recovery) {
+  if (!recovery) return '';
+  const m = recovery.messages || {};
+  const waiting = (m.awaitingAi || 0) + (m.interrupted || 0) + (m.pending || 0) + (m.replaying || 0);
+  const escalations = (recovery.escalations || []).map((e) => `<tr><td>${esc(formatDate(e.at))}</td><td>${esc(e.reason)}</td><td>${e.status === 'open' ? badge('OPEN', 'orange') : badge('CLOSED', 'green')}</td><td>${badge('CALL NOT PLACED', 'gray')} <span class="muted">${esc(e.voiceCallDetail || '')}</span></td></tr>`).join('');
+  const voice = recovery.voiceCall || { available: false, blockers: [], alternatives: [] };
+  return `<p class="muted" style="font-size:12px">${waiting} waiting for an AI answer · ${m.answeredByReplay || 0} answered after recovery · ${m.needsStaff || 0} left for staff. A waiting message is answered once, only while it is recent and nobody replied.</p>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>When</th><th>Reason</th><th>State</th><th>Voice call</th></tr></thead><tbody>${escalations || `<tr><td colspan="4" class="muted">No escalations.</td></tr>`}</tbody></table></div>
+    <p class="muted" style="font-size:12px;margin-top:8px"><b>Automatic voice call: ${voice.available ? 'available' : 'disabled'}.</b> ${(voice.blockers || []).map((b) => esc(b)).join(' ')}</p>
+    ${(voice.alternatives || []).length ? `<ul class="muted" style="font-size:12px;margin:4px 0 0 18px">${voice.alternatives.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}`;
+}
+
 async function renderAiRouting(host) {
   let editing = null; // null = list, 'new' = add form, number = edit form
   async function draw() {
@@ -1355,6 +1368,9 @@ async function renderAiRouting(host) {
       <h4 style="margin-top:12px">Average answer time per hour</h4>
       ${routeLatencySvg(stats.hourly)}
       ${perRoute ? `<div class="table-wrap" style="margin-top:12px"><table class="data-table"><thead><tr><th>Provider</th><th>Model</th><th>OK</th><th>Failed</th><th>Avg time</th><th>Last</th></tr></thead><tbody>${perRoute}</tbody></table></div>` : ''}
+
+      <h4 style="margin-top:18px">Unanswered messages and escalations</h4>
+      ${recoveryHtml(data.recovery)}
 
       <h4 style="margin-top:18px">Routing history (latest attempts)</h4>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>When</th><th>Task</th><th>Route</th><th>Outcome</th><th>HTTP</th><th>Time</th><th>Detail</th></tr></thead><tbody>${historyRows || `<tr><td colspan="7" class="muted">No attempts yet.</td></tr>`}</tbody></table></div>`;

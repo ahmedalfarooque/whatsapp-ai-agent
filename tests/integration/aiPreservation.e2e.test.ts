@@ -117,10 +117,10 @@ describe('provider incidents never touch history, memory, settings or reply mode
     expect(after.templates).toEqual(before.templates);
     expect(after.followups).toEqual(before.followups);
     expect(after.sessionRows).toEqual(before.sessionRows);
-    // history: everything old is still there, in order; the new rows are the customer's message and the automated reply (notice + choices; no AI text invented)
+    // history: everything old is still there, in order; the new rows are the customer's message and the automated reply (ONE message with notice + choices; no AI text invented)
     expect((after.history as unknown[]).slice(0, (before.history as unknown[]).length)).toEqual(before.history);
     const added = (after.history as Array<{ role: string; content: string }>).slice((before.history as unknown[]).length);
-    expect(added.map((r) => r.role)).toEqual(['user', 'assistant', 'assistant']);
+    expect(added.map((r) => r.role)).toEqual(['user', 'assistant']);
     expect(added[0]!.content).toBe('كم سعر الفحص؟'); // the request is preserved verbatim for staff
     expect(added[1]!.content).toMatch(/رد تلقائي/); // labelled automated reply, in the customer's language, not an AI answer
     expect(vi.mocked(sendTextMessage).mock.calls.length).toBeGreaterThanOrEqual(1);

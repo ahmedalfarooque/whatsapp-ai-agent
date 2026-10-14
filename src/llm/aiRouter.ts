@@ -278,7 +278,7 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
       const t0 = Date.now();
       try {
         const response = await completeOnce({
-          baseUrl: candidate.baseUrl, apiKey: candidate.apiKey, model: candidate.model, messages, tools: request.tools, temperature: request.temperature, maxTokens: request.maxTokens,
+          baseUrl: candidate.baseUrl, apiKey: candidate.apiKey, model: candidate.model, messages, tools: candidate.local && request.compactMessages ? undefined : request.tools, temperature: request.temperature, maxTokens: request.maxTokens, // the lean local prompt is text-only: no tool schemas to process
           timeoutMs: Math.min(timeoutMs, Math.max(MIN_ATTEMPT_MS, budgetEnd - Date.now())), headers: candidate.kind === 'openrouter' ? openRouterHeaders() : undefined,
         });
         const latencyMs = Date.now() - t0;

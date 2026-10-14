@@ -2,7 +2,8 @@ import { env } from './config/env';
 import { logger } from './logger';
 import { createApp } from './app';
 import { getDb, closeDb } from './memory/db';
-import { resumeQrConnection, closeQrConnection } from './whatsapp/qrConnection';
+import { resumeQrConnection, closeQrConnection, qrReplayRunner } from './whatsapp/qrConnection';
+import { recoverPendingAtBoot, startRecoveryLoops } from './replay/recoveryLoop';
 import { seedBusinessProfileDefaults } from './config/businessSettings';
 import { flushOutbox } from './notifications/outbox';
 import { expireDueQuotations } from './quotations/quotationExpiry';
@@ -27,6 +28,7 @@ getDb();
   if (interrupted.length) logger.warn({ count: interrupted.length }, 'inbound events interrupted by the previous shutdown were marked failed');
   // Durable reminders / eligibility / overdue checks for follow-up requests: rows survive restarts; a job cut short mid-run is re-queued.
   registerFollowupJobs();
+  recoverPendingAtBoot();
   const stale = recoverStaleJobs();
   if (stale) logger.warn({ count: stale }, 'scheduled jobs interrupted by the previous shutdown were re-queued');
 }
@@ -64,6 +66,10 @@ setInterval(() => { void flushOutbox().catch((error) => logger.warn({ error }, '
 
 // Due follow-up reminders, eligibility and overdue checks run from the scheduled_jobs table every 15 s (and shortly after boot).
 startScheduler();
+
+// Customer messages the assistant could not answer are re-tried (once, safely) when an AI route works again; a request nobody resolved within
+// five minutes while the business is open is escalated to staff (no automatic voice call: see src/escalation/voiceCall.ts).
+startRecoveryLoops(qrReplayRunner);
 
 // Sent quotations whose validity date has passed (in each business's own timezone) are expired quietly: at start-up and then hourly.
 const runQuotationExpiry = (): void => { try { expireDueQuotations(); } catch (error) { logger.warn({ error }, '[QUOTATION] expiry run failed'); } };

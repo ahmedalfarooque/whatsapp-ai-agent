@@ -136,6 +136,18 @@ describe('failover', () => {
     expect(JSON.stringify(log)).not.toMatch(/sk-or-|rules|مرحبا/); // never the key, the prompt or the customer's words
   });
 
+  it('the local route receives the LEAN text-only request: the compact messages and no tool schemas, while a cloud route keeps the full prompt and the tools', async () => {
+    getDb().prepare('UPDATE ai_providers SET enabled = 0 WHERE id IN (?, ?)').run(providerIds.groq, providerIds.gemini);
+    network({ 'openrouter.ai': [() => fail(402, CAP_402)], '127.0.0.1:11434': [() => ok('lean answer')] });
+    const tools = [{ type: 'function' as const, function: { name: 'search_catalogues', description: 'x', parameters: { type: 'object', properties: {} } } }];
+    const result = await ask({ tools, compactMessages: [{ role: 'system', content: 'LEAN prompt' }, { role: 'user', content: 'مرحبا' }] } as never);
+    expect(result.servedBy?.source).toBe('local');
+    expect(bodyOf(callsTo('openrouter.ai')[0]!).tools).toBeDefined();
+    expect(bodyOf(callsTo('openrouter.ai')[0]!).messages[0].content).toBe('rules');
+    expect(bodyOf(callsTo('127.0.0.1:11434')[0]!).tools).toBeUndefined();
+    expect(bodyOf(callsTo('127.0.0.1:11434')[0]!).messages[0].content).toBe('LEAN prompt');
+  });
+
   it('several providers and keys: Groq rate limited (Retry-After honoured as its cooldown) → Google answers; the next message skips Groq without calling it', async () => {
     network({ 'api.groq.com': [() => fail(429, 'Rate limit reached', { 'retry-after': '120' })], 'generativelanguage.googleapis.com': [() => ok('Tinting starts at 450 SAR.')] });
     const first = await ask();

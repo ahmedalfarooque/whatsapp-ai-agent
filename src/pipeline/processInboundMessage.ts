@@ -12,7 +12,7 @@ import {
   type Customer,
   type CustomerLanguage,
 } from '../memory/customerRepo';
-import { afterHoursNoticeSend, followupMenuSend, FOLLOWUP_STATES, isFollowupState, routeFollowup, type FollowupRouteResult } from '../followups/customerFlow';
+import { afterHoursNoticeSend, followupMenuSend, followupOptionsText, FOLLOWUP_STATES, isFollowupState, routeFollowup, type FollowupRouteResult } from '../followups/customerFlow';
 import { describeMoment, nextOpening } from '../setup/hours';
 import { AUDIO_TRANSCRIPT_TOOL, audioContextLine, transcribeAudio, type AudioTranscription } from '../llm/audio';
 import { extractDocumentText, isExtractableDocument, type DocumentTextResult } from '../media/textExtractors';
@@ -29,6 +29,8 @@ import { createCustomerRequest } from '../memory/customerRequestRepo';
 import { notifyBusinessNewRequest } from '../requests/requestService';
 import { isRestartCommand } from '../restart/isRestartCommand';
 import { buildSystemPrompt } from '../llm/buildSystemPrompt';
+import { buildLocalPrompt } from '../llm/localPrompt';
+import { openPendingReply, settlePendingReply } from '../replay/pendingReplyRepo';
 import { renderPublishedProjects } from '../realestate/realEstateRepo';
 import { redactSensitiveText } from '../realestate/leadFields';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
@@ -235,13 +237,13 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   if (!settings.autoRepliesEnabled) {
     recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: 'Automatic replies are disabled' });
     logger.info({ waId: maskedId }, 'automatic replies disabled — inbound message stored only');
-    if (msg.text || msg.interactiveId) storeInbound(conversation.id, msg);
+    if (!msg.replayOf && (msg.text || msg.interactiveId)) storeInbound(conversation.id, msg);
     return;
   }
 
   if (msg.type === 'text' && !msg.text) return;
 
-  storeInbound(conversation.id, msg);
+  if (!msg.replayOf) storeInbound(conversation.id, msg); // a replayed message is already stored: the customer's words are never duplicated
 
   // Human handoff: a customer held for staff (waiting for a person, being handled by one, or resolved but not yet returned to the AI)
   // gets NO automatic reply — no menu, no template, no AI. Enforced here on the server, before anything else can answer.
@@ -339,6 +341,10 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     await replyTemplate(ctx, 'ai_disabled');
     return;
   }
+  // From here the message waits for an AI answer. The record lets it be answered later — once, safely — if the providers fail or the
+  // process is interrupted (src/replay). It holds no customer text.
+  const settleId = msg.replayOf ?? msg.messageId;
+  if (!msg.replayOf && msg.type === 'text') openPendingReply({ customerId: customer.id, conversationId: conversation.id, messageId: msg.messageId, waId: msg.waId, channel });
 
   // A picture is looked at ONCE, by the vision model, before the assistant answers; its report is stored beside the customer's message
   // (hidden from the inbox, visible to the model now and in later turns), so a follow-up question about "this car" is answered from the
@@ -394,7 +400,13 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   let { history, systemPrompt } = buildPrompt(promptScale);
   // A local model on a CPU is slow in proportion to the prompt: when a local route exists it is given a COMPACT rendering of the same
   // facts (a third of the knowledge / history budgets); cloud routes get the full prompt. Nothing is built when no local route exists.
-  const compactFor = (scale: number) => (hasLocalRoute(promptAccountId) ? buildPrompt(Math.min(scale, 0.3)) : undefined);
+  // The LEAN prompt (src/llm/localPrompt.ts: identity, facts, hours, the knowledge passages relevant to THIS message, honesty rules; no tool
+  // or media rules) with only the last few turns: a small model on a CPU is slow in proportion to the prompt.
+  const compactFor = (_scale: number) => {
+    if (!hasLocalRoute(promptAccountId)) return undefined;
+    const recent = trimHistoryToBudget(getRecentMessages(conversation.id, 6, undefined, env.CONVERSATION_MEMORY_HOURS), 1500);
+    return { history: recent, systemPrompt: buildLocalPrompt(deps.knowledge, customer.language ?? undefined, { latestText }) };
+  };
 
   let finalText = '';
   let kind: 'ai' | 'error' = 'ai';
@@ -476,6 +488,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     }
   }
 
+  if (verdict !== 'send') settlePendingReply(settleId, 'abandoned', verdict === 'ai_handoff' ? 'handed to staff' : 'a person took over', { recovered: Boolean(msg.replayOf) });
   if (verdict === 'ai_handoff') {
     if (closedForHandoff(ctx)) {
       // The assistant asked for a person while nobody is there: the hold its tool created is released (a silent night helps nobody) and the
@@ -495,6 +508,13 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   }
 
   if (replacedByLocalFallback) {
+    // The message stays recorded as waiting for an AI answer, so it can be answered once a route works again.
+    settlePendingReply(settleId, 'awaiting_ai', failureDetail);
+    if (msg.replayOf) {
+      // A replay that failed again sends NOTHING: the customer already has the honest automated reply from the first attempt.
+      recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: `Replay of an unanswered message: ${failureDetail} — kept for another try, nothing sent` });
+      return;
+    }
     const sentHow = await sendAssistantUnavailable(ctx);
     if (sentHow) {
       recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: [failureDetail, sentHow, visionNote].filter(Boolean).join(' · ') });
@@ -507,7 +527,8 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
 
   try {
     await sendTextMessage(msg.waId, finalText);
-    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? [failureDetail, visionNote].filter(Boolean).join(' · ') : [`answered in ${((Date.now() - startedAt) / 1000).toFixed(1)} s`, servedByNote, visionNote].filter(Boolean).join(' · ') });
+    if (kind === 'ai') settlePendingReply(settleId, 'answered', null, { recovered: Boolean(msg.replayOf) });
+    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? [failureDetail, visionNote].filter(Boolean).join(' · ') : [msg.replayOf ? 'answered late (recovered after an interruption)' : null, `answered in ${((Date.now() - startedAt) / 1000).toFixed(1)} s`, servedByNote, visionNote].filter(Boolean).join(' · ') });
   } catch (error) {
     recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: 'Reply could not be sent' });
     logger.error({ waId: maskedId, error }, 'failed to send reply to customer after processing');
@@ -558,11 +579,9 @@ async function handoffWhileClosed(ctx: ReplyContext, how: string): Promise<void>
   }
   const nextCtx: ReplyContext = { ...ctx, customer: fresh, language };
   const next = nextOpening(biz);
-  const menu = followupMenuSend(biz, language);
   setCustomerMenuState(fresh.id, FOLLOWUP_STATES.MENU, null);
   setCustomerAfterHoursNotified(fresh.id); // the closed notice is not repeated after this
-  await replyTemplate(nextCtx, 'human_support_closed', 'human_handoff', { next_open: next ? describeMoment(biz, next, language) : '' }, `Asked for a person while closed (${how}): team notified, no hold; callback / message choices offered`);
-  await replyTemplate(nextCtx, menu.key, 'rule', menu.vars ?? {});
+  await replyTemplate(nextCtx, 'human_support_closed', 'human_handoff', { next_open: next ? describeMoment(biz, next, language) : '', options: followupOptionsText(biz, language, fresh.id) }, `Asked for a person while closed (${how}): team notified, no hold; ONE message with the callback choices`);
 }
 
 /**
@@ -581,18 +600,16 @@ async function sendAssistantUnavailable(ctx: ReplyContext): Promise<string | nul
   const full = allowCredentialFallback(currentAccountId(), ctx.msg.waId);
   try {
     if (!full) {
+      // Already told within the window: no second unavailable message and no second menu (the customer has the options; the request is stored).
       if (!isFollowupState(fresh.menu_state)) setCustomerMenuState(fresh.id, FOLLOWUP_STATES.MENU, null);
-      await replyTemplate(nextCtx, 'assistant_unavailable_again', 'rule', {}, 'AI unavailable again within the window: short reminder of the follow-up choices');
-      return 'automated reminder of the callback / message choices sent (not an AI answer)';
+      return 'AI unavailable again within the window: the earlier automated reply stands, nothing repeated';
     }
     const next = nextOpening(biz);
-    const vars: TemplateVars = closed ? { next_open: next ? describeMoment(biz, next, language) : '' } : {};
-    const menu = followupMenuSend(biz, language);
+    const vars: TemplateVars = { options: followupOptionsText(biz, language, fresh.id), ...(closed ? { next_open: next ? describeMoment(biz, next, language) : '' } : {}) };
     setCustomerMenuState(fresh.id, FOLLOWUP_STATES.MENU, null);
     if (closed) setCustomerAfterHoursNotified(fresh.id);
-    await replyTemplate(nextCtx, closed ? 'assistant_unavailable_closed' : 'assistant_unavailable_open', 'rule', vars, `AI unavailable (${closed ? 'business closed' : 'business open'}): automated reply and callback / message choices sent instead`);
-    await replyTemplate(nextCtx, menu.key, 'rule', menu.vars ?? {});
-    return closed ? 'business closed: automated closed reply and callback / message choices sent instead (not an AI answer)' : 'business open: automated reply and callback / message choices sent instead (not an AI answer)';
+    await replyTemplate(nextCtx, closed ? 'assistant_unavailable_closed' : 'assistant_unavailable_open', 'rule', vars, `AI unavailable (${closed ? 'business closed' : 'business open'}): ONE automated message with the callback choices`);
+    return closed ? 'business closed: ONE automated message with the closed notice and the callback choices (not an AI answer)' : 'business open: ONE automated message with the callback choices (not an AI answer)';
   } catch (error) {
     logger.warn({ waId: maskWaId(ctx.msg.waId), error: String((error as Error).message) }, 'could not send the automated unavailable reply');
     return null;
@@ -610,7 +627,7 @@ async function maybeAfterHoursNotice(ctx: ReplyContext): Promise<boolean> {
   const nextCtx: ReplyContext = { ...ctx, customer: fresh, language };
   try {
     const notice = afterHoursNoticeSend(biz, language);
-    const menu = followupMenuSend(biz, language);
+    const menu = followupMenuSend(biz, language, new Date(), fresh.id);
     await replyTemplate(nextCtx, notice.key, 'rule', notice.vars ?? {}, 'Outside opening hours: closed notice and follow-up choices sent once');
     await replyTemplate(nextCtx, menu.key, 'rule', menu.vars ?? {});
     setCustomerMenuState(fresh.id, FOLLOWUP_STATES.MENU, null);

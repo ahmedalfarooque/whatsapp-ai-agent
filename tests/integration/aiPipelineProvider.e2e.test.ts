@@ -83,13 +83,13 @@ describe('customer experience when the provider misbehaves', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // When the assistant cannot answer, the customer gets the LOCAL automated reply (clearly not an AI answer) and the follow-up choices: two
-  // bubbles, never "something went wrong" (see docs/AFTER_HOURS_AND_FOLLOWUPS.md).
+  // When the assistant cannot answer, the customer gets ONE local automated message (clearly not an AI answer) with the follow-up choices,
+  // never "something went wrong" (see docs/AFTER_HOURS_AND_FOLLOWUPS.md).
   const expectLocalFallback = (sent: string[]) => {
-    expect(sent).toHaveLength(2);
-    expect(sent[0]).toMatch(/Automated reply: our smart assistant cannot answer in detail right now/);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatch(/Automated reply: our assistant cannot answer right now/);
     expect(sent[0]).not.toMatch(/went wrong/i);
-    expect(sent[1]).toMatch(/1️⃣ Request a phone callback/);
+    expect(sent[0]).toMatch(/1️⃣ Request a callback/);
   };
 
   it('a permanent rate limit costs at most 2 provider calls (one bounded retry, because it is the only route) and sends the automated choices once', async () => {

@@ -15,6 +15,8 @@ export interface InboundMessage {
   channel?: string;
   /** The picture/file behind a media message, fetched on demand (the QR transport supplies it; the Cloud webhook does not). */
   media?: InboundMedia;
+  /** Set only by the replay worker: the id of the ORIGINAL message being answered late. It is already stored; it is not stored or routed again. */
+  replayOf?: string;
 }
 
 /** A customer's picture or file as WhatsApp describes it, with one shared, memoised download (fetched at most once per message). */

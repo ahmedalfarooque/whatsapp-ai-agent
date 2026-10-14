@@ -186,8 +186,8 @@ describe('end-to-end conversation flow (mocked external services)', () => {
     const sentTexts = vi.mocked(sendTextMessage).mock.calls.map((c) => String(c[1])).join('\n');
     expect(sentTexts).not.toMatch(/OpenRouter is down/);
     expect(sentTexts).not.toMatch(/went wrong/i);
-    expect(sentTexts).toMatch(/Automated reply: our smart assistant cannot answer in detail right now, but our team is available/);
-    expect(sentTexts).toMatch(/1️⃣ Request a phone callback/);
+    expect(sentTexts).toMatch(/Automated reply: our assistant cannot answer right now, but our team can help/);
+    expect(sentTexts).toMatch(/1️⃣ Request a callback/);
   });
   const unavailableTexts = () => vi.mocked(sendTextMessage).mock.calls.map((c) => String(c[1])).join('\n');
   describe('an AI answer that gives the customer nothing usable is a FAILED answer', () => {
@@ -201,7 +201,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
       await processInboundMessage(inbound(waId, 'wamid.empty1', 'How much is a 4 litre bucket of paint?'), { knowledge });
 
       expect(unavailableTexts()).not.toMatch(/went wrong/i);
-      expect(unavailableTexts()).toMatch(/Automated reply[\s\S]*1️⃣ Request a phone callback/);
+      expect(unavailableTexts()).toMatch(/Automated reply[\s\S]*1️⃣ Request a callback/);
       const rows = activityFor(waId);
       expect(rows.some((r) => r.kind === 'ai')).toBe(false);
       expect(rows.at(-1)).toMatchObject({ kind: 'error' });
@@ -223,7 +223,7 @@ describe('end-to-end conversation flow (mocked external services)', () => {
       expect(reply).not.toMatch(/went wrong/i);
       expect(reply).not.toMatch(/openrouter|guardrail|404|model/i);
       expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error' });
-      expect(activityFor(waId).at(-1)!.detail).toMatch(/^AI failed; fallback sent \(model unavailable, HTTP 404, model openrouter\/free\) · business open: automated reply and callback \/ message choices sent instead \(not an AI answer\)/);
+      expect(activityFor(waId).at(-1)!.detail).toMatch(/^AI failed; fallback sent \(model unavailable, HTTP 404, model openrouter\/free\) · business open: ONE automated message with the callback choices \(not an AI answer\)/);
     });
 
     it('PRODUCTION 2026-10-13: an exhausted OpenRouter credit (HTTP 402) is named for staff; the customer gets the automated choices once, then only the short reminder — never silence, never a second long notice', async () => {
@@ -234,16 +234,15 @@ describe('end-to-end conversation flow (mocked external services)', () => {
       const reply = unavailableTexts();
       expect(reply).not.toMatch(/went wrong/i);
       expect(reply).not.toMatch(/402|credit|openrouter|token/i);
-      expect(reply).toMatch(/Automated reply[\s\S]*1️⃣ Request a phone callback/);
+      expect(reply).toMatch(/Automated reply[\s\S]*1️⃣ Request a callback/);
       expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error' });
       expect(activityFor(waId).at(-1)!.detail).toMatch(/^AI failed; fallback sent \(OpenRouter credits exhausted or too low for this prompt, HTTP 402, model openai\/gpt-4\.1-mini — Prompt tokens limit exceeded/);
       expect(activityFor(waId).at(-1)!.detail).toContain('openrouter.ai/settings/credits');
       const sentBefore = vi.mocked(sendTextMessage).mock.calls.length;
       await processInboundMessage(inbound(waId, 'wamid.credit2', 'what services do you offer?'), { knowledge });
-      expect(vi.mocked(sendTextMessage).mock.calls.length).toBe(sentBefore + 1); // ONE short reminder of the choices, not the long reply again, not silence
-      expect(String(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1])).toMatch(/Automated reply: the assistant still cannot answer\. Send a follow-up option number/);
+      expect(vi.mocked(sendTextMessage).mock.calls.length).toBe(sentBefore); // nothing repeated: no second notice, no second menu
       expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error' });
-      expect(activityFor(waId).at(-1)!.detail).toMatch(/HTTP 402[\s\S]*automated reminder of the callback \/ message choices sent/);
+      expect(activityFor(waId).at(-1)!.detail).toMatch(/HTTP 402[\s\S]*the earlier automated reply stands, nothing repeated/); // staff still see the failure
     });
 
     it('a 402 that names the provider token cap is answered by ONE retry with a smaller prompt, and the next message starts small', async () => {
