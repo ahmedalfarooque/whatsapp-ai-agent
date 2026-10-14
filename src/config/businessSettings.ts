@@ -84,6 +84,10 @@ export const businessSettingsInputSchema = z
     /** Comma-separated OpenRouter model ids tried, ONE of them, when the chat model fails for a model-specific reason; null = the shared
      *  env list (OPENROUTER_FALLBACK_MODELS). '' = no fallback for this business. Free (price 0) ids are the only ones tried after a 402. */
     openRouterFallbackModels: z.string().max(600).regex(/^(\s*[A-Za-z0-9._:/-]{1,100}\s*(,\s*[A-Za-z0-9._:/-]{1,100}\s*)*)?$/).nullable(),
+    /** Strict free-only AI routing (fail-closed: a route that may cost money is never used). null = the shared default (on). */
+    aiFreeOnly: z.boolean().nullable(),
+    /** Automatic failover to the next eligible AI route after a failure. null = the shared default (on). */
+    aiFailoverEnabled: z.boolean().nullable(),
   })
   .partial();
 
@@ -153,6 +157,10 @@ export interface BusinessSettings {
   openRouterAudioModel: string | null;
   /** Chat models tried (one of them) when the chat model fails for a model-specific reason; see openRouterClient. Empty = none. */
   openRouterFallbackModels: string[];
+  /** Strict free-only AI routing: a route that may cost money is never used (fail-closed). */
+  aiFreeOnly: boolean;
+  /** After a route fails, the next eligible route is tried at once (within the routing budget). */
+  aiFailoverEnabled: boolean;
 }
 
 /** Official Google Maps link for Rowad Alfa Auto Care (overridable from the dashboard). */
@@ -216,6 +224,8 @@ interface BusinessSettingsRow {
   response_time_promise: string | null;
   open_router_audio_model: string | null;
   open_router_fallback_models: string | null;
+  ai_free_only: number;
+  ai_failover_enabled: number;
 }
 
 /** business_settings.id == whatsapp account id (one profile per business). */
@@ -232,7 +242,7 @@ function readRow(accountId: number): BusinessSettingsRow {
             location_notes_ar, location_notes_en, logo_document_id, staff_whatsapp_number,
             contact_phone, contact_email, weekly_hours, closures, after_hours_enabled, direct_call_enabled, callback_window_minutes,
             reminder_lead_minutes, reminder_repeat_minutes, reminder_max_attempts, response_time_promise, open_router_audio_model,
-            open_router_fallback_models
+            open_router_fallback_models, ai_free_only, ai_failover_enabled
      FROM business_settings WHERE id = ?`,
   );
   let row = select.get(accountId) as BusinessSettingsRow | undefined;
@@ -315,6 +325,8 @@ export function getBusinessSettings(accountId: number = currentAccountId()): Bus
     openRouterAudioModel: row.open_router_audio_model ?? (env.OPENROUTER_AUDIO_MODEL || null),
     // The fallback chat models: this business's own list, else the shared env list; a new business inherits the shared list unchanged.
     openRouterFallbackModels: csvToList(row.open_router_fallback_models ?? env.OPENROUTER_FALLBACK_MODELS),
+    aiFreeOnly: row.ai_free_only !== 0,
+    aiFailoverEnabled: row.ai_failover_enabled !== 0,
   };
 }
 
@@ -469,6 +481,8 @@ export function getBusinessSettingsOverrides(accountId: number = currentAccountI
     responseTimePromise: row.response_time_promise !== null,
     openRouterAudioModel: row.open_router_audio_model !== null,
     openRouterFallbackModels: row.open_router_fallback_models !== null,
+    aiFreeOnly: row.ai_free_only !== 1,
+    aiFailoverEnabled: row.ai_failover_enabled !== 1,
   };
 }
 
@@ -518,10 +532,12 @@ const COLUMN_MAP: Record<keyof BusinessSettingsPatch, string> = {
   responseTimePromise: 'response_time_promise',
   openRouterAudioModel: 'open_router_audio_model',
   openRouterFallbackModels: 'open_router_fallback_models',
+  aiFreeOnly: 'ai_free_only',
+  aiFailoverEnabled: 'ai_failover_enabled',
 };
 
 /** Columns whose shared default is a non-null value: a `null` patch means "back to the default", never SQL NULL. */
-const NOT_NULL_DEFAULTS: Partial<Record<string, number>> = { after_hours_enabled: 1, direct_call_enabled: 1, callback_window_minutes: 30, reminder_lead_minutes: 0, reminder_repeat_minutes: 5, reminder_max_attempts: 3 };
+const NOT_NULL_DEFAULTS: Partial<Record<string, number>> = { after_hours_enabled: 1, direct_call_enabled: 1, callback_window_minutes: 30, reminder_lead_minutes: 0, reminder_repeat_minutes: 5, reminder_max_attempts: 3, ai_free_only: 1, ai_failover_enabled: 1 };
 
 /**
  * Validates the given patch (each field's own rule; `null` means "reset to

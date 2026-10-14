@@ -25,6 +25,8 @@ export class AiResponseError extends Error {
   attempts: ModelAttemptRecord[] = [];
   /** Why no fallback model was tried (none configured, cooling, wrong capabilities, free fallback blocked, account-wide failure). */
   fallbackSkipped: string | null = null;
+  /** The provider's Retry-After, in ms, when it sent one (rate limits); the router uses it for the route's cooldown. */
+  retryAfterMs: number | null = null;
 
   constructor(
     public readonly reason: AiResponseReason,
@@ -41,7 +43,7 @@ export class AiResponseError extends Error {
     const base = this.reason === 'payment_required'
       ? `OpenRouter credits exhausted or too low for this prompt, HTTP 402${this.model ? `, model ${this.model}` : ''}${this.providerMessage ? ` — ${this.providerMessage.slice(0, 120)}` : ''}`
       : `${this.reason.replace(/_/g, ' ')}${this.network ? ' (no answer from the provider)' : ''}${this.httpStatus ? `, HTTP ${this.httpStatus}` : ''}${this.model ? `, model ${this.model}` : ''}`;
-    const others = this.attempts.filter((a) => a.model !== this.model);
+    const others = this.attempts.filter((a, i) => a.model !== this.model && !(i === 0 && this.model && a.model.endsWith(` · ${this.model}`)));
     const tried = others.length ? `; also tried ${others.map((a) => `${a.model} (${a.reason === 'credential' ? 'key rejected' : a.reason.replace(/_/g, ' ')}${a.httpStatus ? `, HTTP ${a.httpStatus}` : ''})`).join(', ')}` : '';
     const skipped = this.fallbackSkipped ? `; no fallback: ${this.fallbackSkipped}` : '';
     return `${base}${tried}${skipped}`;

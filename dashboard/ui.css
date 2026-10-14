@@ -667,3 +667,11 @@ body.palette-open{overflow:hidden}
 .followup-card.overdue{border-color:var(--color-danger-line)}
 .followup-card.open{border-color:var(--color-success-line)}
 .fu-inline{grid-column:1 / -1;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+/* AI routing section (Providers page): plan lists and tables scroll on narrow screens */
+.table-wrap{overflow:auto;max-width:100%}
+.route-plan{margin:0 0 4px 18px;padding:0}
+.route-plan li{margin:2px 0}
+.route-skipped{margin:4px 0 0 18px;padding:0;font-size:12px}
+.provider-form{max-width:760px}
+

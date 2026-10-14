@@ -8,6 +8,7 @@ import { chatCompletion, validateCompletion } from '../../../src/llm/openRouterC
 import { AiResponseError } from '../../../src/llm/aiResponseError';
 import { AiCredentialError } from '../../../src/llm/aiCredentialError';
 import { runAgentLoop } from '../../../src/llm/agentLoop';
+import { resetAiRouterForTests } from '../../../src/llm/aiRouter';
 
 const mutableEnv = env as unknown as Record<string, unknown>;
 const KEY = 'sk-or-v1-clientclientclientclientclientclientclientclient00';
@@ -110,13 +111,14 @@ describe('chatCompletion with the real provider code path (network stubbed)', ()
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('rate limits and provider errors are retried at most twice (3 calls), then reported with their category', async () => {
+  it('rate limits and provider errors get ONE bounded retry on the only route (2 calls), then are reported with their category', async () => {
     const limited = sequence(() => json(429, JSON.stringify({ error: { message: 'Provider returned error' } })));
     await expect(chatCompletion({ messages })).rejects.toMatchObject({ reason: 'rate_limited', httpStatus: 429 });
-    expect(limited).toHaveBeenCalledTimes(3);
+    expect(limited).toHaveBeenCalledTimes(2);
+    resetAiRouterForTests(); // the rate limit put the route into a cooldown (by design); this sub-step wants a fresh attempt
     const broken = sequence(() => json(503, '{}'));
     await expect(chatCompletion({ messages })).rejects.toMatchObject({ reason: 'provider_error', httpStatus: 503 });
-    expect(broken).toHaveBeenCalledTimes(3);
+    expect(broken).toHaveBeenCalledTimes(2);
   });
 
   it('a rate limit that clears is recovered from; a dropped connection is a provider_error', async () => {

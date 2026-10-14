@@ -71,6 +71,8 @@ const RULES: readonly Rule[] = [
   { test: /^\/credentials(\/|$)/, spec: { t: 'configuration' } },
   { test: /^\/integrations$/, spec: { t: 'configuration' } },
   { test: /^\/ai\/configure$/, spec: { t: 'configuration' } },
+  // AI routing: providers, keys, free-only / failover switches, route history (keys are never returned, only masked)
+  { test: /^\/ai-routing(\/|$)/, spec: { t: 'configuration' } },
   { test: /^\/system$/, spec: { t: 'configuration' } },
   { test: /^\/settings$/, spec: { t: 'configuration' } },
   { test: /^\/project-sync$/, spec: { t: 'configuration' } },

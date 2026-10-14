@@ -1033,6 +1033,8 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
         <div id="ai-result" class="muted" style="font-size:12px"></div>
       </section>
 
+      <section id="ai-routing-host" class="panel setup-card" style="margin-top:16px">${loadingView()}</section>
+
       <details class="panel setup-card" style="margin-top:16px">
         <summary><h3 style="display:inline">Optional integrations</h3></summary>
         <p class="muted" style="margin-top:10px">Google Calendar is optional. Leave it unconfigured to keep booking replies informational-only.</p>
@@ -1129,6 +1131,10 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
       }
     });
 
+    // AI routing (providers, keys, free-only / failover, health, history, charts): its own loader so a slow provider test never blocks this page.
+    const routingHost = view.querySelector('#ai-routing-host');
+    if (routingHost) void renderAiRouting(routingHost);
+
     view.querySelectorAll('[data-key]').forEach((row) => {
       const key = row.dataset.key;
       const input = row.querySelector('.cred-input');
@@ -1176,6 +1182,252 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
   }
   await draw();
 });
+
+// ---------------------------------------------------------------------
+// AI routing: providers, keys, free-only / failover, health, history, charts (real data from ai_route_log)
+// ---------------------------------------------------------------------
+
+const ROUTE_CATEGORY_LABEL = {
+  auth: 'key rejected', credit: 'credit / payment required', rate_limited: 'rate limited', policy: 'privacy / data policy', capability: 'capability missing',
+  model_unavailable: 'model unavailable', timeout: 'timeout', network: 'unreachable', provider_error: 'provider error', empty: 'empty answer', malformed: 'malformed answer',
+  disabled: 'disabled', no_key: 'no key', cooldown: 'cooling down', free_only: 'not free', no_time: 'no time left', limit: 'beyond route limit',
+};
+const categoryLabel = (c) => ROUTE_CATEGORY_LABEL[c] || c || '';
+const categoryTone = (c) => (c === 'auth' || c === 'credit' || c === 'policy' ? 'red' : c === 'rate_limited' || c === 'cooldown' || c === 'timeout' ? 'amber' : c === 'free_only' || c === 'capability' ? 'muted' : '');
+
+function priceBadge(free) {
+  if (free === true) return badge('FREE', 'green');
+  if (free === false) return badge('PAID', 'red');
+  return badge('PRICE UNKNOWN', 'muted');
+}
+
+/** A bar chart from hourly buckets: successes (green) and failures (red) stacked, with hover titles. Real data only; empty = says so. */
+function routeBarsSvg(hourly) {
+  if (!hourly || !hourly.length) return `<p class="muted">No AI route attempts recorded in this window yet.</p>`;
+  const max = Math.max(1, ...hourly.map((h) => (h.ok || 0) + (h.failed || 0)));
+  const w = 760, h = 150, pad = 24, bw = Math.max(4, Math.floor((w - pad * 2) / hourly.length) - 2);
+  const bars = hourly.map((b, i) => {
+    const total = (b.ok || 0) + (b.failed || 0);
+    const x = pad + i * (bw + 2);
+    const okH = Math.round(((b.ok || 0) / max) * (h - pad * 2));
+    const failH = Math.round(((b.failed || 0) / max) * (h - pad * 2));
+    const label = `${b.hour.replace('T', ' ').replace('Z', ' UTC')}: ${b.ok || 0} ok, ${b.failed || 0} failed${b.avgLatencyMs ? `, avg ${(b.avgLatencyMs / 1000).toFixed(1)} s` : ''}`;
+    return `<g><title>${esc(label)}</title><rect x="${x}" y="${h - pad - okH - failH}" width="${bw}" height="${failH}" fill="#c0453f"></rect><rect x="${x}" y="${h - pad - okH}" width="${bw}" height="${okH}" fill="#0e8f68"></rect>${total ? '' : ''}</g>`;
+  }).join('');
+  const first = hourly[0].hour.slice(5, 16).replace('T', ' ');
+  const last = hourly[hourly.length - 1].hour.slice(5, 16).replace('T', ' ');
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img" aria-label="AI route successes and failures per hour"><line x1="${pad}" y1="${h - pad}" x2="${w - pad}" y2="${h - pad}" stroke="currentColor" stroke-opacity="0.25"></line>${bars}<text x="${pad}" y="${h - 6}" font-size="10" fill="currentColor" fill-opacity="0.7">${esc(first)} UTC</text><text x="${w - pad}" y="${h - 6}" font-size="10" text-anchor="end" fill="currentColor" fill-opacity="0.7">${esc(last)} UTC</text><text x="${pad}" y="14" font-size="10" fill="currentColor" fill-opacity="0.7">max ${max}/h</text></svg>`;
+}
+
+/** Average latency of successful answers per hour as a line. */
+function routeLatencySvg(hourly) {
+  const points = (hourly || []).filter((b) => b.avgLatencyMs != null);
+  if (points.length < 2) return `<p class="muted">Latency appears once at least two hours have successful answers.</p>`;
+  const w = 760, h = 120, pad = 24;
+  const max = Math.max(1000, ...points.map((p) => p.avgLatencyMs));
+  const step = (w - pad * 2) / (points.length - 1);
+  const path = points.map((p, i) => `${i ? 'L' : 'M'}${(pad + i * step).toFixed(1)},${(h - pad - (p.avgLatencyMs / max) * (h - pad * 2)).toFixed(1)}`).join(' ');
+  const dots = points.map((p, i) => `<circle cx="${(pad + i * step).toFixed(1)}" cy="${(h - pad - (p.avgLatencyMs / max) * (h - pad * 2)).toFixed(1)}" r="3" fill="#2f6fed"><title>${esc(`${p.hour.replace('T', ' ')} UTC: ${(p.avgLatencyMs / 1000).toFixed(1)} s`)}</title></circle>`).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img" aria-label="Average AI answer latency per hour"><line x1="${pad}" y1="${h - pad}" x2="${w - pad}" y2="${h - pad}" stroke="currentColor" stroke-opacity="0.25"></line><path d="${path}" fill="none" stroke="#2f6fed" stroke-width="2"></path>${dots}<text x="${pad}" y="14" font-size="10" fill="currentColor" fill-opacity="0.7">max ${(max / 1000).toFixed(1)} s</text></svg>`;
+}
+
+function providerFormHtml(presets, provider, canManageShared) {
+  const p = provider || {};
+  const options = presets.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+  return `
+    <form id="provider-form" autocomplete="off" class="provider-form">
+      ${autofillDecoy()}
+      <input type="hidden" name="id" value="${p.id || ''}" />
+      ${!provider ? `<div class="field"><label for="wa-field-preset">Preset</label><select id="wa-field-preset" name="preset"><option value="">Choose a provider preset…</option>${options}</select><p class="field-help">Fills the endpoint, the kind and example free models. Keys are never pre-filled.</p></div>` : ''}
+      ${textField('name', 'Provider name', 'Shown in the activity and the history, e.g. "Groq free tier".', p.name || '')}
+      <div class="field"><label for="wa-field-kind">Kind</label><select id="wa-field-kind" name="kind">
+        <option value="openai_compatible" ${p.kind === 'openai_compatible' || !p.kind ? 'selected' : ''}>OpenAI-compatible endpoint (Groq, Google AI Studio, Cerebras, Mistral, custom)</option>
+        <option value="openrouter" ${p.kind === 'openrouter' ? 'selected' : ''}>OpenRouter (free models recognised from its public catalog)</option>
+        <option value="ollama" ${p.kind === 'ollama' ? 'selected' : ''}>Local Ollama (no key; loopback or private network only)</option>
+      </select></div>
+      ${textField('baseUrl', 'Base URL', 'The /v1 base, e.g. https://api.groq.com/openai/v1 or http://127.0.0.1:11434/v1. A local runtime on a public address is refused.', p.baseUrl || '')}
+      ${pwField('apiKey', 'API key', provider ? 'Leave empty to keep the stored key. Enter a new key to replace it; type the word none to remove it.' : 'Stored encrypted under the dashboard master key; shown masked afterwards, never in full.', p.hasKey)}
+      ${textField('models', 'Chat models (comma-separated, best first)', 'Only models you are allowed to use for free on this key. The router tries ONE at a time.', (p.models || []).join(', '))}
+      ${textField('visionModels', 'Vision models (pictures)', 'Models of this provider that accept image input. Empty = this provider never gets pictures.', (p.visionModels || []).join(', '))}
+      ${textField('audioModels', 'Audio models (voice notes)', 'Models that accept audio input. Empty = never gets voice notes.', (p.audioModels || []).join(', '))}
+      <div class="field"><label><input type="checkbox" name="freeTier" ${p.freeTier === false ? '' : 'checked'} /> This key is a free tier with no billing attached</label><p class="field-help">Unchecked = treated as paid: never used while strict free-only mode is on (fail-closed).</p></div>
+      <div class="field"><label><input type="checkbox" name="supportsTools" ${p.supportsTools === false ? '' : 'checked'} /> Supports tool calling (bookings, hand-off)</label><p class="field-help">Unchecked = never given a request that offers tools; nothing is silently degraded.</p></div>
+      ${textField('priority', 'Priority (1 = first; the built-in OpenRouter key is 50, the built-in local route 900)', '', String(p.priority || 100), { numeric: true })}
+      ${textField('timeoutMs', 'Timeout per attempt (ms, 2000–120000)', 'A slow local CPU model needs 30000–60000.', String(p.timeoutMs || 20000), { numeric: true })}
+      ${textField('notes', 'Notes', '', p.notes || '')}
+      ${!provider && canManageShared ? `<div class="field"><label><input type="checkbox" name="shared" /> Shared by every business (super administrator)</label><p class="field-help">Unchecked = this business only. A shared provider's key is used by all businesses but never shown to any.</p></div>` : ''}
+      <div class="toolbar" style="margin-top:8px">
+        <button type="submit" class="btn primary">Save provider</button>
+        <button type="button" class="btn" id="provider-cancel">Cancel</button>
+      </div>
+      <div id="provider-form-result" class="muted" style="font-size:12px"></div>
+    </form>`;
+}
+
+function readProviderForm(form) {
+  const f = readFormFields(form, ['id', 'preset', 'name', 'kind', 'baseUrl', 'apiKey', 'models', 'visionModels', 'audioModels', 'priority', 'timeoutMs', 'notes']);
+  const payload = {
+    name: f.name, kind: f.kind, baseUrl: f.baseUrl, models: f.models, visionModels: f.visionModels, audioModels: f.audioModels, notes: f.notes,
+    priority: f.priority ? Number(f.priority) : undefined, timeoutMs: f.timeoutMs ? Number(f.timeoutMs) : undefined,
+    freeTier: Boolean(form.elements.namedItem('freeTier')?.checked), supportsTools: Boolean(form.elements.namedItem('supportsTools')?.checked),
+    shared: Boolean(form.elements.namedItem('shared')?.checked),
+  };
+  if (f.apiKey) payload.apiKey = /^none$/i.test(f.apiKey.trim()) ? '' : f.apiKey;
+  return { id: f.id, payload };
+}
+
+async function renderAiRouting(host) {
+  let editing = null; // null = list, 'new' = add form, number = edit form
+  async function draw() {
+    let data;
+    try {
+      data = await api('/api/dashboard/ai-routing');
+    } catch (error) {
+      host.innerHTML = errorView(error.message, draw);
+      return;
+    }
+    const { settings, providers, presets, builtin, plan, cooldowns, history, stats, statsWeek, canManageShared } = data;
+    const planList = (p) => p.eligible.length
+      ? `<ol class="route-plan">${p.eligible.map((r) => `<li>${esc(r.providerName)} · <span class="file">${esc(r.model)}</span> ${priceBadge(r.free)}${r.local ? badge('LOCAL', 'blue') : ''}</li>`).join('')}</ol>`
+      : `<p class="muted" style="color:#c0453f">No eligible route: every customer message gets the automated choices (not an AI answer).</p>`;
+    const skippedList = (p) => p.skipped.length
+      ? `<ul class="muted route-skipped">${p.skipped.map((s) => `<li>${esc(s.route.providerName)} · <span class="file">${esc(s.route.model)}</span> — ${badge(categoryLabel(s.category), categoryTone(s.category))} ${esc(s.reason)}</li>`).join('')}</ul>`
+      : '';
+    const providerRows = providers.length
+      ? providers.map((p) => `
+        <tr data-provider="${p.id}">
+          <td><strong>${esc(p.name)}</strong><br><span class="muted" style="font-size:12px">${esc(p.kind)} · ${esc(p.baseUrl)}${p.shared ? ' · shared' : ''}</span></td>
+          <td><span class="file">${esc((p.models || []).join(', ') || '—')}</span>${p.visionModels?.length ? `<br><span class="muted" style="font-size:12px">pictures: ${esc(p.visionModels.join(', '))}</span>` : ''}${p.audioModels?.length ? `<br><span class="muted" style="font-size:12px">audio: ${esc(p.audioModels.join(', '))}</span>` : ''}</td>
+          <td>${p.kind === 'ollama' ? badge('NO KEY NEEDED', 'green') : p.keyStatus === 'ok' ? `<span class="file">${esc(p.keyMasked || '')}</span>` : p.keyStatus === 'undecryptable' ? badge('RE-ENTER KEY', 'red') : badge('NO KEY', 'red')}</td>
+          <td>${p.freeTier ? badge('FREE TIER', 'green') : badge('PAID', 'red')}${p.supportsTools ? '' : `<br>${badge('NO TOOLS', 'muted')}`}</td>
+          <td>${p.priority}</td>
+          <td>${p.enabled ? badge('ENABLED', 'green') : badge('DISABLED', 'muted')}</td>
+          <td>${p.lastTestAt ? `${badge(p.lastTestOk ? 'OK' : 'FAILED', p.lastTestOk ? 'green' : 'red')}<br><span class="muted" style="font-size:12px">${esc(formatDate(p.lastTestAt))}${p.lastTestDetail ? ` · ${esc(p.lastTestDetail)}` : ''}</span>` : badge('NOT TESTED', 'muted')}</td>
+          <td class="toolbar" style="white-space:nowrap">
+            <button type="button" class="btn small" data-act="test">Test</button>
+            <button type="button" class="btn small" data-act="${p.enabled ? 'disable' : 'enable'}">${p.enabled ? 'Disable' : 'Enable'}</button>
+            <button type="button" class="btn small" data-act="edit">Edit</button>
+            <button type="button" class="btn small danger" data-act="remove">Remove</button>
+          </td>
+        </tr>`).join('')
+      : `<tr><td colspan="8" class="muted">No provider added yet. The built-in OpenRouter key and, when configured on the server, the local route are the only AI routes.</td></tr>`;
+    const perRoute = (stats.perRoute || []).map((r) => `<tr><td>${esc(r.providerName)}</td><td><span class="file">${esc(r.model)}</span></td><td>${r.ok}</td><td>${r.failed}</td><td>${r.avgLatencyMs != null ? `${(r.avgLatencyMs / 1000).toFixed(1)} s` : '—'}</td><td>${r.lastOutcome ? badge(r.lastOutcome === 'ok' ? 'OK' : categoryLabel(r.lastCategory), r.lastOutcome === 'ok' ? 'green' : categoryTone(r.lastCategory) || 'red') : '—'}</td></tr>`).join('');
+    const historyRows = (history || []).map((h) => `<tr><td class="muted" style="white-space:nowrap">${esc(formatDate(h.created_at))}</td><td>${esc(h.task)}</td><td>${esc(h.provider_name)} · <span class="file">${esc(h.model)}</span></td><td>${h.outcome === 'ok' ? badge('OK', 'green') : badge(categoryLabel(h.category), categoryTone(h.category) || 'red')}</td><td>${h.http_status ?? ''}</td><td>${(h.latency_ms / 1000).toFixed(1)} s</td><td class="muted" style="font-size:12px">${esc(h.detail || '')}</td></tr>`).join('');
+    const coolRows = (cooldowns || []).map((c) => `<li>${esc(c.key)} — ${esc(c.why)} until ${esc(formatDate(c.untilIso))}</li>`).join('');
+    const builtinModels = (builtin.openRouter.models || []).map((m) => `<li><span class="file">${esc(m.model)}</span> ${priceBadge(m.free)}${m.image ? badge('PICTURES', 'blue') : ''}</li>`).join('');
+    host.innerHTML = `
+      <h3>AI routing — providers, keys and failover</h3>
+      <p class="muted">Every AI task goes through one routing layer: the providers below (by priority), the built-in OpenRouter key (priority 50) and the server's local route (priority 900). A failing route is skipped at once and cools down; when no route answers, the customer gets the automated choices — never silence. Keys are stored encrypted and shown masked only.</p>
+
+      <div class="detail-grid" style="margin-top:12px">
+        <label class="muted">Strict free-only mode</label>
+        <div><label><input type="checkbox" id="routing-free-only" ${settings.freeOnly ? 'checked' : ''} /> Never use a route that may cost money (fail-closed: an unknown price counts as paid)</label></div>
+        <label class="muted">Automatic failover</label>
+        <div><label><input type="checkbox" id="routing-failover" ${settings.failover ? 'checked' : ''} /> After a failure, try the next eligible route at once (at most ${builtin.budget.maxRoutesPerMessage} routes within ${Math.round(builtin.budget.routingBudgetMs / 1000)} s)</label></div>
+        <span></span>
+        <div class="toolbar"><button type="button" class="btn primary" id="routing-save">Save routing switches</button><span id="routing-save-result" class="muted" style="font-size:12px"></span></div>
+      </div>
+
+      <h4 style="margin-top:18px">Live routing plan for this business</h4>
+      <div class="detail-grid">
+        <label class="muted">Chat</label><div>${planList(plan.chat)}${skippedList(plan.chat)}</div>
+        <label class="muted">Pictures</label><div>${planList(plan.vision)}${skippedList(plan.vision)}</div>
+        <label class="muted">Voice notes</label><div>${planList(plan.audio)}${skippedList(plan.audio)}</div>
+      </div>
+      ${coolRows ? `<p class="muted" style="margin-top:8px">Cooling down now:</p><ul class="muted">${coolRows}</ul>` : ''}
+
+      <h4 style="margin-top:18px">Built-in routes</h4>
+      <div class="detail-grid">
+        <label class="muted">OpenRouter (built-in key)</label>
+        <div>${builtin.openRouter.hasKey ? badge('KEY SAVED', 'green') : badge('NO KEY', 'red')} <span class="muted">source: ${esc(builtin.openRouter.source)}</span><ul style="margin:6px 0 0 18px">${builtinModels}</ul><p class="muted" style="font-size:12px">A PAID model is never used while strict free-only mode is on. Free OpenRouter models are unavailable while the OpenRouter account enforces Zero Data Retention (openrouter.ai/settings/privacy) — shown here as "privacy / data policy" when tried.</p></div>
+        <label class="muted">Local route (server)</label>
+        <div>${builtin.local.configured ? `${badge('CONFIGURED', 'green')} <span class="file">${esc(builtin.local.baseUrl)}</span> · ${esc(builtin.local.models.join(', '))}${builtin.local.visionModels.length ? ` · pictures: ${esc(builtin.local.visionModels.join(', '))}` : ''} · timeout ${Math.round(builtin.local.timeoutMs / 1000)} s` : `${badge('NOT CONFIGURED', 'muted')} <span class="muted">Set OLLAMA_BASE_URL and OLLAMA_MODELS on the server (an Ollama on 127.0.0.1), or add a Local Ollama provider below.</span>`}</div>
+      </div>
+
+      <h4 style="margin-top:18px">Providers and API keys</h4>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Provider</th><th>Models</th><th>Key</th><th>Billing</th><th>Priority</th><th>State</th><th>Last test</th><th></th></tr></thead><tbody>${providerRows}</tbody></table></div>
+      <div class="toolbar" style="margin-top:8px"><button type="button" class="btn primary" id="provider-add">Add provider</button></div>
+      <div id="provider-form-host" style="margin-top:10px">${editing === 'new' ? providerFormHtml(presets, null, canManageShared) : typeof editing === 'number' ? providerFormHtml(presets, providers.find((p) => p.id === editing), canManageShared) : ''}</div>
+
+      <h4 style="margin-top:18px">Route success and failures — last 24 hours</h4>
+      <p class="muted" style="font-size:12px">${stats.totals.ok} answered · ${stats.totals.failed} failed${stats.totals.avgLatencyMs != null ? ` · average answer ${(stats.totals.avgLatencyMs / 1000).toFixed(1)} s` : ''} · last 7 days: ${statsWeek.totals.ok} answered, ${statsWeek.totals.failed} failed</p>
+      ${routeBarsSvg(stats.hourly)}
+      <h4 style="margin-top:12px">Average answer time per hour</h4>
+      ${routeLatencySvg(stats.hourly)}
+      ${perRoute ? `<div class="table-wrap" style="margin-top:12px"><table class="data-table"><thead><tr><th>Provider</th><th>Model</th><th>OK</th><th>Failed</th><th>Avg time</th><th>Last</th></tr></thead><tbody>${perRoute}</tbody></table></div>` : ''}
+
+      <h4 style="margin-top:18px">Routing history (latest attempts)</h4>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>When</th><th>Task</th><th>Route</th><th>Outcome</th><th>HTTP</th><th>Time</th><th>Detail</th></tr></thead><tbody>${historyRows || `<tr><td colspan="7" class="muted">No attempts yet.</td></tr>`}</tbody></table></div>`;
+
+    host.querySelector('#routing-save').addEventListener('click', async () => {
+      const result = host.querySelector('#routing-save-result');
+      try {
+        await api('/api/dashboard/ai-routing/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ freeOnly: host.querySelector('#routing-free-only').checked, failover: host.querySelector('#routing-failover').checked }) });
+        toast('Routing switches saved', 'success');
+        await draw();
+      } catch (error) {
+        result.textContent = error.message;
+      }
+    });
+    host.querySelector('#provider-add').addEventListener('click', () => { editing = 'new'; draw(); });
+    host.querySelectorAll('tr[data-provider] [data-act]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.closest('tr').dataset.provider);
+        const act = btn.dataset.act;
+        try {
+          if (act === 'edit') { editing = id; await draw(); return; }
+          if (act === 'remove') {
+            if (!window.confirm('Remove this provider and its stored key?')) return;
+            await api(`/api/dashboard/ai-routing/providers/${id}`, { method: 'DELETE' });
+            toast('Provider removed', 'success');
+          } else if (act === 'test') {
+            btn.disabled = true; btn.textContent = 'Testing…';
+            const res = await api(`/api/dashboard/ai-routing/providers/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            toast(res.ok ? 'Provider test passed' : 'Provider test failed', res.ok ? 'success' : 'error');
+          } else {
+            await api(`/api/dashboard/ai-routing/providers/${id}/${act}`, { method: 'POST' });
+            toast(act === 'enable' ? 'Provider enabled' : 'Provider disabled', 'success');
+          }
+          await draw();
+        } catch (error) {
+          toast(error.message, 'error');
+          await draw();
+        }
+      });
+    });
+    const form = host.querySelector('#provider-form');
+    if (form) {
+      const preset = form.elements.namedItem('preset');
+      if (preset) preset.addEventListener('change', () => {
+        const chosen = presets.find((x) => x.id === preset.value);
+        if (!chosen) return;
+        form.elements.namedItem('name').value = chosen.name;
+        form.elements.namedItem('kind').value = chosen.kind;
+        form.elements.namedItem('baseUrl').value = chosen.baseUrl;
+        if (!form.elements.namedItem('models').value) form.elements.namedItem('models').value = chosen.models;
+        if (chosen.kind === 'ollama') form.elements.namedItem('timeoutMs').value = '45000';
+        form.querySelector('#provider-form-result').textContent = chosen.hint;
+      });
+      form.querySelector('#provider-cancel').addEventListener('click', () => { editing = null; draw(); });
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const { id, payload } = readProviderForm(form);
+        const result = form.querySelector('#provider-form-result');
+        try {
+          if (id) await api(`/api/dashboard/ai-routing/providers/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          else await api('/api/dashboard/ai-routing/providers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          toast('Provider saved', 'success');
+          editing = null;
+          await draw();
+        } catch (error) {
+          result.textContent = error.fields ? `${error.message}: check ${error.fields.join(', ')}` : error.message;
+          result.style.color = '#c0453f';
+        }
+      });
+    }
+  }
+  await draw();
+}
 
 // ---------------------------------------------------------------------
 // System

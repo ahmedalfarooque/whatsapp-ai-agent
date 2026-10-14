@@ -33,7 +33,7 @@ describe('migration 024 — shared AI reply policy and vision model (additive)',
     const after = rows(db);
     // (025 later adds the after-hours / follow-up columns to the same table; they are additive too and are left out of the comparison)
     const ADDED_BY_025 = ['weekly_hours', 'closures', 'after_hours_enabled', 'direct_call_enabled', 'callback_window_minutes', 'reminder_lead_minutes', 'reminder_repeat_minutes', 'reminder_max_attempts', 'response_time_promise', 'open_router_audio_model'];
-    const ADDED_BY_026 = ['open_router_fallback_models'];
+    const ADDED_BY_026 = ['open_router_fallback_models', 'ai_free_only', 'ai_failover_enabled' /* 027 */];
     expect(hashWithout(after, ['ai_reply_language', 'open_router_vision_model', ...ADDED_BY_025, ...ADDED_BY_026])).toBe(before);
     for (const r of after) {
       expect(r.ai_reply_language).toBeNull();

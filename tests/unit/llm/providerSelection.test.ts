@@ -57,6 +57,9 @@ describe('OpenRouter provider selection', () => {
         process.env.GOOGLE_PRIVATE_KEY = 'real-private-key';
       },
       async () => {
+        // vi.resetModules() gave this test fresh module instances: the suite-wide test hooks (tests/setup.ts) must be set again on them.
+        (await import('../../../src/llm/aiRouter')).allowUnknownPriceForTests(true);
+        (await import('../../../src/llm/modelCatalog')).disableCatalogFetchForTests(true);
         const { chatCompletion } = await import('../../../src/llm/openRouterClient');
         const result = await chatCompletion({ messages: [{ role: 'user', content: 'hi' }] });
 

@@ -72,6 +72,7 @@ import { authorizeDashboardRequest } from './authorize';
 import { registerUserRoutes } from './userRoutes';
 import { registerHandoffRoutes } from './handoffRoutes';
 import { registerFollowupRoutes } from './followupRoutes';
+import { registerAiRoutingRoutes } from './aiRoutingRoutes';
 import { registerInboxRoutes } from './inboxRoutes';
 import { HandoffError, returnToAi, getHold, getOpenHandoff, takeOverCustomer, type HandoffActor } from '../handoff/handoffRepo';
 import { buildOverview, getAiState, OVERVIEW_RANGES, type OverviewRange } from './overview';
@@ -361,6 +362,7 @@ export function createDashboardRouter(): Router {
   registerUserRoutes(router);
   registerHandoffRoutes(router);
   registerFollowupRoutes(router);
+  registerAiRoutingRoutes(router);
   registerInboxRoutes(router);
   registerCustomerRoutes(router);
   registerBrandingRoutes(router);

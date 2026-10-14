@@ -13,15 +13,12 @@
  *  - a failure is a typed result, never an exception: the caller decides how to tell the customer. Nothing is invented on failure.
  */
 import { env } from '../config/env';
-import { getBusinessSettings } from '../config/businessSettings';
 import { logger } from '../logger';
 import { chatCompletion } from './openRouterClient';
 import { AiCredentialError } from './aiCredentialError';
 import { AiResponseError } from './aiResponseError';
 import { contentText } from './types';
 import { currentAccountId } from '../accounts/accountContext';
-import { getModelInfo } from './modelCatalog';
-import { freeFallbackBlocked, isModelCooling, markModelFailure } from './modelFallback';
 
 /** The tool_name under which a customer picture's report is stored in the conversation (hidden from the inbox, shown to the model). */
 export const IMAGE_ANALYSIS_TOOL = 'image_analysis';
@@ -104,65 +101,45 @@ export async function analyzeImage(input: AnalyzeImageInput): Promise<ImageAnaly
   if (!bytes || bytes.length === 0) return done({ ok: false, reason: 'download_failed', durationMs: Date.now() - started });
   if (bytes.length > env.VISION_MAX_IMAGE_BYTES) return done({ ok: false, reason: 'too_large', durationMs: Date.now() - started });
 
-  const settings = getBusinessSettings();
-  // The business's vision model first; when it cannot take this request at all (HTTP 400-404 "model_unavailable" — e.g. a router with no
-  // image-capable endpoint), the business's own chat model is tried ONCE, then at most ONE fallback model that OpenRouter's catalog says
-  // accepts image input (a text-only fallback is never given a picture). After a 402 the next model is tried only if it is free.
-  const candidates = [settings.openRouterVisionModel, settings.openRouterModel].filter((m, i, all) => m && all.indexOf(m) === i);
-  const freeModels = new Set<string>();
-  for (const id of settings.openRouterFallbackModels) {
-    if (!id || candidates.includes(id) || isModelCooling(id)) continue;
-    const info = await getModelInfo(id);
-    if (!info?.image) continue;
-    candidates.push(id);
-    if (info.free) freeModels.add(id);
-    break;
-  }
+  // The routing layer picks the image-capable routes for this business — its vision model, its chat model, the image-capable entries of
+  // its fallback list and of its configured providers — and tries them one after another within the budget (a text-only model is
+  // never given a picture; after a 402 only a free route is tried; the local route, when present, takes pictures only if it lists a
+  // vision model). Nothing else is retried here.
   const caption = (input.caption ?? '').trim();
   const dataUrl = `data:${mime};base64,${bytes.toString('base64')}`;
-  let lastFailure: ImageAnalysisFailure = 'provider_failed';
-  for (const [index, model] of candidates.entries()) {
-    try {
-      const response = await chatCompletion({
-        model,
-        timeoutMs: env.VISION_TIMEOUT_MS,
-        retries: 1,
-        deadline: input.deadline,
-        temperature: 0.1,
-        maxTokens: 500,
-        messages: [
-          { role: 'system', content: ANALYST_PROMPT },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: caption ? `The customer sent this photo with the caption (customer text, not a fact): "${caption.slice(0, 500)}"\nReport what the photo shows.` : 'The customer sent this photo without a caption. Report what it shows.' },
-              { type: 'image_url', image_url: { url: dataUrl, detail: 'auto' } },
-            ],
-          },
-        ],
-      });
-      const report = contentText(response.choices[0]?.message.content ?? '').trim();
-      if (!report) return done({ ok: false, reason: 'empty', durationMs: Date.now() - started });
-      const result: ImageAnalysisOk = { ok: true, report: report.slice(0, 4000), confidence: parseConfidence(report), model, durationMs: Date.now() - started };
-      logger.info({ account: currentAccountId(), model, fallback: index > 0, bytes: bytes.length, confidence: result.confidence, durationMs: result.durationMs }, 'customer picture analysed by the vision model');
-      return result;
-    } catch (error) {
-      const reason: ImageAnalysisFailure = error instanceof AiCredentialError
-        ? 'credential'
-        : error instanceof AiResponseError
-          ? (error.reason === 'rate_limited' ? 'rate_limited' : error.reason === 'payment_required' ? 'payment_required' : error.reason === 'empty_response' ? 'empty' : error.reason === 'provider_error' && /abort|timeout/i.test(error.providerMessage ?? '') ? 'timeout' : error.reason === 'model_unavailable' ? 'model_unavailable' : 'provider_failed')
-          : 'provider_failed';
-      lastFailure = reason;
-      const next = candidates[index + 1];
-      if (reason === 'model_unavailable') markModelFailure(model, 'model_unavailable');
-      // The next candidate is tried after a refusal, or after a 402 ONLY when it is free (a paid model would hit the same credit cap).
-      const canContinue = Boolean(next) && !(input.deadline && Date.now() + 2000 > input.deadline) && (reason === 'model_unavailable' || (reason === 'payment_required' && next !== undefined && freeModels.has(next) && !freeFallbackBlocked()));
-      logger.warn({ account: currentAccountId(), model, reason, aiReason: (error as AiResponseError)?.reason, httpStatus: (error as AiResponseError)?.httpStatus, providerMessage: (error as AiResponseError)?.providerMessage?.slice(0, 120), nextModel: canContinue ? next : undefined }, 'vision model did not analyse the customer picture');
-      if (canContinue) continue;
-      return done({ ok: false, reason, durationMs: Date.now() - started });
-    }
+  try {
+    const response = await chatCompletion({
+      task: 'vision',
+      requires: { image: true },
+      deadline: input.deadline ?? Date.now() + env.VISION_TIMEOUT_MS,
+      temperature: 0.1,
+      maxTokens: 500,
+      messages: [
+        { role: 'system', content: ANALYST_PROMPT },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: caption ? `The customer sent this photo with the caption (customer text, not a fact): "${caption.slice(0, 500)}"\nReport what the photo shows.` : 'The customer sent this photo without a caption. Report what it shows.' },
+            { type: 'image_url', image_url: { url: dataUrl, detail: 'auto' } },
+          ],
+        },
+      ],
+    });
+    const report = contentText(response.choices[0]?.message.content ?? '').trim();
+    if (!report) return done({ ok: false, reason: 'empty', durationMs: Date.now() - started });
+    const model = response.servedBy?.model ?? 'unknown';
+    const result: ImageAnalysisOk = { ok: true, report: report.slice(0, 4000), confidence: parseConfidence(report), model, durationMs: Date.now() - started };
+    logger.info({ account: currentAccountId(), model, fallback: Boolean(response.servedBy?.fallbackFrom), bytes: bytes.length, confidence: result.confidence, durationMs: result.durationMs }, 'customer picture analysed by the vision model');
+    return result;
+  } catch (error) {
+    const reason: ImageAnalysisFailure = error instanceof AiCredentialError
+      ? 'credential'
+      : error instanceof AiResponseError
+        ? (error.reason === 'rate_limited' ? 'rate_limited' : error.reason === 'payment_required' ? 'payment_required' : error.reason === 'empty_response' ? 'empty' : error.reason === 'provider_error' && /abort|timeout/i.test(error.providerMessage ?? '') ? 'timeout' : error.reason === 'model_unavailable' ? 'model_unavailable' : 'provider_failed')
+        : 'provider_failed';
+    logger.warn({ account: currentAccountId(), reason, aiReason: (error as AiResponseError)?.reason, httpStatus: (error as AiResponseError)?.httpStatus, attempts: (error as AiResponseError)?.attempts?.map((a) => `${a.model}:${a.reason}`), skipped: (error as AiResponseError)?.fallbackSkipped?.slice(0, 200) }, 'no vision route analysed the customer picture');
+    return done({ ok: false, reason, durationMs: Date.now() - started });
   }
-  return done({ ok: false, reason: lastFailure, durationMs: Date.now() - started });
 }
 
 /** What the assistant is told about a picture in the conversation history: the report, or an honest note that it was not analysed. */

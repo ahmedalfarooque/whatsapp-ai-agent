@@ -24,6 +24,7 @@
 import { env } from '../src/config/env';
 import { deriveKeyFromRawValue } from '../src/config/masterKey';
 import { listAllOverrideRows, overwriteCiphertext, decryptWithKey, encryptWithKey } from '../src/config/secretStore';
+import { listProviderCiphertexts, overwriteProviderCiphertext } from '../src/llm/providerRepo';
 import { getDb } from '../src/memory/db';
 
 /* eslint-disable no-console */
@@ -49,9 +50,11 @@ function main(): void {
 
   const db = getDb();
   const rows = listAllOverrideRows();
+  // AI provider keys (ai_providers.key_ciphertext, migration 027) use the same framing and rotate in the same transaction.
+  const providerRows = listProviderCiphertexts(db);
 
-  if (rows.length === 0) {
-    console.log('No credential overrides exist — nothing to re-encrypt. Safe to update DASHBOARD_MASTER_KEY and restart.');
+  if (rows.length === 0 && providerRows.length === 0) {
+    console.log('No credential overrides or provider keys exist — nothing to re-encrypt. Safe to update DASHBOARD_MASTER_KEY and restart.');
     return;
   }
 
@@ -62,10 +65,17 @@ function main(): void {
   for (const row of rows) {
     plaintextByKey.set(row.key, decryptWithKey(row.ciphertext, oldKey));
   }
+  const providerPlaintext = new Map<number, string>();
+  for (const row of providerRows) {
+    providerPlaintext.set(row.id, decryptWithKey(row.key_ciphertext, oldKey));
+  }
 
   const run = db.transaction(() => {
     for (const [key, plaintext] of plaintextByKey) {
       overwriteCiphertext(key, encryptWithKey(plaintext, newKey));
+    }
+    for (const [id, plaintext] of providerPlaintext) {
+      overwriteProviderCiphertext(id, encryptWithKey(plaintext, newKey), db);
     }
   });
   run();
@@ -74,6 +84,7 @@ function main(): void {
     JSON.stringify({
       ok: true,
       rotatedKeys: rows.map((r) => r.key),
+      rotatedProviderKeys: providerRows.length,
       nextStep: 'Update DASHBOARD_MASTER_KEY in .env to the new value and restart the app.',
     }),
   );

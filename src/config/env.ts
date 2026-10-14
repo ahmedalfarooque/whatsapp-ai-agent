@@ -80,6 +80,18 @@ const envSchema = z
      *  fallback. A business can set its own in business_settings.open_router_fallback_models. Nothing paid is ever added by default:
      *  the shipped default is empty because every free endpoint was blocked by the account's data policy on 2026-10-14 (see docs). */
     OPENROUTER_FALLBACK_MODELS: z.string().optional().default(''),
+    /** The AI routing layer (src/llm/aiRouter.ts): the whole chain of routes for ONE completion must finish within this budget, and at most
+     *  this many routes are tried for one message (each with its own hard timeout; a known-failing route is skipped by its cooldown). */
+    AI_ROUTING_BUDGET_MS: z.coerce.number().int().positive().default(45000),
+    AI_ROUTE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(8).default(4),
+    /** Built-in LOCAL inference route, shared by every business: an Ollama (or any OpenAI-compatible local runtime) reachable on the loopback
+     *  or a private network, e.g. http://127.0.0.1:11434/v1 — never a public address. Empty = no local route. OLLAMA_MODELS is the
+     *  comma-separated chat model list (smallest first); OLLAMA_VISION_MODELS the models that take pictures (empty = none). A CPU-only host is
+     *  slow: the per-attempt timeout is OLLAMA_TIMEOUT_MS and the local route gets the COMPACT prompt (same facts, less text). */
+    OLLAMA_BASE_URL: z.string().optional().default(''),
+    OLLAMA_MODELS: z.string().optional().default(''),
+    OLLAMA_VISION_MODELS: z.string().optional().default(''),
+    OLLAMA_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
     /** Prompt size guards (characters): the knowledge base is selected by relevance within this budget, the history is trimmed to this budget,
      *  and at most this many business documents (each cut to this length) are pasted into a prompt. A prompt that grows without bound hits the
      *  provider's per-request token cap (OpenRouter answers HTTP 402 "Prompt tokens limit exceeded" when the credit is low). */

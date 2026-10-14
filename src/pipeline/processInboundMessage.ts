@@ -33,6 +33,7 @@ import { renderPublishedProjects } from '../realestate/realEstateRepo';
 import { redactSensitiveText } from '../realestate/leadFields';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { runAgentLoop, CONTEXT_TOOL_ROWS } from '../llm/agentLoop';
+import { hasLocalRoute } from '../llm/aiRouter';
 import { IMAGE_ANALYSIS_TOOL, analyzeImage, imageContextLine, type ImageAnalysis } from '../llm/vision';
 import fs from 'node:fs';
 import { sendTextMessage, sendDocumentMessage, sendImageMessage, ImageDeliveryUnsupportedError, DocumentDeliveryUnsupportedError } from '../whatsapp/client';
@@ -391,6 +392,9 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     return { history, systemPrompt: buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText, knowledgeScale: scale, compactMediaRules: !mediaInPlay }) };
   };
   let { history, systemPrompt } = buildPrompt(promptScale);
+  // A local model on a CPU is slow in proportion to the prompt: when a local route exists it is given a COMPACT rendering of the same
+  // facts (a third of the knowledge / history budgets); cloud routes get the full prompt. Nothing is built when no local route exists.
+  const compactFor = (scale: number) => (hasLocalRoute(promptAccountId) ? buildPrompt(Math.min(scale, 0.3)) : undefined);
 
   let finalText = '';
   let kind: 'ai' | 'error' = 'ai';
@@ -403,7 +407,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   try {
     let loopResult: Awaited<ReturnType<typeof runAgentLoop>>;
     try {
-      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
+      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id, compact: compactFor(promptScale) });
     } catch (firstError) {
       // HTTP 402 "Prompt tokens limit exceeded: N > CAP": send less (same model, no extra cost) and try ONCE more; anything else rethrows.
       const cap = firstError instanceof AiResponseError && firstError.reason === 'payment_required' && !firstError.afterToolCalls ? parsePromptCap(firstError.providerMessage) : null;
@@ -413,11 +417,15 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
       rememberPromptScale(promptAccountId, promptScale);
       logger.warn({ waId: maskedId, account: promptAccountId, promptTokens: cap.used, tokenCap: cap.cap, scale: Number(promptScale.toFixed(2)), systemChars: systemPrompt.length, historyChars: history.reduce((n, h) => n + (h.content?.length ?? 0), 0), historyMessages: history.length }, 'provider token cap is below the prompt size; retrying once with a smaller prompt');
       ({ history, systemPrompt } = buildPrompt(promptScale));
-      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
+      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id, compact: compactFor(promptScale) });
     }
     logger.info({ waId: maskedId, account: currentAccountId(), totalMs: Date.now() - startedAt, visionMs: analysis?.durationMs ?? 0, picture: Boolean(picture), model: loopResult.servedBy?.model, fallbackFrom: loopResult.servedBy?.fallbackFrom, rounds: loopResult.generatedMessages.filter((g) => g.content.startsWith('[requested tools:')).length + 1 }, 'AI reply ready');
     finalText = loopResult.finalText;
-    if (loopResult.servedBy?.fallbackFrom) servedByNote = `fallback model ${loopResult.servedBy.model} answered (${loopResult.servedBy.fallbackFrom}: ${loopResult.servedBy.fallbackReason ?? 'failed'})`;
+    // The activity says honestly where the answer came from: cloud AI or local AI, which provider / model, and whether a failover happened.
+    if (loopResult.servedBy) {
+      const s = loopResult.servedBy;
+      servedByNote = `${s.source === 'local' ? 'local AI' : 'cloud AI'} (${[s.provider, s.model].filter(Boolean).join(' · ')})${s.fallbackFrom ? ` after failover from ${s.fallbackFrom} (${s.fallbackReason ?? 'failed'})` : ''}`;
+    }
     // The model took a while: ownership may have changed meanwhile. Decide from the database NOW, before anything is stored or sent.
     heldBy = getHold(customer.id);
     if (heldBy && heldBy.source === 'ai' && heldBy.state === 'HUMAN_REQUESTED') {

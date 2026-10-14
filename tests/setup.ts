@@ -4,7 +4,22 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, vi } from 'vitest';
+
+// The network is stubbed in tests, so OpenRouter's public catalog is never read and no model has a known price; strict free-only routing
+// (the production default) would then skip every route. Tests that exercise the client opt in here to "unknown price = allowed"; the
+// tests of the fail-closed rule switch it off explicitly. Imported lazily so the env below is in place before src modules load.
+beforeAll(async () => {
+  const router = await import('../src/llm/aiRouter');
+  const catalog = await import('../src/llm/modelCatalog');
+  router.allowUnknownPriceForTests(true);
+  catalog.disableCatalogFetchForTests(true); // scripted fetch answers must never be consumed by a catalog download
+});
+// Route / provider cooldowns are process-wide: a failure scripted by one test must not silence the route in the next one.
+beforeEach(async () => {
+  const router = await import('../src/llm/aiRouter');
+  router.resetAiRouterForTests();
+});
 
 // Tests supply their own environment. Never reload production secrets from .env.
 vi.mock('dotenv', () => ({ config: vi.fn() }));

@@ -25,6 +25,9 @@ const CATALOG_TIMEOUT_MS = 10_000;
 
 let cache: { models: Map<string, ModelInfo>; at: number; ok: boolean } | null = null;
 let inFlight: Promise<Map<string, ModelInfo> | null> | null = null;
+// Test hook: the suite stubs fetch with scripted provider answers; a catalog download would consume one. Tests set a catalog explicitly.
+let fetchDisabled = false;
+export function disableCatalogFetchForTests(flag: boolean): void { fetchDisabled = flag; }
 
 function parseCatalog(body: unknown): Map<string, ModelInfo> {
   const data = (body as { data?: unknown[] } | null)?.data;
@@ -52,8 +55,10 @@ function parseCatalog(body: unknown): Map<string, ModelInfo> {
 
 /** The catalog (fresh or cached), or null when it cannot be read; never throws, never blocks longer than CATALOG_TIMEOUT_MS. */
 export async function loadModelCatalog(now = Date.now()): Promise<Map<string, ModelInfo> | null> {
-  if (env.shouldUseMockProviders) return cache?.models ?? null;
-  if (cache && now - cache.at < (cache.ok ? CATALOG_TTL_MS : CATALOG_FAIL_TTL_MS)) return cache.ok ? cache.models : null;
+  if (env.shouldUseMockProviders || fetchDisabled) return cache?.models.size ? cache.models : null;
+  // A failed refresh keeps serving the LAST GOOD catalog (stale is far better than "unknown" under strict free-only routing, where an
+  // unknown price fails closed); only with no catalog ever read does it answer null.
+  if (cache && now - cache.at < (cache.ok ? CATALOG_TTL_MS : CATALOG_FAIL_TTL_MS)) return cache.models.size ? cache.models : null;
   if (inFlight) return inFlight;
   inFlight = (async () => {
     try {
@@ -66,7 +71,7 @@ export async function loadModelCatalog(now = Date.now()): Promise<Map<string, Mo
     } catch (error) {
       logger.warn({ errorName: (error as Error)?.name, errorMessage: String((error as Error)?.message ?? '').slice(0, 80) }, 'OpenRouter model catalog could not be read; model capabilities are unknown until the next attempt');
       cache = { models: cache?.models ?? new Map(), at: Date.now(), ok: false };
-      return null;
+      return cache.models.size ? cache.models : null;
     } finally {
       inFlight = null;
     }

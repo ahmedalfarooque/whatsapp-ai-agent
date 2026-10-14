@@ -5,6 +5,7 @@ import { getDb } from '../../../src/memory/db';
 import { createAccount } from '../../../src/accounts/accountRepo';
 import { runWithAccount } from '../../../src/accounts/accountContext';
 import { updateBusinessSettings, getBusinessSettings } from '../../../src/config/businessSettings';
+import { resetAiRouterForTests } from '../../../src/llm/aiRouter';
 
 /**
  * The vision step with the REAL provider client and a stubbed network: proves the actual image BYTES are what the model receives,
@@ -101,6 +102,7 @@ describe('analyzeImage sends the real picture to the image-capable model', () =>
     expect(r).toMatchObject({ ok: false, reason: 'model_unavailable' });
     expect(fetchMock).toHaveBeenCalledTimes(1); // one candidate only (vision model = chat model): no second identical attempt
     expect(imageContextLine(r)).toContain('no configured model accepts pictures');
+    resetAiRouterForTests(); // the refusal put that route into a cooldown (by design); this sub-step wants a fresh attempt
     const broke = provider(() => new Response(JSON.stringify({ error: { message: 'Prompt tokens limit exceeded: 14140 > 10822', code: 402 } }), { status: 402, headers: { 'Content-Type': 'application/json' } }));
     const r2 = await runWithAccount(ACCOUNT, () => analyzeImage({ mimeType: 'image/png', download: async () => PNG }));
     expect(r2).toMatchObject({ ok: false, reason: 'payment_required' });
@@ -124,16 +126,20 @@ describe('analyzeImage sends the real picture to the image-capable model', () =>
     expect(await run({ download: async () => Buffer.alloc(0) })).toMatchObject({ ok: false, reason: 'download_failed' });
     const failing = provider(() => json(500, { error: { message: 'upstream' } }));
     expect(await run()).toMatchObject({ ok: false, reason: 'provider_failed' });
-    expect(failing).toHaveBeenCalledTimes(2); // one attempt + ONE retry
+    expect(failing).toHaveBeenCalledTimes(2); // one attempt + ONE retry (the only eligible route)
+    resetAiRouterForTests(); // each sub-step below starts without the cooldown the previous failure set (by design)
     const limited = provider(() => json(429, { error: { message: 'slow down' } }));
     expect(await run()).toMatchObject({ ok: false, reason: 'rate_limited' });
     expect(limited).toHaveBeenCalledTimes(2);
+    resetAiRouterForTests();
     const refused = provider(() => json(404, { error: { message: 'no endpoints' } }), () => json(404, { error: { message: 'no endpoints' } }));
     expect(await run()).toMatchObject({ ok: false, reason: 'model_unavailable' });
     expect(refused.mock.calls.length).toBeLessThanOrEqual(2); // a refusal is never retried on the same model; at most the business's chat model is tried ONCE more, then it stops
+    resetAiRouterForTests();
     const slow = vi.fn(() => new Promise<Response>((_resolve, reject) => { setTimeout(() => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), 5); }));
     vi.stubGlobal('fetch', slow);
     expect((await run({ deadline: Date.now() + 1500 })).ok).toBe(false);
+    resetAiRouterForTests();
     expect(await run({ download: async () => PNG }).then((r) => r.ok)).toBe(false);
   });
 

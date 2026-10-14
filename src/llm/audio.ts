@@ -6,6 +6,7 @@ import { chatCompletion } from './openRouterClient';
 import { contentText } from './types';
 import { AiCredentialError } from './aiCredentialError';
 import { AiResponseError } from './aiResponseError';
+import { csv, listProvidersForAccount } from './providerRepo';
 
 /**
  * Voice-note transcription through the existing OpenRouter provider abstraction: the actual audio bytes are sent to the business's
@@ -60,8 +61,10 @@ export function audioFormatOf(mimeType: string): string | null {
 export async function transcribeAudio(input: TranscribeAudioInput): Promise<AudioTranscription> {
   const started = Date.now();
   const done = (r: AudioTranscription): AudioTranscription => r;
+  // An audio route exists when the business set an audio model (built-in OpenRouter key) or a configured provider lists audio models.
   const model = getBusinessSettings().openRouterAudioModel;
-  if (!model) return done({ ok: false, reason: 'not_configured', durationMs: 0 });
+  const providerAudio = listProvidersForAccount(currentAccountId()).some((p) => p.enabled !== 0 && csv(p.audio_models).length > 0);
+  if (!model && !providerAudio) return done({ ok: false, reason: 'not_configured', durationMs: 0 });
   const format = audioFormatOf(input.mimeType);
   if (!format) return done({ ok: false, reason: 'unsupported_format', durationMs: Date.now() - started });
   if (input.fileLength && input.fileLength > env.AUDIO_MAX_BYTES) return done({ ok: false, reason: 'too_large', durationMs: Date.now() - started });
@@ -79,10 +82,9 @@ export async function transcribeAudio(input: TranscribeAudioInput): Promise<Audi
 
   try {
     const response = await chatCompletion({
-      model,
-      timeoutMs: env.AUDIO_TIMEOUT_MS,
-      retries: 1,
-      deadline: input.deadline,
+      task: 'audio',
+      requires: { audio: true },
+      deadline: input.deadline ?? Date.now() + env.AUDIO_TIMEOUT_MS,
       temperature: 0,
       maxTokens: 800,
       messages: [
@@ -95,7 +97,7 @@ export async function transcribeAudio(input: TranscribeAudioInput): Promise<Audi
     const language = /^LANGUAGE:\s*([a-z]{2,3})/im.exec(raw)?.[1]?.toLowerCase() ?? null;
     const transcript = (/TRANSCRIPT:\s*([\s\S]*)$/i.exec(raw)?.[1] ?? raw).trim().slice(0, 4000);
     if (!transcript || /^NO_SPEECH$/i.test(transcript)) return done({ ok: false, reason: 'empty', durationMs: Date.now() - started });
-    const result: AudioTranscriptionOk = { ok: true, text: transcript, language: language && language !== 'unknown' ? language : null, model, durationMs: Date.now() - started };
+    const result: AudioTranscriptionOk = { ok: true, text: transcript, language: language && language !== 'unknown' ? language : null, model: response.servedBy?.model ?? model ?? 'unknown', durationMs: Date.now() - started };
     logger.info({ account: currentAccountId(), model, bytes: bytes.length, language: result.language, chars: transcript.length, durationMs: result.durationMs }, 'customer voice note transcribed by the audio model');
     return result;
   } catch (error) {

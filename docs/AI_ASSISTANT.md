@@ -16,7 +16,45 @@
 
 # The AI assistant: how a free-text message is answered
 
-## Model fallback (bounded, honest) — `src/llm/openRouterClient.ts`, `modelFallback.ts`, `modelCatalog.ts`
+## The AI routing layer (24/7, zero API spending by default) — `src/llm/aiRouter.ts`, `providerRepo.ts`, `routeLog.ts`, `openAiCompatible.ts`
+
+Every AI task (chat, picture analysis, voice transcription) goes through one router. The routes, in order:
+
+1. **Providers configured in the dashboard** (Providers page → *AI routing*; table `ai_providers`, migration 027): OpenRouter, any
+   OpenAI-compatible free tier (presets: Groq, Google AI Studio, Cerebras, Mistral, custom) or a **local Ollama**. A provider is shared by
+   every business (super administrator) or belongs to one business; each has its own key (AES-GCM under the dashboard master key, returned
+   masked only), its chat / vision / audio model lists, a priority, a timeout, a *free tier* declaration and a *supports tools* flag.
+2. **The built-in OpenRouter key** (priority 50) with the business's own models and fallback list.
+3. **The built-in local route** (priority 900): `OLLAMA_BASE_URL` + `OLLAMA_MODELS` on the server (loopback / private address only). A local
+   route receives a **compact prompt** (a third of the knowledge / history budgets, same facts) because a CPU-only host is slow.
+4. The pipeline's **deterministic customer-service fallback** (not an AI answer, labelled as such): the automated reply with the
+   callback / message / next-opening choices — see `docs/AFTER_HOURS_AND_FOLLOWUPS.md`.
+
+Rules, all per business (`ai_free_only`, `ai_failover_enabled`, both ON by default; new businesses inherit them):
+
+* **Strict free-only, fail-closed**: a route that may cost money is never used — an OpenRouter model whose public-catalog price is not 0
+  (an unknown price counts as paid), a provider not declared as a free tier. The paid `openai/gpt-4.1-mini` is therefore skipped while strict
+  mode is on; the dashboard shows why ("not free"). Switching strict mode off is an administrator's explicit choice.
+* **Capability-aware**: a text-only route is never given a picture or a recording; a provider without tool calling is never given a request
+  that offers tools (no silent degradation).
+* **Immediate failover, bounded**: one attempt per route, at most `AI_ROUTE_MAX_ATTEMPTS` routes within `AI_ROUTING_BUDGET_MS`; a route
+  gets one bounded retry only when it is the ONLY eligible route and the failure is transient. The same messages (tool results included)
+  go to every route, so no tool, booking or notification ever runs twice.
+* **Classified failures and cooldowns**: auth (401/403, provider cooldown 10 min), credit (402, provider 30 min), privacy / data policy
+  (404 "ZDR" / "data policy", route 30 min), capability (route 60 min), rate limit (Retry-After or 60 s), model unavailable (5 min),
+  timeout (1 min cloud / 3 min local), network (provider 1–2 min), provider error (1 min), empty / malformed (no cooldown). Cooldowns are per
+  task, so a picture failure never silences chat.
+* **Evidence**: every attempt is written to `ai_route_log` (provider, model, outcome, category, HTTP status, latency, short provider message;
+  never the prompt, the key or customer text) and shown on the Providers page (live plan with skip reasons, cooldowns, history, per-route
+  and hourly success / failure counts, average latency). The activity names the source of every answer: *cloud AI*, *local AI* or the
+  automated reply.
+
+What is NOT promised: perfect uptime or unlimited free cloud AI (free tiers have quotas and policies; the OpenRouter account's Zero Data
+Retention setting blocks every free OpenRouter endpoint until the owner changes it at openrouter.ai/settings/privacy), and local inference
+without a runtime installed on the host (evaluated 2026-10-14: the production host — Ampere A1, 2 cores, 12 GB RAM, 39 GB free — can run a
+1.5B–3B quantised model; installing Ollama is the owner's action; see the handoff).
+
+## Model fallback (bounded, honest) — the built-in OpenRouter route's model list (now one source of candidates for the router above)
 
 1. The business's chat model is tried with its bounded retries (two more attempts for a rate limit / provider failure, one for an empty
    answer; a 400-404 refusal and a 402 are never retried on the same model).

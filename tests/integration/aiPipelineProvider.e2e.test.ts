@@ -9,6 +9,7 @@ vi.mock('../../src/whatsapp/client', () => ({
 import path from 'node:path';
 import { sendTextMessage } from '../../src/whatsapp/client';
 import { processInboundMessage, resetCredentialFallbackThrottle } from '../../src/pipeline/processInboundMessage';
+import { resetAiRouterForTests } from '../../src/llm/aiRouter';
 import { getOrCreateCustomer, setCustomerLanguage } from '../../src/memory/customerRepo';
 import { loadKnowledgeBase } from '../../src/knowledge/loader';
 import { getDb } from '../../src/memory/db';
@@ -91,10 +92,10 @@ describe('customer experience when the provider misbehaves', () => {
     expect(sent[1]).toMatch(/1️⃣ Request a phone callback/);
   };
 
-  it('a permanent rate limit costs at most 3 provider calls and sends the automated choices once (no fallback model configured)', async () => {
+  it('a permanent rate limit costs at most 2 provider calls (one bounded retry, because it is the only route) and sends the automated choices once', async () => {
     const fetchMock = provider(() => json(429, {}));
     const { sent, activity } = await customerSays();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expectLocalFallback(sent);
     expect(activity.at(-1)).toMatchObject({ kind: 'error', detail: expect.stringMatching(/^AI failed; fallback sent \(rate limited, HTTP 429/) });
     expect(activity.some((a) => a.kind === 'ai')).toBe(false);
@@ -127,7 +128,7 @@ describe('customer experience when the provider misbehaves', () => {
 
     const down = provider(() => { throw new TypeError('fetch failed'); });
     const dropped = await customerSays();
-    expect(down).toHaveBeenCalledTimes(3);
+    expect(down).toHaveBeenCalledTimes(2); // the only route: one bounded retry, then the local choices
     expectLocalFallback(dropped.sent);
     expect(dropped.activity.at(-1)!.detail).toContain('provider error (no answer from the provider)');
   });
@@ -160,8 +161,10 @@ describe('what reaches the logs', () => {
   it('never the key, the prompt, the customer\'s words or the provider\'s raw body — only category, status and model', async () => {
     provider(() => json(404, { error: { message: 'guardrail restriction on endpoints' } }));
     await customerSays();
+    resetAiRouterForTests(); // each failure put the route into a cooldown (by design); the next scenario wants a fresh attempt
     provider(() => answer(''));
     await customerSays();
+    resetAiRouterForTests();
     provider(() => json(401, {}));
     await customerSays();
     const everything = logged.join('\n');
