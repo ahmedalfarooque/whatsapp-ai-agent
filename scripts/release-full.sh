@@ -61,6 +61,8 @@ git -C $R merge --ff-only "$TFULL" >/dev/null || abort merge "fast-forward faile
 rollback() {
   echo "ROLLING BACK to ${HEAD:0:7}"
   git -C $R checkout -q -B master "$HEAD"
+  # the stamp the dashboard footer and release-status read must name the commit that is live again (a rollback that left the target's stamp made the next release refuse to start)
+  printf '{"commit":"%s","fullCommit":"%s","branch":"master","environment":"production","releasedAt":"%s","writtenBy":"scripts/release-full.sh (rollback)"}\n' "$(git -C $R rev-parse --short HEAD)" "$(git -C $R rev-parse HEAD)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > $R/dashboard/build-info.json
   if [ "$PKG" -gt 0 ]; then (cd $R && npm ci --silent </dev/null) || echo "warning: npm ci for the base commit failed; the previous node_modules may be incomplete"; fi
   (cd $R && npm run build --silent </dev/null) || echo "warning: rebuild of the base commit failed; dist/ left as it was"
   sudo systemctl restart $SVC </dev/null || true

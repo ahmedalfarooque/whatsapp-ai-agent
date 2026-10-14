@@ -95,6 +95,11 @@ describe('release-full.ps1 (the full-release wrapper) and release-full.sh (the s
     expect(line).toMatch(/m and print\('\$f',d\.get\('registrationId'\),m\)/);
     expect(line).toContain("(d.get('me') or {}).get('id')");
     expect(line).not.toMatch(/print\('\$f',d\.get\('registrationId'\),\(d\.get\('me'\) or \{\}\)\.get\('id'\)\)/);
+  });  it('REGRESSION 2026-10-14: a rollback rewrites the build stamp to the restored commit (it used to leave the failed target\'s stamp, so the next release refused to start)', () => {
+    const rollback = sh.slice(sh.indexOf('rollback() {'), sh.indexOf('# A full install'));
+    expect(rollback).toContain('checkout -q -B master "$HEAD"');
+    expect(rollback).toMatch(/build-info\.json/);
+    expect(rollback.indexOf('build-info.json')).toBeGreaterThan(rollback.indexOf('checkout -q -B master'));
   });  it('the server script explains its two hashes and refuses to run outside the production checkout', () => {
     expect(sh).toMatch(/--base <commit production is live on> and --target <commit of origin\/master> are both required/);
     expect(sh).toMatch(/pwsh scripts\/release-full\.ps1/);
