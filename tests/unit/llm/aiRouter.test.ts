@@ -278,3 +278,34 @@ describe('the deterministic path and duplicates', () => {
     expect(Date.now() - started).toBeLessThan(500);
   });
 });
+describe('context limits and a crashing local runtime', () => {
+  it('a "context length exceeded" refusal fails over at once to the next route WITHOUT cooling the first one down (a shorter prompt may fit it next time)', async () => {
+    network({ 'api.groq.com': [() => fail(400, "This model's maximum context length is 8192 tokens. Please reduce the length of the messages."), () => ok('short answer')], 'generativelanguage.googleapis.com': [() => ok('gemini answer')] });
+    expect(classifyRouteFailure(new AiResponseError('model_unavailable', 400, 'm', "This model's maximum context length is 8192 tokens"))).toBe('context');
+    expect(classifyRouteFailure(new AiResponseError('payment_required', 402, 'm', CAP_402))).toBe('credit'); // the credit-derived cap stays a credit problem (the pipeline shrinks the prompt)
+    const first = await ask();
+    expect(first.servedBy).toMatchObject({ provider: 'Google AI Studio', fallbackReason: 'context' });
+    const plan = await explainRoutes(ACC, 'chat');
+    expect(plan.skipped.find((s) => s.route.providerName === 'Groq free tier')).toBeUndefined(); // not cooling down
+    fetchSpy.mockClear();
+    const second = await ask();
+    expect(second.servedBy?.provider).toBe('Groq free tier'); // tried again first, and now answers
+  });
+
+  it('a local runtime that crashes (connection refused) is skipped within its cooldown, and once it is back (service restarted) the next window uses it again', async () => {
+    getDb().prepare('UPDATE ai_providers SET enabled = 0 WHERE id IN (?, ?)').run(providerIds.groq, providerIds.gemini);
+    getDb().prepare('UPDATE ai_providers SET priority = 1 WHERE id = ?').run(providerIds.local);
+    network({ 'openrouter.ai': [() => ok('cloud answer')] }); // local not scripted = refused
+    const down = await ask();
+    expect(down.servedBy).toMatchObject({ provider: 'OpenRouter (built-in key)', fallbackReason: 'network' });
+    fetchSpy.mockClear();
+    network({ '127.0.0.1:11434': [() => ok('local answer')], 'openrouter.ai': [() => ok('cloud answer')] });
+    const stillCooling = await ask();
+    expect(stillCooling.servedBy?.provider).toBe('OpenRouter (built-in key)'); // known-failing route is not retried
+    expect(callsTo('127.0.0.1:11434')).toHaveLength(0);
+    resetAiRouterForTests(); // the cooldown elapsed
+    const back = await ask();
+    expect(back.servedBy).toMatchObject({ provider: 'Local Ollama', source: 'local' });
+    getDb().prepare('UPDATE ai_providers SET priority = 900 WHERE id = ?').run(providerIds.local);
+  });
+});

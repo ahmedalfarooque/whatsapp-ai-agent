@@ -30,7 +30,7 @@ import type { ToolDefinition } from '../tools';
  *  context and account isolation are preserved. Every attempt is logged (ai_route_log) without the prompt, the key or customer text.
  */
 export type AiTask = 'chat' | 'vision' | 'audio';
-export type FailureCategory = 'auth' | 'credit' | 'rate_limited' | 'policy' | 'capability' | 'model_unavailable' | 'timeout' | 'network' | 'provider_error' | 'empty' | 'malformed';
+export type FailureCategory = 'context' | 'auth' | 'credit' | 'rate_limited' | 'policy' | 'capability' | 'model_unavailable' | 'timeout' | 'network' | 'provider_error' | 'empty' | 'malformed';
 export type SkipCategory = 'disabled' | 'no_key' | 'cooldown' | 'free_only' | 'capability' | 'no_time' | 'limit';
 
 export interface RouteCandidate {
@@ -98,6 +98,8 @@ export function coolingUntil(key: string, now = Date.now()): { until: number; wh
 
 function cooldownFor(category: FailureCategory, error: AiResponseError | null, local: boolean): { ms: number; scope: 'route' | 'provider' } {
   switch (category) {
+    // A prompt that is too long for THIS model says nothing about the route: a shorter prompt (or the compact local one) may fit.
+    case 'context': return { ms: 0, scope: 'route' };
     case 'auth': return { ms: 10 * 60_000, scope: 'provider' };
     case 'credit': return { ms: 30 * 60_000, scope: 'provider' };
     case 'policy': return { ms: 30 * 60_000, scope: 'route' };
@@ -124,6 +126,7 @@ export function classifyRouteFailure(error: unknown): FailureCategory {
   if (error.reason === 'empty_response') return 'empty';
   if (error.reason === 'malformed_response') return 'malformed';
   if (error.reason === 'model_unavailable') {
+    if (/context length|context window|maximum context|too many tokens|token limit|reduce the length|input is too long|exceeds the limit of/.test(message) && !/prompt tokens limit exceeded: \d+ > \d+/.test(message)) return 'context';
     if (/data policy|zdr|privacy|guardrail|moderation|not allowed|blocked by/.test(message)) return 'policy';
     if (/image|audio|modalit|does not support|unsupported|tool|function/.test(message)) return 'capability';
     if (/credit|quota|billing|insufficient|exceeded your current/.test(message)) return 'credit';
@@ -135,7 +138,7 @@ export function classifyRouteFailure(error: unknown): FailureCategory {
 
 const reasonOf = (category: FailureCategory): AiResponseReason =>
   category === 'credit' ? 'payment_required' : category === 'rate_limited' ? 'rate_limited' : category === 'empty' ? 'empty_response' : category === 'malformed' ? 'malformed_response'
-    : category === 'policy' || category === 'capability' || category === 'model_unavailable' ? 'model_unavailable' : 'provider_error';
+    : category === 'policy' || category === 'capability' || category === 'model_unavailable' || category === 'context' ? 'model_unavailable' : 'provider_error';
 
 // ---- candidates ------------------------------------------------------------------------------------------------------------------------
 function modelsFor(row: AiProviderRow, task: AiTask): string[] {

@@ -51,8 +51,9 @@ Rules, all per business (`ai_free_only`, `ai_failover_enabled`, both ON by defau
 
 What is NOT promised: perfect uptime or unlimited free cloud AI (free tiers have quotas and policies; the OpenRouter account's Zero Data
 Retention setting blocks every free OpenRouter endpoint until the owner changes it at openrouter.ai/settings/privacy), and local inference
-without a runtime installed on the host (evaluated 2026-10-14: the production host — Ampere A1, 2 cores, 12 GB RAM, 39 GB free — can run a
-1.5B–3B quantised model; installing Ollama is the owner's action; see the handoff).
+without a runtime installed on the host.
+
+**Local route, live since 2026-10-14**: Ollama v0.40.4 (official arm64 archive) in ~ubuntu/ollama, run as the user service ollama-local (systemctl --user, linger on, loopback 127.0.0.1:11434 only, MemoryMax=4G, one model at a time), model qwen2.5:1.5b-instruct-q4_K_M (986 MB), registered with OLLAMA_BASE_URL/OLLAMA_MODELS/OLLAMA_TIMEOUT_MS in the app .env (a timestamped .env.bak-* was kept). Measured on the host with a ~1.2k-token prompt: cold load 33 s, warm 11.5 s; a short Arabic greeting through the router 3.9 s; RAM stays ~9.7 GB free. A 1.5B model follows the facts it is given but is weaker than a cloud model: it is the LAST AI route, after the free cloud routes. Remove with systemctl --user disable --now ollama-local; rm -rf ~/ollama ~/.ollama and delete the three .env lines.
 
 ## Model fallback (bounded, honest) — the built-in OpenRouter route's model list (now one source of candidates for the router above)
 
