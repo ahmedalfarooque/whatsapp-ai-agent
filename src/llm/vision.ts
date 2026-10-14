@@ -20,6 +20,8 @@ import { AiCredentialError } from './aiCredentialError';
 import { AiResponseError } from './aiResponseError';
 import { contentText } from './types';
 import { currentAccountId } from '../accounts/accountContext';
+import { getModelInfo } from './modelCatalog';
+import { freeFallbackBlocked, isModelCooling, markModelFailure } from './modelFallback';
 
 /** The tool_name under which a customer picture's report is stored in the conversation (hidden from the inbox, shown to the model). */
 export const IMAGE_ANALYSIS_TOOL = 'image_analysis';
@@ -104,8 +106,18 @@ export async function analyzeImage(input: AnalyzeImageInput): Promise<ImageAnaly
 
   const settings = getBusinessSettings();
   // The business's vision model first; when it cannot take this request at all (HTTP 400-404 "model_unavailable" — e.g. a router with no
-  // image-capable endpoint), the business's own chat model is tried ONCE. Nothing else is retried here beyond the client's bounded retries.
+  // image-capable endpoint), the business's own chat model is tried ONCE, then at most ONE fallback model that OpenRouter's catalog says
+  // accepts image input (a text-only fallback is never given a picture). After a 402 the next model is tried only if it is free.
   const candidates = [settings.openRouterVisionModel, settings.openRouterModel].filter((m, i, all) => m && all.indexOf(m) === i);
+  const freeModels = new Set<string>();
+  for (const id of settings.openRouterFallbackModels) {
+    if (!id || candidates.includes(id) || isModelCooling(id)) continue;
+    const info = await getModelInfo(id);
+    if (!info?.image) continue;
+    candidates.push(id);
+    if (info.free) freeModels.add(id);
+    break;
+  }
   const caption = (input.caption ?? '').trim();
   const dataUrl = `data:${mime};base64,${bytes.toString('base64')}`;
   let lastFailure: ImageAnalysisFailure = 'provider_failed';
@@ -142,8 +154,11 @@ export async function analyzeImage(input: AnalyzeImageInput): Promise<ImageAnaly
           : 'provider_failed';
       lastFailure = reason;
       const next = candidates[index + 1];
-      logger.warn({ account: currentAccountId(), model, reason, aiReason: (error as AiResponseError)?.reason, httpStatus: (error as AiResponseError)?.httpStatus, providerMessage: (error as AiResponseError)?.providerMessage?.slice(0, 120), nextModel: reason === 'model_unavailable' ? next : undefined }, 'vision model did not analyse the customer picture');
-      if (reason === 'model_unavailable' && next && !(input.deadline && Date.now() + 2000 > input.deadline)) continue;
+      if (reason === 'model_unavailable') markModelFailure(model, 'model_unavailable');
+      // The next candidate is tried after a refusal, or after a 402 ONLY when it is free (a paid model would hit the same credit cap).
+      const canContinue = Boolean(next) && !(input.deadline && Date.now() + 2000 > input.deadline) && (reason === 'model_unavailable' || (reason === 'payment_required' && next !== undefined && freeModels.has(next) && !freeFallbackBlocked()));
+      logger.warn({ account: currentAccountId(), model, reason, aiReason: (error as AiResponseError)?.reason, httpStatus: (error as AiResponseError)?.httpStatus, providerMessage: (error as AiResponseError)?.providerMessage?.slice(0, 120), nextModel: canContinue ? next : undefined }, 'vision model did not analyse the customer picture');
+      if (canContinue) continue;
       return done({ ok: false, reason, durationMs: Date.now() - started });
     }
   }

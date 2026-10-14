@@ -16,8 +16,9 @@ import { getDb } from '../../src/memory/db';
 import { createAccount } from '../../src/accounts/accountRepo';
 import { runWithAccount } from '../../src/accounts/accountContext';
 import { getCustomerByWaId, setCustomerMenuState } from '../../src/memory/customerRepo';
-import { updateBusinessSettings } from '../../src/config/businessSettings';
+import { getBusinessSettings, updateBusinessSettings } from '../../src/config/businessSettings';
 import { AiResponseError } from '../../src/llm/aiResponseError';
+import { getHold, requestHandoff } from '../../src/handoff/handoffRepo';
 import { activeFollowupsForCustomer, getFollowup, listFollowupEvents, type FollowupRequest } from '../../src/followups/followupRepo';
 import { callWindow, cancelFollowup, completeFollowup, createFollowup, FollowupError, recordCallOpened, registerFollowupJobs, rescheduleFollowup, telUrlFor } from '../../src/followups/followupService';
 import { listJobsFor, runDueJobs, resetJobHandlersForTests } from '../../src/jobs/scheduler';
@@ -106,22 +107,35 @@ describe('after hours: the customer is told once, offered the follow-up choices,
     await processInboundMessage(msg(waId, '2'), { knowledge: KB });
     expect(lastSent()).toMatch(/Your request is saved\./);
     expect(customerOf(waId).menu_state).toBe('MAIN_MENU');
-    // back in the main menu with the assistant still down: the closed notice and choices are sent again, once per message, not an error
+    // back in the main menu with the assistant still down: NOT the long closed notice again (no duplicate closure messages) — the short
+    // automated reminder of the choices, and the choices still work
     vi.mocked(sendTextMessage).mockClear();
     await processInboundMessage(msg(waId, 'any news about my tinting?'), { knowledge: KB });
+    expect(sent()).toHaveLength(1);
     expect(sent().join('\n')).not.toMatch(/went wrong/i);
-    expect(sent().join('\n')).toMatch(/currently closed/);
-    expect(sent().join('\n')).toMatch(/1️⃣ Request a phone callback/);
+    expect(sent().join('\n')).not.toMatch(/currently closed/);
+    expect(lastSent()).toMatch(/Automated reply: the assistant still cannot answer\. Send a follow-up option number \(1 callback, 2 WhatsApp message, 4 choose a time\) or 0 for the main menu/);
+    expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
+    await processInboundMessage(msg(waId, '0'), { knowledge: KB });
+    expect(customerOf(waId).menu_state).toBe('MAIN_MENU');
   });
 
-  it('when the business is OPEN and the assistant is unavailable, the neutral apology is still sent (nothing else can help)', async () => {
+  it('when the business is OPEN and the assistant is unavailable, the customer still gets the automated choices (not "something went wrong"), with the open-hours menu', async () => {
     vi.setSystemTime(OPEN_NOW);
     const waId = await englishCustomer();
     vi.mocked(chatCompletion).mockRejectedValue(new AiResponseError('payment_required', 402, 'openai/gpt-4.1-mini', 'Insufficient credits'));
     vi.mocked(sendTextMessage).mockClear();
     await processInboundMessage(msg(waId, 'how much is tinting?'), { knowledge: KB });
-    expect(lastSent()).toMatch(/went wrong/i);
+    expect(sent().join('\n')).not.toMatch(/went wrong/i);
     expect(sent().join('\n')).not.toMatch(/currently closed/);
+    expect(sent()[0]).toMatch(/Automated reply: our smart assistant cannot answer in detail right now, but our team is available/);
+    expect(sent()[1]).toMatch(/7️⃣ Call us now: \+966112223344/); // open: the direct call is offered
+    expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
+    // and a callback request completes without the assistant
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB });
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB });
+    expect(lastSent()).toMatch(/Your request is saved/);
+    expect(activeFollowupsForCustomer(customerOf(waId).id, undefined, ACC)).toHaveLength(1);
   });
 
   it('callback → appointment type → saved as pending until the business opens; staff get a persistent notification, a WhatsApp alert and a durable job', async () => {
@@ -300,5 +314,117 @@ describe('while the business is open', () => {
     expect(row.status).toBe('eligible');
     expect(callWindow(row)).toMatchObject({ state: 'open', allowed: true });
     expect(listStaffNotifications({ accountIds: [ACC], adminUserId: 1, status: 'open' }).find((n) => n.followup_id === row.id)).toMatchObject({ kind: 'followup_new', ring: 1 });
+  });
+});
+
+describe('SCREENSHOT 2026-10-14: the assistant works 24/7; business hours decide the closure notice and staff availability, never whether the AI answers', () => {
+  const holdOf = (waId: string) => runWithAccount(ACC, () => getHold(customerOf(waId).id));
+
+  it('after hours the AI answers the actual question FIRST, the closed notice + choices follow once, and later answers never repeat the notice', async () => {
+    const waId = await englishCustomer(); // closed: welcome, notice, menu
+    vi.mocked(sendTextMessage).mockClear();
+    vi.mocked(chatCompletion).mockResolvedValue(reply('Ceramic tint starts at 450 SAR for a sedan.') as never);
+    await processInboundMessage(msg(waId, 'how much is ceramic tint?'), { knowledge: KB });
+    expect(sent()).toEqual(['Ceramic tint starts at 450 SAR for a sedan.']); // the answer, nothing appended
+    await processInboundMessage(msg(waId, 'and for an SUV?'), { knowledge: KB });
+    expect(sent()).toHaveLength(2);
+    expect(sent().join('\n')).not.toMatch(/currently closed/);
+    expect(chatCompletion).toHaveBeenCalledTimes(2);
+    expect(String(vi.mocked(chatCompletion).mock.calls[1]![0].messages[0]!.content)).toMatch(/BUSINESS STATUS NOW: CLOSED/); // the model knows it is closed and says so when relevant
+  });
+
+  it('"agent" after hours: NO silent hold — an honest "nobody is available until …" with the choices, ONE staff notification, and the assistant keeps answering', async () => {
+    const waId = await englishCustomer();
+    vi.mocked(sendTextMessage).mockClear();
+    await processInboundMessage(msg(waId, 'I want to talk to an agent'), { knowledge: KB });
+    expect(sent()).toHaveLength(2);
+    expect(sent()[0]).toMatch(/No one from our team is available right now: Pearl Dental is currently closed; we will be back tomorrow at 9:00 AM/);
+    expect(sent()[0]).toMatch(/The team has been notified/);
+    expect(sent()[1]).toMatch(/1️⃣ Request a phone callback/);
+    expect(holdOf(waId)).toBeNull(); // not parked for the night
+    expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
+    const notes = listStaffNotifications({ accountIds: [ACC], adminUserId: 1, status: 'open' }).filter((n) => n.kind === 'handoff_after_hours' && n.customer_id === customerOf(waId).id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.body).not.toMatch(new RegExp(waId)); // the number is masked in the notification body
+    // asking again within the window: told again, but no second notification row
+    vi.mocked(sendTextMessage).mockClear();
+    await processInboundMessage(msg(waId, 'agent please'), { knowledge: KB });
+    expect(sent()[0]).toMatch(/No one from our team is available right now/);
+    expect(listStaffNotifications({ accountIds: [ACC], adminUserId: 1, status: 'open' }).filter((n) => n.kind === 'handoff_after_hours' && n.customer_id === customerOf(waId).id)).toHaveLength(1);
+    // a question is still answered by the assistant (no hold), and a callback still completes without it
+    vi.mocked(sendTextMessage).mockClear();
+    await processInboundMessage(msg(waId, 'do you fit dash cams?'), { knowledge: KB });
+    expect(lastSent()).toMatch(/Our tinting starts from the basic package/);
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB });
+    await processInboundMessage(msg(waId, '2'), { knowledge: KB });
+    expect(lastSent()).toMatch(/Your request is saved/);
+    expect(runWithAccount(ACC, () => activeFollowupsForCustomer(customerOf(waId).id))).toHaveLength(1);
+  });
+
+  it('"agent" while OPEN keeps the real hand-off: the hold is created and the assistant goes quiet for that customer', async () => {
+    vi.setSystemTime(OPEN_NOW);
+    const waId = await englishCustomer();
+    vi.mocked(sendTextMessage).mockClear();
+    await processInboundMessage(msg(waId, 'I want to talk to an agent'), { knowledge: KB });
+    expect(holdOf(waId)).toMatchObject({ state: 'HUMAN_REQUESTED', source: 'customer' });
+    expect(sent().join('\n')).not.toMatch(/No one from our team is available/);
+    vi.mocked(chatCompletion).mockClear();
+    await processInboundMessage(msg(waId, 'hello?'), { knowledge: KB });
+    expect(chatCompletion).not.toHaveBeenCalled();
+  });
+
+  it('the assistant itself hands off while closed: its hold is released, the customer gets the honest closed hand-over and the choices', async () => {
+    const waId = await englishCustomer();
+    vi.mocked(sendTextMessage).mockClear();
+    vi.mocked(chatCompletion).mockImplementation(async () => {
+      runWithAccount(ACC, () => requestHandoff({ customerId: customerOf(waId).id, conversationId: null, source: 'ai', reason: 'customer wants a person' }, { type: 'assistant' }));
+      return reply('Let me connect you with the team.') as never;
+    });
+    await processInboundMessage(msg(waId, 'can a person call me?'), { knowledge: KB });
+    expect(sent()[0]).toMatch(/No one from our team is available right now/);
+    expect(sent().join('\n')).not.toMatch(/Let me connect you/);
+    expect(holdOf(waId)).toBeNull();
+    expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.MENU);
+  });
+
+  it('a callback request repeated within two minutes (double tap / repeated webhook) is ONE request, one staff alert, one job', async () => {
+    const waId = await englishCustomer();
+    const customerId = customerOf(waId).id;
+    const first = runWithAccount(ACC, () => createFollowup({ customerId, conversationId: null, contactMethod: 'call', appointmentTypeKey: null, requestedAt: null, asap: true, source: 'customer' }));
+    const second = runWithAccount(ACC, () => createFollowup({ customerId, conversationId: null, contactMethod: 'call', appointmentTypeKey: null, requestedAt: null, asap: true, source: 'customer' }));
+    expect(second.id).toBe(first.id);
+    expect(runWithAccount(ACC, () => activeFollowupsForCustomer(customerId))).toHaveLength(1);
+    expect(listStaffNotifications({ accountIds: [ACC], adminUserId: 1, status: 'open' }).filter((n) => n.followup_id === first.id)).toHaveLength(1);
+    expect(runWithAccount(ACC, () => listJobsFor('followup', first.id))).toHaveLength(1);
+    // a DIFFERENT request (WhatsApp message instead of a call) is a new one
+    const third = runWithAccount(ACC, () => createFollowup({ customerId, conversationId: null, contactMethod: 'whatsapp', appointmentTypeKey: null, requestedAt: null, asap: true, source: 'customer' }));
+    expect(third.id).not.toBe(first.id);
+  });
+
+  it('a request for a selected future time is validated against the business hours and timezone, persisted, and staff are notified', async () => {
+    const waId = await englishCustomer();
+    vi.mocked(sendTextMessage).mockClear();
+    await processInboundMessage(msg(waId, '4'), { knowledge: KB }); // choose a time
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // phone call
+    await processInboundMessage(msg(waId, '1'), { knowledge: KB }); // consultation
+    await processInboundMessage(msg(waId, 'tomorrow 7am'), { knowledge: KB }); // before opening: rejected with the hours, still asked
+    expect(lastSent()).toMatch(/outside|Opening hours/i);
+    expect(customerOf(waId).menu_state).toBe(FOLLOWUP_STATES.TIME);
+    await processInboundMessage(msg(waId, 'tomorrow 10am'), { knowledge: KB });
+    expect(lastSent()).toMatch(/Your request is saved/);
+    const row = runWithAccount(ACC, () => activeFollowupsForCustomer(customerOf(waId).id))[0]!;
+    expect(row.status).toBe('scheduled');
+    expect(row.requested_at).toBe(riyadh('2026-10-08T10:00:00').toUTC().toISO());
+    expect(listStaffNotifications({ accountIds: [ACC], adminUserId: 1, status: 'open' }).find((n) => n.followup_id === row.id)).toMatchObject({ kind: 'followup_new' });
+  });
+
+  it('a brand-new business inherits the same after-hours defaults (enabled, 30-minute window) and its own empty hours mean no closed notice is ever guessed', async () => {
+    const fresh = createAccount({ name: 'Fresh Bakery' }).id;
+    const settings = runWithAccount(fresh, () => getBusinessSettings(fresh));
+    expect(settings.afterHoursEnabled).toBe(true);
+    expect(settings.callbackWindowMinutes).toBe(30);
+    expect(settings.hoursConfigured).toBe(false);
+    expect(settings.openRouterFallbackModels).toEqual([]);
+    expect(runWithAccount(fresh, () => activeFollowupsForCustomer(1, undefined, fresh))).toEqual([]); // nothing of another business is visible
   });
 });

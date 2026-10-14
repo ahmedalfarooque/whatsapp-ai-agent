@@ -75,6 +75,11 @@ const envSchema = z
      *  (which must then accept image input, as openai/gpt-4.1-mini does). Production evidence 2026-10-13: `openrouter/free` answers HTTP 404
      *  "model_unavailable" to image requests, so it is NOT a safe default for pictures. */
     OPENROUTER_VISION_MODEL: z.string().optional().default(''),
+    /** Shared default list (comma-separated OpenRouter ids) of chat models tried — ONE of them — when a business's chat model fails for a
+     *  model-specific reason (refused, provider error, rate limit, empty answer) or, if the id is free (price 0), after a 402. Empty = no
+     *  fallback. A business can set its own in business_settings.open_router_fallback_models. Nothing paid is ever added by default:
+     *  the shipped default is empty because every free endpoint was blocked by the account's data policy on 2026-10-14 (see docs). */
+    OPENROUTER_FALLBACK_MODELS: z.string().optional().default(''),
     /** Prompt size guards (characters): the knowledge base is selected by relevance within this budget, the history is trimmed to this budget,
      *  and at most this many business documents (each cut to this length) are pasted into a prompt. A prompt that grows without bound hits the
      *  provider's per-request token cap (OpenRouter answers HTTP 402 "Prompt tokens limit exceeded" when the credit is low). */

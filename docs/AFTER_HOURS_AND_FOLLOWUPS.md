@@ -49,7 +49,27 @@ Templates (all editable per business in the Manual Reply Editor): `after_hours_n
 `followup_cancel_list`, `followup_cancel_none`, `followup_cancelled`, `followup_save_failed`, `followup_direct_call`, `followup_invalid_option`,
 and the staff texts `followup_staff_alert|reminder|overdue|eligible`. New placeholders: `{next_open} {when} {method} {type} {types} {requests} {window} {promise}`.
 
-A hand-off to staff outside hours still sends `out_of_hours` (now with `{next_open}`); a customer held for staff never receives the menu.
+### The assistant answers 24/7; the hours decide the notice and the hand-off (2026-10-14)
+
+Business hours never switch the assistant off: a question at 23:00 gets its answer first (the prompt carries `BUSINESS STATUS NOW: CLOSED
+(reopens …)` so the model says so when relevant), then the closed notice and the choices once per window. The hours decide two things only:
+
+* **Asking for a person while closed** ("agent", the menu's "Talk to staff", or the assistant's own hand-off tool) no longer parks the
+  customer on a silent staff hold until morning. The customer gets `human_support_closed` ("no one is available right now … back
+  {next_open} … the team has been notified") and the follow-up menu; the team gets ONE persistent notification per customer per window
+  (`staff_notifications.kind = handoff_after_hours`, number masked); the assistant keeps answering questions. While OPEN the real hand-off is
+  unchanged: `human_support`, the hold, staff reply by hand (`out_of_hours` is only sent if the business happens to be closed).
+* **The assistant cannot answer** (provider down, credit exhausted, every model refused — see `docs/AI_ASSISTANT.md`): never "something went
+  wrong" and never silence. The LOCAL automated reply is sent — `assistant_unavailable_closed` (with `{next_open}`) or
+  `assistant_unavailable_open` — plus the follow-up menu, and the menu state waits for a choice; further failures within 10 minutes get the
+  short `assistant_unavailable_again` reminder of the choices instead of a repeated closure notice. These texts say they are automated and
+  state no business fact beyond the configured hours / next opening. Every choice (callback now, callback at a time, staff WhatsApp message,
+  cancel, main menu) completes without any AI call. Only a customer inside a guided request (or with no language yet) still gets the neutral
+  `fallback_error`.
+* **Duplicates**: a repeated webhook delivery is dropped by the message-id claim; a customer's identical request (same method, same time /
+  ASAP, same type) within two minutes returns the existing row — one request, one staff alert, one reminder job.
+
+Legacy note: the old once-only "closed notice forced on every AI failure" path is gone; the notice after a successful answer is unchanged.
 
 ## Request lifecycle (`followup_requests`, `src/followups/`)
 

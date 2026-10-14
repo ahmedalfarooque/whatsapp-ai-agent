@@ -24,6 +24,8 @@ export interface GeneratedMessage {
 export interface AgentLoopResult {
   finalText: string;
   generatedMessages: GeneratedMessage[];
+  /** The model that wrote the final answer and, when a fallback model stepped in on any round, which model failed first and why. */
+  servedBy?: { model: string; fallbackFrom?: string; fallbackReason?: string };
 }
 
 /**
@@ -83,6 +85,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
   ];
   const generatedMessages: GeneratedMessage[] = [];
   const executed = new Map<string, string>(); // canonical call -> the result it produced
+  let servedBy: AgentLoopResult['servedBy'];
 
   for (let round = 1; round <= maxRounds; round += 1) {
     if (Date.now() >= deadline) {
@@ -97,6 +100,8 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
       if (error instanceof AiResponseError && round > 1) error.afterToolCalls = true; // tools ran in an earlier round: the caller must not re-run this loop
       throw error;
     }
+    // A fallback that stepped in on ANY round is remembered (the final answer may come from the primary again on a later round).
+    if (response.servedBy) servedBy = response.servedBy.fallbackFrom || !servedBy?.fallbackFrom ? response.servedBy : { ...servedBy, model: response.servedBy.model };
     const choice = response.choices[0];
     if (!choice) {
       throw new AiResponseError('malformed_response', null, null);
@@ -110,7 +115,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
       const finalText = contentText(assistantMessage.content).trim();
       if (!finalText) throw new AiResponseError('empty_response', null, null);
       generatedMessages.push({ role: 'assistant', content: finalText });
-      return { finalText, generatedMessages };
+      return { finalText, generatedMessages, servedBy };
     }
 
     messages.push(assistantMessage);

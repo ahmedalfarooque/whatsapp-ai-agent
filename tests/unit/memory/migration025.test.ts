@@ -33,7 +33,7 @@ describe('migration 025 — after-hours, follow-up requests, appointment types, 
     const settingsBefore = hashWithout(rows(db, 'business_settings'), []);
     const customersBefore = hashWithout(rows(db, 'customers'), []);
     runMigrations(db);
-    expect(hashWithout(rows(db, 'business_settings'), ADDED)).toBe(settingsBefore);
+    expect(hashWithout(rows(db, 'business_settings'), [...ADDED, 'open_router_fallback_models' /* added by 026, additive too */])).toBe(settingsBefore);
     expect(hashWithout(rows(db, 'customers'), ['after_hours_notified_at'])).toBe(customersBefore);
     for (const r of rows(db, 'business_settings')) {
       expect(r).toMatchObject({ weekly_hours: null, closures: null, after_hours_enabled: 1, direct_call_enabled: 1, callback_window_minutes: 30, reminder_lead_minutes: 0, reminder_repeat_minutes: 5, reminder_max_attempts: 3, response_time_promise: null, open_router_audio_model: null });

@@ -5,7 +5,9 @@ import { logger } from '../logger';
 import { fetchWithTimeout, withRetry } from '../utils/retry';
 import { chatCompletionMock } from './mockOpenRouterClient';
 import { AiCredentialError } from './aiCredentialError';
-import { AiResponseError, reasonForHttpStatus } from './aiResponseError';
+import { AiResponseError, reasonForHttpStatus, type ModelAttemptRecord } from './aiResponseError';
+import { chooseFallback, classifyFailure, markFreeFallbackBlocked, markModelFailure, type FallbackNeeds } from './modelFallback';
+import { currentAccountId } from '../accounts/accountContext';
 import type { ChatCompletionResponse, ChatMessage } from './types';
 import type { ToolDefinition } from '../tools';
 
@@ -22,6 +24,10 @@ export interface ChatCompletionRequest {
   timeoutMs?: number;
   /** Fewer retries for a step that has its own fallback (the vision step: one retry on a rate limit / provider error). */
   retries?: number;
+  /** What a fallback model must be able to take for THIS request (a text-only model is never given a picture or a recording). */
+  requires?: { image?: boolean; audio?: boolean };
+  /** Try one fallback model after a model-specific failure. Default: only when the business's chat model is used (no `model` given). */
+  allowFallback?: boolean;
 }
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -92,16 +98,10 @@ export function validateCompletion(parsed: unknown, model: string): ChatCompleti
   return parsed as ChatCompletionResponse;
 }
 
-/** Calls OpenRouter's OpenAI-compatible chat completions endpoint with tool-calling support. */
-export async function chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
-  if (env.shouldUseMockProviders) {
-    return chatCompletionMock(request.messages);
-  }
-  // Images are sent as data URLs (the bytes themselves, base64). They are never logged; this is the only place the request leaves the process.
-  const model = request.model ?? getBusinessSettings().openRouterModel;
+/** One model, with the bounded per-model retry policy: at most `retries` more attempts for a rate limit / provider failure, ONE for an empty answer. */
+async function completeWithModel(request: ChatCompletionRequest, model: string, retries: number): Promise<ChatCompletionResponse> {
   const perAttemptMs = request.timeoutMs ?? env.OPENROUTER_TIMEOUT_MS;
-  // Retries are bounded: at most 2 more attempts for a rate limit or provider failure, and ONE more for an empty answer. A bad model
-  // or policy refusal (400-404) is never retried — asking again cannot help and would only cost money.
+  // A bad model or policy refusal (400-404) is never retried — asking again cannot help and would only cost money.
   let emptyRetries = 0;
   return withRetry(
     async () => {
@@ -129,7 +129,10 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
           request.deadline ? Math.max(1000, Math.min(perAttemptMs, request.deadline - Date.now())) : perAttemptMs,
         );
       } catch (error) {
-        throw new AiResponseError('provider_error', null, model, `${(error as Error)?.name ?? 'network error'}`);
+        // No answer at all (connection, DNS, abort/timeout): the provider or the network, not this model — the error says so.
+        const failure = new AiResponseError('provider_error', null, model, `${(error as Error)?.name ?? 'network error'}`);
+        failure.network = true;
+        throw failure;
       }
 
       if (response.status === 401 || response.status === 403) {
@@ -150,7 +153,7 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
       return validateCompletion(parsed, model);
     },
     {
-      retries: request.retries ?? 2,
+      retries,
       isRetryable: (error) => {
         if (error instanceof AiCredentialError) return false;
         if (request.deadline && Date.now() + 2000 > request.deadline) return false; // no time left for another attempt
@@ -166,4 +169,76 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
       },
     },
   );
+}
+
+const FALLBACK_MIN_TIME_LEFT_MS = 4000;
+
+/**
+ * Calls OpenRouter's OpenAI-compatible chat completions endpoint with tool-calling support.
+ *
+ * Model fallback (bounded, honest): the request goes to the business's chat model (or `request.model`). When that fails for a
+ * MODEL-SPECIFIC reason, ONE fallback model from the business's list is tried with the very same messages (tool results included, so no
+ * tool ever runs twice), chosen for the task's needs (tools / image / audio, from OpenRouter's public catalog) and skipped while cooling
+ * down. After an HTTP 402 only a FREE fallback is tried, once; if it fails too the account is marked "free fallback blocked" for a while.
+ * A rejected key or a network failure is never answered by switching models. Every model tried is recorded on the thrown error
+ * (`attempts`) and a successful fallback is recorded on the response (`servedBy`) for the activity log.
+ */
+export async function chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+  if (env.shouldUseMockProviders) {
+    return chatCompletionMock(request.messages);
+  }
+  // Images are sent as data URLs (the bytes themselves, base64). They are never logged; this is the only place the request leaves the process.
+  const settings = getBusinessSettings();
+  const model = request.model ?? settings.openRouterModel;
+  const fallbackEnabled = request.allowFallback ?? request.model === undefined; // a caller that names its model (vision, audio) manages its own candidates
+  const needs: FallbackNeeds = { tools: Boolean(request.tools && request.tools.length > 0), image: Boolean(request.requires?.image), audio: Boolean(request.requires?.audio) };
+  try {
+    const response = await completeWithModel(request, model, request.retries ?? 2);
+    response.servedBy = { model };
+    return response;
+  } catch (primaryError) {
+    const attempts: ModelAttemptRecord[] = [recordOf(primaryError, model)];
+    const failure = classifyFailure(primaryError);
+    if (primaryError instanceof AiResponseError && failure === 'model') markModelFailure(model, primaryError.reason);
+    const timeLeft = request.deadline ? request.deadline - Date.now() : Number.POSITIVE_INFINITY;
+    let skipped: string | null = null;
+    if (!fallbackEnabled) skipped = null;
+    else if (timeLeft < FALLBACK_MIN_TIME_LEFT_MS) skipped = 'no time left for another model';
+    else {
+      const choice = await chooseFallback(model, settings.openRouterFallbackModels, failure, needs);
+      if (choice.model) {
+        const fallbackModel = choice.model;
+        logger.warn({ account: currentAccountId(), model, fallbackModel, failure, reason: (primaryError as AiResponseError)?.reason, httpStatus: (primaryError as AiResponseError)?.httpStatus }, 'chat model failed; trying the fallback model once with the same conversation');
+        try {
+          const response = await completeWithModel(request, fallbackModel, 1);
+          response.servedBy = { model: fallbackModel, fallbackFrom: model, fallbackReason: attempts[0]!.reason === 'credential' ? 'key rejected' : attempts[0]!.reason };
+          logger.info({ account: currentAccountId(), model: fallbackModel, fallbackFrom: model, reason: attempts[0]!.reason }, 'fallback model answered');
+          return response;
+        } catch (fallbackError) {
+          attempts.push(recordOf(fallbackError, fallbackModel));
+          const fallbackClass = classifyFailure(fallbackError);
+          if (fallbackError instanceof AiResponseError && fallbackClass === 'model') markModelFailure(fallbackModel, fallbackError.reason);
+          if (failure === 'credit' && fallbackError instanceof AiResponseError && (fallbackError.reason === 'payment_required' || fallbackError.reason === 'model_unavailable')) {
+            // The free model is not usable on this account either (negative balance, or free endpoints blocked by the account's data policy):
+            // trying it on every message would only add latency. Remembered for a while; staff read the reason in the activity.
+            markFreeFallbackBlocked(fallbackError.reason === 'payment_required' ? 'HTTP 402 on the free model too: the account balance blocks every model' : `free model refused, HTTP ${fallbackError.httpStatus} (OpenRouter privacy settings may block free endpoints)`);
+          }
+          logger.warn({ account: currentAccountId(), attempts: attempts.map((a) => ({ model: a.model, reason: a.reason, httpStatus: a.httpStatus })) }, 'the fallback model failed as well');
+        }
+      } else {
+        skipped = (choice as { skipped: string }).skipped;
+      }
+    }
+    if (primaryError instanceof AiResponseError) {
+      primaryError.attempts = attempts;
+      primaryError.fallbackSkipped = skipped;
+    }
+    throw primaryError;
+  }
+}
+
+function recordOf(error: unknown, model: string): ModelAttemptRecord {
+  if (error instanceof AiCredentialError) return { model, reason: 'credential', httpStatus: error.httpStatus ?? null };
+  if (error instanceof AiResponseError) return { model, reason: error.reason, httpStatus: error.httpStatus, providerMessage: error.providerMessage };
+  return { model, reason: 'provider_error', httpStatus: null };
 }

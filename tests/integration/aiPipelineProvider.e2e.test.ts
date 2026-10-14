@@ -82,12 +82,20 @@ describe('customer experience when the provider misbehaves', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('a permanent rate limit costs at most 3 provider calls and sends ONE neutral fallback', async () => {
+  // When the assistant cannot answer, the customer gets the LOCAL automated reply (clearly not an AI answer) and the follow-up choices: two
+  // bubbles, never "something went wrong" (see docs/AFTER_HOURS_AND_FOLLOWUPS.md).
+  const expectLocalFallback = (sent: string[]) => {
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatch(/Automated reply: our smart assistant cannot answer in detail right now/);
+    expect(sent[0]).not.toMatch(/went wrong/i);
+    expect(sent[1]).toMatch(/1️⃣ Request a phone callback/);
+  };
+
+  it('a permanent rate limit costs at most 3 provider calls and sends the automated choices once (no fallback model configured)', async () => {
     const fetchMock = provider(() => json(429, {}));
     const { sent, activity } = await customerSays();
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatch(/went wrong/i);
+    expectLocalFallback(sent);
     expect(activity.at(-1)).toMatchObject({ kind: 'error', detail: expect.stringMatching(/^AI failed; fallback sent \(rate limited, HTTP 429/) });
     expect(activity.some((a) => a.kind === 'ai')).toBe(false);
   });
@@ -96,8 +104,7 @@ describe('customer experience when the provider misbehaves', () => {
     const fetchMock = provider(() => answer(''));
     const { sent, activity } = await customerSays();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatch(/went wrong/i);
+    expectLocalFallback(sent);
     expect(activity.at(-1)).toMatchObject({ kind: 'error', detail: expect.stringContaining('empty response') });
     expect(activity.some((a) => a.kind === 'ai')).toBe(false);
   });
@@ -106,8 +113,8 @@ describe('customer experience when the provider misbehaves', () => {
     const fetchMock = provider(() => json(404, { error: { message: '0 endpoints available matching your guardrail restrictions and data policy' } }));
     const { sent, activity } = await customerSays();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).not.toMatch(/openrouter|openai|model|404|guardrail|policy/i);
+    expectLocalFallback(sent);
+    expect(sent.join('\n')).not.toMatch(/openrouter|openai|model|404|guardrail|policy/i);
     expect(activity.at(-1)!.detail).toMatch(/model unavailable, HTTP 404, model /);
   });
 
@@ -115,21 +122,21 @@ describe('customer experience when the provider misbehaves', () => {
     const bad = provider(() => new Response('<html>gateway error</html>', { status: 200 }));
     const malformed = await customerSays();
     expect(bad).toHaveBeenCalledTimes(1);
-    expect(malformed.sent).toHaveLength(1);
+    expectLocalFallback(malformed.sent);
     expect(malformed.activity.at(-1)!.detail).toContain('malformed response');
 
     const down = provider(() => { throw new TypeError('fetch failed'); });
     const dropped = await customerSays();
     expect(down).toHaveBeenCalledTimes(3);
-    expect(dropped.sent).toHaveLength(1);
-    expect(dropped.activity.at(-1)!.detail).toContain('provider error');
+    expectLocalFallback(dropped.sent);
+    expect(dropped.activity.at(-1)!.detail).toContain('provider error (no answer from the provider)');
   });
 
   it('a rejected key (401) is not retried and the apology is not repeated for the same customer within the cooldown', async () => {
     const fetchMock = provider(() => json(401, {}));
     const first = await customerSays();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(first.sent).toHaveLength(1);
+    expectLocalFallback(first.sent);
     expect(first.activity.at(-1)!.detail).toMatch(/^AI credential problem \(rejected\)/);
   });
 
@@ -144,7 +151,7 @@ describe('customer experience when the provider misbehaves', () => {
     const fetchMock = provider(() => toolCall('request_human_handoff_typo', { x: 1 }));
     const { sent, activity } = await customerSays();
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(sent).toHaveLength(1);
+    expectLocalFallback(sent);
     expect(activity.at(-1)!.detail).toContain('tool rounds exhausted');
   });
 });

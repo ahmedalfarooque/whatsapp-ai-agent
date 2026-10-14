@@ -182,10 +182,14 @@ describe('end-to-end conversation flow (mocked external services)', () => {
 
     await processInboundMessage(inbound(waId, 'wamid.e1', 'Is my car ready for pickup?'), { knowledge });
 
-    const lastCall = vi.mocked(sendTextMessage).mock.calls.at(-1);
-    expect(lastCall?.[1]).not.toMatch(/OpenRouter is down/);
-    expect(lastCall?.[1]).toMatch(/went wrong/i);
+    // Not "something went wrong": the LOCAL automated reply (clearly not an AI answer) and the callback / message choices, which work without the AI.
+    const sentTexts = vi.mocked(sendTextMessage).mock.calls.map((c) => String(c[1])).join('\n');
+    expect(sentTexts).not.toMatch(/OpenRouter is down/);
+    expect(sentTexts).not.toMatch(/went wrong/i);
+    expect(sentTexts).toMatch(/Automated reply: our smart assistant cannot answer in detail right now, but our team is available/);
+    expect(sentTexts).toMatch(/1️⃣ Request a phone callback/);
   });
+  const unavailableTexts = () => vi.mocked(sendTextMessage).mock.calls.map((c) => String(c[1])).join('\n');
   describe('an AI answer that gives the customer nothing usable is a FAILED answer', () => {
     const activityFor = (waId: string) => getDb().prepare('SELECT kind, detail FROM reply_activity WHERE wa_id = ? ORDER BY id').all(waId) as Array<{ kind: string; detail: string | null }>;
 
@@ -196,7 +200,8 @@ describe('end-to-end conversation flow (mocked external services)', () => {
 
       await processInboundMessage(inbound(waId, 'wamid.empty1', 'How much is a 4 litre bucket of paint?'), { knowledge });
 
-      expect(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1]).toMatch(/went wrong/i);
+      expect(unavailableTexts()).not.toMatch(/went wrong/i);
+      expect(unavailableTexts()).toMatch(/Automated reply[\s\S]*1️⃣ Request a phone callback/);
       const rows = activityFor(waId);
       expect(rows.some((r) => r.kind === 'ai')).toBe(false);
       expect(rows.at(-1)).toMatchObject({ kind: 'error' });
@@ -214,28 +219,31 @@ describe('end-to-end conversation flow (mocked external services)', () => {
 
       await processInboundMessage(inbound(waId, 'wamid.refused1', 'Do you have Jotun paint?'), { knowledge });
 
-      const reply = String(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1]);
-      expect(reply).toMatch(/went wrong/i);
+      const reply = unavailableTexts();
+      expect(reply).not.toMatch(/went wrong/i);
       expect(reply).not.toMatch(/openrouter|guardrail|404|model/i);
-      expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error', detail: 'AI failed; fallback sent (model unavailable, HTTP 404, model openrouter/free)' });
+      expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error' });
+      expect(activityFor(waId).at(-1)!.detail).toMatch(/^AI failed; fallback sent \(model unavailable, HTTP 404, model openrouter\/free\) · business open: automated reply and callback \/ message choices sent instead \(not an AI answer\)/);
     });
 
-    it('PRODUCTION 2026-10-13: an exhausted OpenRouter credit (HTTP 402) is named for staff, the customer hears the apology ONCE per window, and later messages are not spammed with it', async () => {
+    it('PRODUCTION 2026-10-13: an exhausted OpenRouter credit (HTTP 402) is named for staff; the customer gets the automated choices once, then only the short reminder — never silence, never a second long notice', async () => {
       const waId = '15552220017';
       preselectLanguage(waId);
       vi.mocked(chatCompletion).mockRejectedValue(new AiResponseError('payment_required', 402, 'openai/gpt-4.1-mini', 'Prompt tokens limit exceeded: 14140 > 10822. To increase, visit https://openrouter.ai/settings/credits'));
       await processInboundMessage(inbound(waId, 'wamid.credit1', 'I want to sell my building'), { knowledge });
-      const reply = String(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1]);
-      expect(reply).toMatch(/went wrong/i);
+      const reply = unavailableTexts();
+      expect(reply).not.toMatch(/went wrong/i);
       expect(reply).not.toMatch(/402|credit|openrouter|token/i);
+      expect(reply).toMatch(/Automated reply[\s\S]*1️⃣ Request a phone callback/);
       expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error' });
       expect(activityFor(waId).at(-1)!.detail).toMatch(/^AI failed; fallback sent \(OpenRouter credits exhausted or too low for this prompt, HTTP 402, model openai\/gpt-4\.1-mini — Prompt tokens limit exceeded/);
       expect(activityFor(waId).at(-1)!.detail).toContain('openrouter.ai/settings/credits');
       const sentBefore = vi.mocked(sendTextMessage).mock.calls.length;
       await processInboundMessage(inbound(waId, 'wamid.credit2', 'what services do you offer?'), { knowledge });
-      expect(vi.mocked(sendTextMessage).mock.calls.length).toBe(sentBefore); // no second apology within the window
-      expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'suppressed' });
-      expect(activityFor(waId).at(-1)!.detail).toMatch(/credits exhausted \(HTTP 402\)/);
+      expect(vi.mocked(sendTextMessage).mock.calls.length).toBe(sentBefore + 1); // ONE short reminder of the choices, not the long reply again, not silence
+      expect(String(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1])).toMatch(/Automated reply: the assistant still cannot answer\. Send a follow-up option number/);
+      expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error' });
+      expect(activityFor(waId).at(-1)!.detail).toMatch(/HTTP 402[\s\S]*automated reminder of the callback \/ message choices sent/);
     });
 
     it('a 402 that names the provider token cap is answered by ONE retry with a smaller prompt, and the next message starts small', async () => {
@@ -263,7 +271,8 @@ describe('end-to-end conversation flow (mocked external services)', () => {
         .mockRejectedValue(new AiResponseError('payment_required', 402, 'openai/gpt-4.1-mini', 'Prompt tokens limit exceeded: 6666 > 6196. To increase, visit https://openrouter.ai/settings/credits'));
       await processInboundMessage(inbound(waId, 'wamid.cap3', 'check something'), { knowledge });
       expect(chatCompletion).toHaveBeenCalledTimes(2); // round 1 (tool) + round 2 (402); no second loop
-      expect(String(vi.mocked(sendTextMessage).mock.calls.at(-1)?.[1])).toMatch(/went wrong/i);
+      expect(unavailableTexts()).not.toMatch(/went wrong/i);
+      expect(unavailableTexts()).toMatch(/Automated reply/);
       expect(activityFor(waId).at(-1)).toMatchObject({ kind: 'error' });
       expect(activityFor(waId).some((r) => r.kind === 'ai')).toBe(false);
     });

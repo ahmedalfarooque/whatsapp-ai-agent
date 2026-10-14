@@ -147,6 +147,8 @@ export interface AiConfigView {
   visionModel: string;
   /** null = voice notes are not transcribed for this business. */
   audioModel: string | null;
+  /** The fallback chat models of this business as a comma-separated list ('' = none / inherited empty). */
+  fallbackModels: string;
   /** null = the shared policy (reply in the customer's latest language); a code = this business always replies in it. */
   replyLanguage: string | null;
   maxToolRounds: number;
@@ -162,6 +164,7 @@ export function getAiConfig(): AiConfigView {
     model: getBusinessSettings().openRouterModel,
     visionModel: getBusinessSettings().openRouterVisionModel,
     audioModel: getBusinessSettings().openRouterAudioModel,
+    fallbackModels: getBusinessSettings().openRouterFallbackModels.join(', '),
     replyLanguage: getBusinessSettings().aiReplyLanguage,
     maxToolRounds: env.MAX_TOOL_ROUNDS,
     conversationHistoryLimit: getBusinessSettings().conversationHistoryLimit,

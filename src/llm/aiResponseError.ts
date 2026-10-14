@@ -13,9 +13,18 @@ export type AiResponseReason =
   | 'tool_rounds_exhausted' // the model kept calling tools and never answered
   | 'time_budget_exceeded'; // the whole AI loop for one message ran out of time
 
+/** One model that was tried for a request and how it failed (safe diagnostics only). */
+export interface ModelAttemptRecord { model: string; reason: AiResponseReason | 'credential'; httpStatus: number | null; providerMessage?: string | null }
+
 export class AiResponseError extends Error {
   /** Set by the agent loop when the failure came on a round AFTER tool calls were requested: the whole loop must then never be re-run (a tool may already have acted). */
   afterToolCalls = false;
+  /** True when no HTTP answer arrived at all (connection refused, DNS, abort/timeout): a provider-side or network problem, not this model's. */
+  network = false;
+  /** Every model tried for this request, in order (the primary first, then at most one fallback), each with its own failure. */
+  attempts: ModelAttemptRecord[] = [];
+  /** Why no fallback model was tried (none configured, cooling, wrong capabilities, free fallback blocked, account-wide failure). */
+  fallbackSkipped: string | null = null;
 
   constructor(
     public readonly reason: AiResponseReason,
@@ -29,8 +38,13 @@ export class AiResponseError extends Error {
 
   /** Short text for the activity log shown in the dashboard. */
   describe(): string {
-    if (this.reason === 'payment_required') return `OpenRouter credits exhausted or too low for this prompt, HTTP 402${this.model ? `, model ${this.model}` : ''}${this.providerMessage ? ` — ${this.providerMessage.slice(0, 120)}` : ''}`;
-    return `${this.reason.replace(/_/g, ' ')}${this.httpStatus ? `, HTTP ${this.httpStatus}` : ''}${this.model ? `, model ${this.model}` : ''}`;
+    const base = this.reason === 'payment_required'
+      ? `OpenRouter credits exhausted or too low for this prompt, HTTP 402${this.model ? `, model ${this.model}` : ''}${this.providerMessage ? ` — ${this.providerMessage.slice(0, 120)}` : ''}`
+      : `${this.reason.replace(/_/g, ' ')}${this.network ? ' (no answer from the provider)' : ''}${this.httpStatus ? `, HTTP ${this.httpStatus}` : ''}${this.model ? `, model ${this.model}` : ''}`;
+    const others = this.attempts.filter((a) => a.model !== this.model);
+    const tried = others.length ? `; also tried ${others.map((a) => `${a.model} (${a.reason === 'credential' ? 'key rejected' : a.reason.replace(/_/g, ' ')}${a.httpStatus ? `, HTTP ${a.httpStatus}` : ''})`).join(', ')}` : '';
+    const skipped = this.fallbackSkipped ? `; no fallback: ${this.fallbackSkipped}` : '';
+    return `${base}${tried}${skipped}`;
   }
 }
 

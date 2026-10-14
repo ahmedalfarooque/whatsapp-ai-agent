@@ -81,6 +81,9 @@ export const businessSettingsInputSchema = z
     responseTimePromise: z.string().max(200).nullable(),
     /** null = voice notes are not transcribed for this business; a model id = the OpenRouter model that receives the audio. */
     openRouterAudioModel: z.string().min(1).max(100).nullable(),
+    /** Comma-separated OpenRouter model ids tried, ONE of them, when the chat model fails for a model-specific reason; null = the shared
+     *  env list (OPENROUTER_FALLBACK_MODELS). '' = no fallback for this business. Free (price 0) ids are the only ones tried after a 402. */
+    openRouterFallbackModels: z.string().max(600).regex(/^(\s*[A-Za-z0-9._:/-]{1,100}\s*(,\s*[A-Za-z0-9._:/-]{1,100}\s*)*)?$/).nullable(),
   })
   .partial();
 
@@ -148,6 +151,8 @@ export interface BusinessSettings {
   responseTimePromise: string | null;
   /** null = voice notes are not transcribed for this business. */
   openRouterAudioModel: string | null;
+  /** Chat models tried (one of them) when the chat model fails for a model-specific reason; see openRouterClient. Empty = none. */
+  openRouterFallbackModels: string[];
 }
 
 /** Official Google Maps link for Rowad Alfa Auto Care (overridable from the dashboard). */
@@ -210,6 +215,7 @@ interface BusinessSettingsRow {
   reminder_max_attempts: number;
   response_time_promise: string | null;
   open_router_audio_model: string | null;
+  open_router_fallback_models: string | null;
 }
 
 /** business_settings.id == whatsapp account id (one profile per business). */
@@ -225,7 +231,8 @@ function readRow(accountId: number): BusinessSettingsRow {
             google_maps_url, latitude, longitude, friday_hours_start, friday_hours_end,
             location_notes_ar, location_notes_en, logo_document_id, staff_whatsapp_number,
             contact_phone, contact_email, weekly_hours, closures, after_hours_enabled, direct_call_enabled, callback_window_minutes,
-            reminder_lead_minutes, reminder_repeat_minutes, reminder_max_attempts, response_time_promise, open_router_audio_model
+            reminder_lead_minutes, reminder_repeat_minutes, reminder_max_attempts, response_time_promise, open_router_audio_model,
+            open_router_fallback_models
      FROM business_settings WHERE id = ?`,
   );
   let row = select.get(accountId) as BusinessSettingsRow | undefined;
@@ -306,6 +313,8 @@ export function getBusinessSettings(accountId: number = currentAccountId()): Bus
     reminderMaxAttempts: row.reminder_max_attempts ?? 3,
     responseTimePromise: row.response_time_promise,
     openRouterAudioModel: row.open_router_audio_model ?? (env.OPENROUTER_AUDIO_MODEL || null),
+    // The fallback chat models: this business's own list, else the shared env list; a new business inherits the shared list unchanged.
+    openRouterFallbackModels: csvToList(row.open_router_fallback_models ?? env.OPENROUTER_FALLBACK_MODELS),
   };
 }
 
@@ -459,6 +468,7 @@ export function getBusinessSettingsOverrides(accountId: number = currentAccountI
     reminderMaxAttempts: row.reminder_max_attempts !== 3,
     responseTimePromise: row.response_time_promise !== null,
     openRouterAudioModel: row.open_router_audio_model !== null,
+    openRouterFallbackModels: row.open_router_fallback_models !== null,
   };
 }
 
@@ -507,6 +517,7 @@ const COLUMN_MAP: Record<keyof BusinessSettingsPatch, string> = {
   reminderMaxAttempts: 'reminder_max_attempts',
   responseTimePromise: 'response_time_promise',
   openRouterAudioModel: 'open_router_audio_model',
+  openRouterFallbackModels: 'open_router_fallback_models',
 };
 
 /** Columns whose shared default is a non-null value: a `null` patch means "back to the default", never SQL NULL. */

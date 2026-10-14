@@ -1024,6 +1024,7 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
           ${textField('model', 'Model for this business', 'Applies to the selected business only; the key above is shared by all of them. Leave the key empty to change only the model. openrouter/free costs nothing but is often rate limited, refused by your OpenRouter privacy settings, or answers empty — for dependable replies name a specific model, for example openai/gpt-4o-mini (paid). Saving tests the model with one tiny request.', aiConfig.model)}
           ${textField('visionModel', 'Vision model (customer pictures)', 'The model that is shown the actual photo a customer sends, so the assistant identifies what is in it (a car, a part, a building) before answering. Leave EMPTY to use this business\'s chat model above (it must accept image input — openai/gpt-4.1-mini does; openrouter/free does NOT and answers 404 to pictures). If the model named here refuses pictures, the chat model is tried once. Saving tests it with one tiny picture.', aiConfig.visionModel)}
           ${textField('replyLanguage', 'Reply language override', 'Leave EMPTY for the shared rule every business uses: the assistant answers in the language of the customer\'s latest message (Arabic, English, Malayalam, Chinese, French, …) and switches when the customer switches. Enter a code such as ar or en only if this business must always reply in that one language.', aiConfig.replyLanguage || '')}
+          ${textField('fallbackModels', 'Fallback chat models (comma-separated)', 'Tried ONE at a time, with the same conversation, only when the chat model fails for a model-specific reason (refused, provider error, rate limit, empty answer). After an HTTP 402 (credit exhausted / token cap) only a FREE model (price 0 in the OpenRouter catalog) is tried, once. A rejected key or a network problem is never "solved" by switching. Leave EMPTY to inherit the shared default; enter the word none to disable fallback for this business. Free OpenRouter endpoints are unavailable while the account enforces Zero Data Retention (openrouter.ai/settings/privacy).', aiConfig.fallbackModels || '')}
           ${textField('audioModel', 'Audio model (customer voice notes)', 'The model that is given the actual recording when a customer sends a voice note, so the assistant answers what was said. It must accept audio input (for example google/gemini-2.5-flash, paid). Leave EMPTY and voice notes are not transcribed: the customer is told so and asked to type. Nothing paid is chosen for you.', aiConfig.audioModel || '')}
           <div class="toolbar" style="margin-top:8px">
             <button type="submit" class="btn primary">Save &amp; Test AI</button>
@@ -1109,7 +1110,7 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
 
     view.querySelector('#ai-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const payload = readFormFields(e.target, ['apiKey', 'model', 'visionModel', 'replyLanguage', 'audioModel']);
+      const payload = readFormFields(e.target, ['apiKey', 'model', 'visionModel', 'replyLanguage', 'audioModel', 'fallbackModels']);
       const result = view.querySelector('#ai-result');
       result.textContent = 'Testing…';
       try {

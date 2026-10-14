@@ -1222,7 +1222,10 @@ export function createDashboardRouter(): Router {
     const replyLanguage = typeof req.body?.replyLanguage === 'string' ? req.body.replyLanguage.trim().toLowerCase() : undefined;
     // The AUDIO model (the one given customer voice notes) is per business and optional: '' = voice notes are not transcribed.
     const audioModel = typeof req.body?.audioModel === 'string' ? req.body.audioModel.trim() : undefined;
-    if (!apiKey && !model && !visionModel && replyLanguage === undefined && audioModel === undefined) {
+    // The FALLBACK chat models are per business and optional: '' = inherit the shared env list, 'none' = no fallback for this business.
+    const fallbackModelsRaw = typeof req.body?.fallbackModels === 'string' ? req.body.fallbackModels.trim() : undefined;
+    const fallbackModels = fallbackModelsRaw === undefined ? undefined : /^none$/i.test(fallbackModelsRaw) ? '' : fallbackModelsRaw.split(',').map((s: string) => s.trim()).filter(Boolean).join(',');
+    if (!apiKey && !model && !visionModel && replyLanguage === undefined && audioModel === undefined && fallbackModels === undefined) {
       res.status(400).json({ error: 'validation_failed', fields: ['apiKey', 'model'] });
       return;
     }
@@ -1242,7 +1245,13 @@ export function createDashboardRouter(): Router {
       res.status(400).json({ error: 'validation_failed', fields: ['audioModel'] });
       return;
     }
+    if (fallbackModels !== undefined && fallbackModels !== '' && !fallbackModels.split(',').every((m: string) => /^[A-Za-z0-9._:/-]{1,100}$/.test(m))) {
+      res.status(400).json({ error: 'validation_failed', fields: ['fallbackModels'] });
+      return;
+    }
     if (audioModel !== undefined) updateBusinessSettings({ openRouterAudioModel: audioModel || null }); // '' = voice notes are not transcribed
+    // '' (blank field) = back to the shared list; 'none' was turned into '' above and is stored as '' = no fallback: the two are told apart here.
+    if (fallbackModels !== undefined) updateBusinessSettings({ openRouterFallbackModels: fallbackModelsRaw === '' ? null : fallbackModels });
     if (apiKey) setSecret('OPENROUTER_API_KEY', apiKey, req.adminUserId as number);
     if (model) updateBusinessSettings({ openRouterModel: model });
     if (visionModel) updateBusinessSettings({ openRouterVisionModel: visionModel });
@@ -1272,6 +1281,7 @@ export function createDashboardRouter(): Router {
         visionModel: settings.openRouterVisionModel, visionStatus: visionProbe?.status ?? null,
         replyLanguage: settings.aiReplyLanguage,
         audioModel: settings.openRouterAudioModel,
+        fallbackModels: settings.openRouterFallbackModels.join(', '),
       });
     } catch (error) {
       logger.error({ error }, 'dashboard: AI configure/test threw unexpectedly');

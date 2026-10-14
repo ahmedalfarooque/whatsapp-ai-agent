@@ -15,6 +15,7 @@ import {
   ACTIVE_FOLLOWUP_STATUSES,
   addFollowupEvent,
   getFollowup,
+  activeFollowupsForCustomer,
   getFollowupAnyAccount,
   insertFollowup,
   updateFollowup,
@@ -136,6 +137,8 @@ function scheduleJobsFor(row: FollowupRequest, settings: BusinessSettings, db: D
   }
 }
 
+const DUPLICATE_WINDOW_MS = 2 * 60_000;
+
 /** Creates one request: validates, persists, notifies staff, schedules the jobs. Returns the stored row (status tells the caller what to say). */
 export function createFollowup(input: CreateFollowupInput, db: Database.Database = getDb(), accountId: number = currentAccountId()): FollowupRequest {
   const now = input.now ?? new Date();
@@ -143,6 +146,16 @@ export function createFollowup(input: CreateFollowupInput, db: Database.Database
   const type = input.appointmentTypeKey ? getAppointmentType(input.appointmentTypeKey, accountId, db) : undefined;
   if (input.appointmentTypeKey && (!type || !type.enabled)) throw new FollowupError('unknown appointment type', 400, 'unknown_type');
   const asap = !input.requestedAt;
+  // A customer's identical request within two minutes (the same contact method and the same time / ASAP) is the SAME request: a repeated
+  // webhook delivery, a double tap or a re-sent message must never create a second row, a second staff alert or a second reminder.
+  if ((input.source ?? 'customer') === 'customer') {
+    const wanted = input.requestedAt ? iso(input.requestedAt) : null;
+    const twin = activeFollowupsForCustomer(input.customerId, db, accountId).find((r) => r.contact_method === input.contactMethod && (r.requested_at ?? null) === wanted && (r.appointment_type_key ?? null) === (type?.key ?? null) && now.getTime() - new Date(r.created_at).getTime() < DUPLICATE_WINDOW_MS);
+    if (twin) {
+      logger.info({ account: accountId, id: twin.id, reference: twin.reference }, '[FOLLOWUP] identical request repeated within the duplicate window; the existing one is returned');
+      return twin;
+    }
+  }
   let status: FollowupStatus;
   let eligibleAt: string | null = null;
   let windowEndAt: string | null = null;

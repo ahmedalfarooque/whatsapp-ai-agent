@@ -56,6 +56,7 @@ import { runCart } from '../cart/cartFlow';
 import { isCartState } from '../cart/cartStates';
 import { detectHumanHandoffIntent } from '../handoff/intent';
 import { customerLeavesHold, getHold, requestHandoff, type Handoff } from '../handoff/handoffRepo';
+import { createStaffNotification } from '../notifications/staffNotifications';
 
 export interface ProcessDependencies {
   /** The knowledge base of the account the message belongs to. */
@@ -286,6 +287,13 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   if (msg.type === 'text') {
     const intent = detectHumanHandoffIntent(msg.text, { inGuidedFlow: inGuidedFlow(customer.menu_state) });
     if (intent.requested) {
+      // Nobody is there while the business is closed: no silent hold. The customer is told so honestly, the team is notified, and the
+      // callback / message choices are offered — the assistant keeps answering questions in the meantime.
+      if (closedForHandoff(ctx)) {
+        logger.info({ waId: maskedId, rule: intent.rule }, 'customer asked for a person while the business is closed: team notified, choices offered');
+        await handoffWhileClosed(ctx, 'typed a request for a person');
+        return;
+      }
       requestHandoff({ customerId: customer.id, conversationId: conversation.id, source: 'customer', reason: 'Customer requested a human' });
       setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
       logger.info({ waId: maskedId, rule: intent.rule }, 'customer asked for a person: handoff requested');
@@ -388,7 +396,8 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   let kind: 'ai' | 'error' = 'ai';
   let failureDetail = 'AI failed; fallback sent';
   let verdict: 'send' | 'ai_handoff' | 'dropped' = 'send';
-  let replacedByAfterHours: 'notice' | 'menu' | null = null;
+  let replacedByLocalFallback = false;
+  let servedByNote: string | null = null;
   let heldBy: Handoff | null = null;
   const visionNote = [analysis ? (analysis.ok ? `picture analysed in ${(analysis.durationMs / 1000).toFixed(1)} s (${analysis.model}, confidence ${analysis.confidence})` : `picture not analysed (${analysis.reason})`) : null, ...mediaNotes].filter(Boolean).join(' · ') || null;
   try {
@@ -406,8 +415,9 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
       ({ history, systemPrompt } = buildPrompt(promptScale));
       loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
     }
-    logger.info({ waId: maskedId, account: currentAccountId(), totalMs: Date.now() - startedAt, visionMs: analysis?.durationMs ?? 0, picture: Boolean(picture), rounds: loopResult.generatedMessages.filter((g) => g.content.startsWith('[requested tools:')).length + 1 }, 'AI reply ready');
+    logger.info({ waId: maskedId, account: currentAccountId(), totalMs: Date.now() - startedAt, visionMs: analysis?.durationMs ?? 0, picture: Boolean(picture), model: loopResult.servedBy?.model, fallbackFrom: loopResult.servedBy?.fallbackFrom, rounds: loopResult.generatedMessages.filter((g) => g.content.startsWith('[requested tools:')).length + 1 }, 'AI reply ready');
     finalText = loopResult.finalText;
+    if (loopResult.servedBy?.fallbackFrom) servedByNote = `fallback model ${loopResult.servedBy.model} answered (${loopResult.servedBy.fallbackFrom}: ${loopResult.servedBy.fallbackReason ?? 'failed'})`;
     // The model took a while: ownership may have changed meanwhile. Decide from the database NOW, before anything is stored or sent.
     heldBy = getHold(customer.id);
     if (heldBy && heldBy.source === 'ai' && heldBy.state === 'HUMAN_REQUESTED') {
@@ -441,40 +451,31 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
       },
       'agent loop failed for inbound message',
     );
+    // The activity names every model tried and the real cause for staff (the dashboard shows "AI credits exhausted" / "AI model unavailable").
     if (responseProblem) failureDetail = `AI failed; fallback sent (${responseProblem.describe()})`;
-    if (responseProblem?.reason === 'payment_required') {
-      // The OpenRouter credit is exhausted (or too low for this prompt): every message fails the same way until it is topped up. The customer
-      // hears the apology once per window; the activity names the real cause for staff (the dashboard shows "AI credits exhausted").
-      if (!allowCredentialFallback(currentAccountId(), msg.waId) && afterHoursInsteadMode(ctx) === null) {
-        recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: 'OpenRouter credits exhausted (HTTP 402) — apology already sent recently; top up at openrouter.ai/settings/credits' });
-        return;
-      }
-      failureDetail = `AI failed; fallback sent (${responseProblem.describe()}). Top up OpenRouter credits (openrouter.ai/settings/credits).`;
-    }
-    if (credentialProblem) {
-      // The provider key is unusable: every message would fail the same way. Tell the customer once in a while, not on every message.
-      if (!allowCredentialFallback(currentAccountId(), msg.waId) && afterHoursInsteadMode(ctx) === null) {
-        recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'suppressed', detail: `AI credential problem (${credentialProblem.reason}) — apology already sent recently` });
-        return;
-      }
-      failureDetail = `AI credential problem (${credentialProblem.reason}): fallback sent. Enter a valid OpenRouter key in the dashboard (Providers).`;
-    }
+    if (responseProblem?.reason === 'payment_required') failureDetail = `AI failed; fallback sent (${responseProblem.describe()}). Top up OpenRouter credits (openrouter.ai/settings/credits).`;
+    if (credentialProblem) failureDetail = `AI credential problem (${credentialProblem.reason}): fallback sent. Enter a valid OpenRouter key in the dashboard (Providers).`;
     heldBy = getHold(customer.id); // staff may have taken over while the model call was failing
     if (heldBy) {
       verdict = 'dropped';
     } else {
       kind = 'error';
-      // Closed and the assistant is unavailable: a bare "something went wrong" helps nobody; the closed notice with the callback / staff
-      // message choices (all handled without the AI) is sent instead, below. Otherwise the neutral fallback as before.
-      replacedByAfterHours = afterHoursInsteadMode(ctx);
-      if (!replacedByAfterHours) {
-        finalText = resolveTemplate('fallback_error', language);
-        appendMessage(conversation.id, { role: 'assistant', content: finalText, direction: MESSAGE_DIRECTION.OUTBOUND });
-      }
+      // The assistant cannot answer (provider down, credit exhausted, every model refused): a bare "something went wrong" helps nobody. The
+      // LOCAL automated reply is sent instead — clearly marked as not an AI answer, with the opening hours / next opening when closed, and
+      // the callback / staff-message choices, all of which work without the AI. Repeated failures within a window get the short reminder of
+      // the choices, never silence. Only a customer inside a guided request (or without a known language) still gets the neutral apology.
+      replacedByLocalFallback = true;
     }
   }
 
   if (verdict === 'ai_handoff') {
+    if (closedForHandoff(ctx)) {
+      // The assistant asked for a person while nobody is there: the hold its tool created is released (a silent night helps nobody) and the
+      // customer gets the honest closed hand-over with the follow-up choices instead; the team is notified.
+      customerLeavesHold(customer.id);
+      await handoffWhileClosed(ctx, 'the assistant handed the conversation to staff');
+      return;
+    }
     setCustomerMenuState(customer.id, MENU_STATES.MAIN_MENU, null);
     await replyTemplate(ctx, 'human_support', 'human_handoff', {}, 'The assistant handed the conversation to staff');
     await replyOutOfHours(ctx);
@@ -485,19 +486,20 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     return;
   }
 
-  if (replacedByAfterHours) {
-    if (await sendAfterHoursInstead(ctx, replacedByAfterHours)) {
-      recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: [failureDetail, 'business closed: the closed notice and callback / message choices were sent instead', visionNote].filter(Boolean).join(' · ') });
+  if (replacedByLocalFallback) {
+    const sentHow = await sendAssistantUnavailable(ctx);
+    if (sentHow) {
+      recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: [failureDetail, sentHow, visionNote].filter(Boolean).join(' · ') });
       return;
     }
-    // The choices could not be sent: fall back to the neutral apology so the customer is never left without an answer.
+    // The choices could not be offered (guided request, unknown language, send failure): the neutral apology so the customer is never left without an answer.
     finalText = resolveTemplate('fallback_error', language);
     appendMessage(conversation.id, { role: 'assistant', content: finalText, direction: MESSAGE_DIRECTION.OUTBOUND });
   }
 
   try {
     await sendTextMessage(msg.waId, finalText);
-    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? [failureDetail, visionNote].filter(Boolean).join(' · ') : [`answered in ${((Date.now() - startedAt) / 1000).toFixed(1)} s`, visionNote].filter(Boolean).join(' · ') });
+    recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? [failureDetail, visionNote].filter(Boolean).join(' · ') : [`answered in ${((Date.now() - startedAt) / 1000).toFixed(1)} s`, servedByNote, visionNote].filter(Boolean).join(' · ') });
   } catch (error) {
     recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: 'Reply could not be sent' });
     logger.error({ waId: maskedId, error }, 'failed to send reply to customer after processing');
@@ -509,44 +511,94 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
 /** Once per window while the business is closed: the closed notice (hours, next opening) and the follow-up choices, then the menu state waits for a choice. */
 const AFTER_HOURS_WINDOW_MS = 6 * 60 * 60_000;
 /**
- * What the customer can be offered while the business is closed and after-hours help is on (language known, no guided flow, no staff hold):
- * 'notice' = the closed notice plus the follow-up menu; 'menu' = they are already in that menu, so just the menu again; null = neither.
+ * The customer (fresh from the database) who can be given the after-hours follow-up choices: the business has after-hours help on and real
+ * hours, is closed NOW, and the customer has a known language and is not inside a guided request. Null otherwise. Business hours decide the
+ * CLOSURE NOTICE and staff availability — never whether the assistant may answer (it answers 24/7 whenever the provider works).
  */
-function afterHoursInsteadMode(ctx: ReplyContext): 'notice' | 'menu' | null {
+function closedCustomer(ctx: ReplyContext): { biz: ReturnType<typeof getBusinessSettings>; fresh: Customer; language: CustomerLanguage } | null {
   const biz = getBusinessSettings();
   if (!biz.afterHoursEnabled || !biz.hoursConfigured || isOutsideBusinessHours(biz) !== true) return null;
   const fresh = getCustomerById(ctx.customer.id, undefined, null);
-  if (!fresh || !fresh.language || inGuidedFlow(fresh.menu_state) || getHold(fresh.id)) return null;
-  if (fresh.menu_state === FOLLOWUP_STATES.MENU) return 'menu';
-  return isFollowupState(fresh.menu_state) ? null : 'notice';
+  if (!fresh || !fresh.language || inGuidedFlow(fresh.menu_state)) return null;
+  return { biz, fresh, language: fresh.language };
 }
 
-/** The AI could not answer and the business is closed: offer the callback / staff-message choices (handled without the AI). True when they were sent. */
-async function sendAfterHoursInstead(ctx: ReplyContext, mode: 'notice' | 'menu'): Promise<boolean> {
-  if (mode === 'notice') return maybeAfterHoursNotice(ctx, true);
-  const fresh = getCustomerById(ctx.customer.id, undefined, null);
-  if (!fresh?.language) return false;
+/** True when a request for a person should get the honest "closed" hand-over (team notified, choices offered) instead of a silent staff hold. */
+function closedForHandoff(ctx: ReplyContext): boolean {
+  return closedCustomer(ctx) !== null;
+}
+
+/**
+ * The customer asked for a person (typed it, chose it in the menu, or the assistant decided so) while the business is closed: the team gets
+ * ONE persistent notification per customer per window, the customer is told honestly that nobody is available until {next_open} and is
+ * offered the follow-up choices (callback now / at a time, staff WhatsApp message) — handled without the AI — while the assistant stays
+ * available for questions. No hold is created, so the night never goes silent.
+ */
+async function handoffWhileClosed(ctx: ReplyContext, how: string): Promise<void> {
+  const closed = closedCustomer(ctx);
+  if (!closed) return;
+  const { biz, fresh, language } = closed;
+  const windowKey = Math.floor(Date.now() / AFTER_HOURS_WINDOW_MS);
   try {
-    const nextCtx: ReplyContext = { ...ctx, customer: fresh, language: fresh.language };
-    await replyTemplate(nextCtx, 'followup_invalid_option', 'rule', {}, 'AI unavailable while closed: asked the customer to pick a follow-up option');
-    const menu = followupMenuSend(getBusinessSettings(), fresh.language);
-    await replyTemplate(nextCtx, menu.key, 'rule', menu.vars ?? {});
-    return true;
+    createStaffNotification({
+      accountId: currentAccountId(), kind: 'handoff_after_hours', title: 'Customer asked for a person while closed',
+      body: `${fresh.display_name ?? ctx.msg.contactName ?? 'A customer'} (${maskWaId(ctx.msg.waId)}) ${how} outside opening hours. They were told nobody is available until ${(() => { const n = nextOpening(biz); return n ? describeMoment(biz, n, 'en') : 'the next opening'; })()} and offered a callback / message. Open the conversation to reply.`,
+      customerId: fresh.id, ring: false, dedupeKey: `handoff_closed:${currentAccountId()}:${fresh.id}:${windowKey}`,
+    });
   } catch (error) {
-    logger.warn({ waId: maskWaId(ctx.msg.waId), error: String((error as Error).message) }, 'could not re-send the follow-up menu');
-    return false;
+    logger.warn({ waId: maskWaId(ctx.msg.waId), error: String((error as Error).message) }, 'could not record the after-hours staff notification');
+  }
+  const nextCtx: ReplyContext = { ...ctx, customer: fresh, language };
+  const next = nextOpening(biz);
+  const menu = followupMenuSend(biz, language);
+  setCustomerMenuState(fresh.id, FOLLOWUP_STATES.MENU, null);
+  setCustomerAfterHoursNotified(fresh.id); // the closed notice is not repeated after this
+  await replyTemplate(nextCtx, 'human_support_closed', 'human_handoff', { next_open: next ? describeMoment(biz, next, language) : '' }, `Asked for a person while closed (${how}): team notified, no hold; callback / message choices offered`);
+  await replyTemplate(nextCtx, menu.key, 'rule', menu.vars ?? {});
+}
+
+/**
+ * The LOCAL automated reply when the assistant cannot answer. First failure in a window: the "assistant unavailable" text (closed variant
+ * with the next opening, or the open variant) and the follow-up choices; further failures within the window: the short reminder of the
+ * choices (never silence, never a repeated closure notice). Returns a note for the activity, or null when it could not be sent (guided
+ * request, unknown language, send failure) so the caller sends the neutral apology.
+ */
+async function sendAssistantUnavailable(ctx: ReplyContext): Promise<string | null> {
+  const biz = getBusinessSettings();
+  const fresh = getCustomerById(ctx.customer.id, undefined, null);
+  if (!fresh || !fresh.language || inGuidedFlow(fresh.menu_state)) return null;
+  const language = fresh.language;
+  const nextCtx: ReplyContext = { ...ctx, customer: fresh, language };
+  const closed = biz.afterHoursEnabled && biz.hoursConfigured && isOutsideBusinessHours(biz) === true;
+  const full = allowCredentialFallback(currentAccountId(), ctx.msg.waId);
+  try {
+    if (!full) {
+      if (!isFollowupState(fresh.menu_state)) setCustomerMenuState(fresh.id, FOLLOWUP_STATES.MENU, null);
+      await replyTemplate(nextCtx, 'assistant_unavailable_again', 'rule', {}, 'AI unavailable again within the window: short reminder of the follow-up choices');
+      return 'automated reminder of the callback / message choices sent (not an AI answer)';
+    }
+    const next = nextOpening(biz);
+    const vars: TemplateVars = closed ? { next_open: next ? describeMoment(biz, next, language) : '' } : {};
+    const menu = followupMenuSend(biz, language);
+    setCustomerMenuState(fresh.id, FOLLOWUP_STATES.MENU, null);
+    if (closed) setCustomerAfterHoursNotified(fresh.id);
+    await replyTemplate(nextCtx, closed ? 'assistant_unavailable_closed' : 'assistant_unavailable_open', 'rule', vars, `AI unavailable (${closed ? 'business closed' : 'business open'}): automated reply and callback / message choices sent instead`);
+    await replyTemplate(nextCtx, menu.key, 'rule', menu.vars ?? {});
+    return closed ? 'business closed: automated closed reply and callback / message choices sent instead (not an AI answer)' : 'business open: automated reply and callback / message choices sent instead (not an AI answer)';
+  } catch (error) {
+    logger.warn({ waId: maskWaId(ctx.msg.waId), error: String((error as Error).message) }, 'could not send the automated unavailable reply');
+    return null;
   }
 }
 
-/** `force` skips the once-per-window rule: used when the AI could not answer, so the customer gets the callback / message choices instead of a bare error. Returns true when they were sent. */
-async function maybeAfterHoursNotice(ctx: ReplyContext, force = false): Promise<boolean> {
-  if (afterHoursInsteadMode(ctx) !== 'notice') return false;
-  const biz = getBusinessSettings();
-  const fresh = getCustomerById(ctx.customer.id, undefined, null)!;
+/** After a successful answer while closed: the closed notice (hours, next opening) and the follow-up choices, once per window, never inside a follow-up state. */
+async function maybeAfterHoursNotice(ctx: ReplyContext): Promise<boolean> {
+  const closed = closedCustomer(ctx);
+  if (!closed || isFollowupState(closed.fresh.menu_state) || getHold(closed.fresh.id)) return false;
+  const { biz, fresh, language } = closed;
   const last = fresh.after_hours_notified_at ? Date.parse(fresh.after_hours_notified_at) : 0;
-  if (!force && Number.isFinite(last) && Date.now() - last < AFTER_HOURS_WINDOW_MS) return false;
+  if (Number.isFinite(last) && Date.now() - last < AFTER_HOURS_WINDOW_MS) return false;
   setCustomerAfterHoursNotified(fresh.id);
-  const language = fresh.language as CustomerLanguage; // afterHoursInsteadMode() has checked it is known
   const nextCtx: ReplyContext = { ...ctx, customer: fresh, language };
   try {
     const notice = afterHoursNoticeSend(biz, language);
@@ -584,6 +636,11 @@ async function applyRoute(ctx: ReplyContext, route: RouteResult): Promise<void> 
     customer = setCustomerMenuState(customer.id, route.state === undefined ? customer.menu_state : route.state, flowData);
   }
   if (route.kind === 'human_handoff') {
+    // "Talk to staff" while the business is closed: no silent hold; the honest closed hand-over and the follow-up choices instead.
+    if (closedForHandoff({ ...ctx, customer })) {
+      await handoffWhileClosed({ ...ctx, customer, language: (route.language ?? customer.language) || 'en' }, 'chose "Talk to staff" in the menu');
+      return;
+    }
     requestHandoff({ customerId: customer.id, conversationId: ctx.conversationId, source: 'menu', reason: 'Customer chose "Talk to staff"' });
     customer = getCustomerById(customer.id, undefined, null) ?? customer;
   }

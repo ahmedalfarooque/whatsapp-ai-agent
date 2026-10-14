@@ -31,6 +31,8 @@ export interface ChatCompletionChoice {
 export interface ChatCompletionResponse {
   id?: string;
   choices: ChatCompletionChoice[];
+  /** Added by the client: which model produced this answer and, when a fallback was used, which model failed first and why (safe text only). */
+  servedBy?: { model: string; fallbackFrom?: string; fallbackReason?: string };
 }
 
 /** The text of a message's content whatever its shape (a string or content parts; image parts contribute nothing). */

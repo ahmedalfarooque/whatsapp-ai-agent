@@ -24,9 +24,33 @@ export const FOLLOWUP_TEMPLATE_KEYS = [
   'followup_time_closed', 'followup_confirm_scheduled', 'followup_confirm_asap_open', 'followup_confirm_asap_closed', 'followup_confirm_whatsapp',
   'followup_cancel_list', 'followup_cancel_none', 'followup_cancelled', 'followup_save_failed', 'followup_direct_call', 'followup_invalid_option',
   'followup_staff_alert', 'followup_staff_reminder', 'followup_staff_overdue', 'followup_staff_eligible',
+  'assistant_unavailable_closed', 'assistant_unavailable_open', 'assistant_unavailable_again', 'human_support_closed',
 ] as const;
 
 export const FOLLOWUP_TEMPLATES: FollowupTemplateDefault[] = [
+  // ---- The local automated replies used when the AI assistant cannot answer (provider down, credit exhausted, every model refused). They are
+  // NOT AI answers and say so; they never state a business fact beyond the configured hours / next opening, and they always lead to the
+  // follow-up choices (callback, staff message, agreed time), which work without the AI.
+  {
+    key: 'assistant_unavailable_closed', category: CAT, titleAr: 'المساعد غير متاح (مغلق)', titleEn: 'Assistant Unavailable (closed)',
+    ar: '🤖 رد تلقائي: لا يستطيع المساعد الذكي الإجابة بالتفصيل الآن.\n\n🕒 {business} مغلق حالياً وسنعود {next_open}.\n\nيمكنك اختيار إحدى الطرق التالية وسيتواصل معك فريقنا:',
+    en: '🤖 Automated reply: our smart assistant cannot answer in detail right now.\n\n🕒 {business} is currently closed; we will be back {next_open}.\n\nChoose one of the options below and our team will get back to you:',
+  },
+  {
+    key: 'assistant_unavailable_open', category: CAT, titleAr: 'المساعد غير متاح (مفتوح)', titleEn: 'Assistant Unavailable (open)',
+    ar: '🤖 رد تلقائي: لا يستطيع المساعد الذكي الإجابة بالتفصيل الآن، لكن فريقنا متاح.\n\nاختر إحدى الطرق التالية وسنتواصل معك:',
+    en: '🤖 Automated reply: our smart assistant cannot answer in detail right now, but our team is available.\n\nChoose one of the options below and we will get back to you:',
+  },
+  {
+    key: 'assistant_unavailable_again', category: CAT, titleAr: 'المساعد لا يزال غير متاح', titleEn: 'Assistant Still Unavailable',
+    ar: '🤖 رد تلقائي: المساعد لا يزال غير قادر على الإجابة. أرسل رقم خيار المتابعة (1 اتصال، 2 رسالة واتساب، 4 اختيار وقت) أو 0 للقائمة الرئيسية.',
+    en: '🤖 Automated reply: the assistant still cannot answer. Send a follow-up option number (1 callback, 2 WhatsApp message, 4 choose a time) or 0 for the main menu.',
+  },
+  {
+    key: 'human_support_closed', category: CAT, titleAr: 'طلب موظف خارج ساعات العمل', titleEn: 'Staff Requested (closed)',
+    ar: 'لا يوجد موظف متاح الآن: {business} مغلق حالياً وسنعود {next_open}.\n\nأبلغنا الفريق بطلبك. اختر كيف تحب أن نتابع معك، أو اكتب سؤالك وسيساعدك المساعد الآن:',
+    en: 'No one from our team is available right now: {business} is currently closed; we will be back {next_open}.\n\nThe team has been notified of your request. Choose how you would like us to follow up, or type your question and the assistant will help you now:',
+  },
   {
     key: 'after_hours_notice', category: CAT, titleAr: 'إشعار خارج ساعات العمل', titleEn: 'After-hours Notice',
     ar: '🕒 {business} مغلق حالياً.\n\n⏰ ساعات العمل:\n{hours}\n\nسنعود {next_open}.\n{promise}',

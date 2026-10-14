@@ -5,7 +5,36 @@
 > DOCUMENTS_PROMPT_COUNT / DOCUMENT_PROMPT_CHARS), a 402 is shown as "AI credits exhausted" on the dashboard and apologised for once per window.
 > Topping up the OpenRouter credit is the owner's action.
 
+> **Evidence 2026-10-14 (read-only, production).** The OpenRouter account shows `total_credits 0`, `total_usage 0.189` (a negative balance on the
+> free tier), so the credit-derived prompt cap kept falling (8457 → 6192 → 5458 tokens) and gpt-4.1-mini only answers small prompts. Every free
+> model (`google/gemma-4-31b-it:free`, `nvidia/nemotron-3-super-120b-a12b:free`, `nvidia/nemotron-3.5-lightning:free`,
+> `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`, and the `openrouter/free` router) answered **HTTP 404 "0 endpoints … ZDR violation
+> (account setting)"**: the account enforces **Zero Data Retention** and no free endpoint is ZDR-compliant. `thinkingmachines/inkling(-small):free`
+> answered 403 "only available on agentic harnesses". Consequence: **no free fallback is usable on this account today**, and it is not a code
+> problem — the owner either allows non-ZDR endpoints at https://openrouter.ai/settings/privacy (free, then set a free fallback) or tops up
+> credit. Until then every failed answer gets the local automated choices described in `docs/AFTER_HOURS_AND_FOLLOWUPS.md`.
+
 # The AI assistant: how a free-text message is answered
+
+## Model fallback (bounded, honest) — `src/llm/openRouterClient.ts`, `modelFallback.ts`, `modelCatalog.ts`
+
+1. The business's chat model is tried with its bounded retries (two more attempts for a rate limit / provider failure, one for an empty
+   answer; a 400-404 refusal and a 402 are never retried on the same model).
+2. The failure is **classified**: `account` (key rejected, 401/403), `network` (no HTTP answer at all), `credit` (402), `model` (refused,
+   provider error, rate limited, empty / malformed). Only `model` and `credit` may switch.
+3. **One** fallback model is chosen from the business's list (`business_settings.open_router_fallback_models`, else env
+   `OPENROUTER_FALLBACK_MODELS`; Providers page → "Fallback chat models"): skipped while cooling down after its own recent failure, skipped
+   when OpenRouter's public catalog (cached 1 h) says it lacks a capability the request needs (image / audio must be *known* to be supported;
+   a text-only model is never given a picture), and after a 402 skipped unless the catalog says it is **free** (price 0). The fallback gets
+   the **same messages** — tool results included — so a tool never runs twice and the language, knowledge and context are preserved.
+4. When the free fallback fails after a 402 (402 again, or 404 from the data policy) the account is marked **free fallback blocked** for
+   30 minutes: no model switching is attempted until then (switching cannot help an account-wide restriction).
+5. Every model tried is recorded on the error (`attempts`) and in the activity ("also tried …; no fallback: …"); a successful fallback is
+   recorded in the activity ("fallback model X answered (Y: reason)") and in the log, never with the prompt, the key or customer text.
+6. The vision step applies the same rule to its own candidates: vision model → chat model → one image-capable fallback (free only after a 402).
+
+What this does **not** promise: unlimited free generation (free models have their own daily quotas and policies), or transcription of voice
+notes without an audio-capable model (none that is both free and permitted on this account exists today).
 
 A customer's message reaches the assistant only when the guided menu has no rule for it (a number, a menu word, a language word, a
 greeting or a request for a person are handled by the menu). Everything below is per account (business); nothing is shared between accounts
