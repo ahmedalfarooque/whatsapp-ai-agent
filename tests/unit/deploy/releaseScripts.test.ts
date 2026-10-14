@@ -90,7 +90,12 @@ describe('release-full.ps1 (the full-release wrapper) and release-full.sh (the s
     expect(sh).toMatch(/set -e/);
     expect(sh.indexOf('L3005=$(ss -ltn | grep -c \':3005 \' || true)')).toBeGreaterThan(sh.indexOf('systemctl restart $SVC'));
   });
-  it('the server script explains its two hashes and refuses to run outside the production checkout', () => {
+  it('REGRESSION 2026-10-14: the baileys identity fingerprint counts only PAIRED identities (a placeholder creds.json without "me" must not roll a release back), and still includes registrationId and me.id', () => {
+    const line = sh.split(/\r?\n/).find((l) => l.startsWith('fp()'))!;
+    expect(line).toMatch(/m and print\('\$f',d\.get\('registrationId'\),m\)/);
+    expect(line).toContain("(d.get('me') or {}).get('id')");
+    expect(line).not.toMatch(/print\('\$f',d\.get\('registrationId'\),\(d\.get\('me'\) or \{\}\)\.get\('id'\)\)/);
+  });  it('the server script explains its two hashes and refuses to run outside the production checkout', () => {
     expect(sh).toMatch(/--base <commit production is live on> and --target <commit of origin\/master> are both required/);
     expect(sh).toMatch(/pwsh scripts\/release-full\.ps1/);
     expect(sh).toMatch(/abort server .* is not the production checkout/);
