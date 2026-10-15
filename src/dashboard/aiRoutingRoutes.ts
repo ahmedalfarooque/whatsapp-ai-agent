@@ -80,11 +80,10 @@ export function createInputFromSimple(body: unknown): AiProviderInput {
 export function updateInputFromSimple(existing: AiProviderRow, body: unknown): AiProviderInput {
   const b = (body ?? {}) as Record<string, unknown>;
   const config = str(b.config);
-  const isUrl = /^https?:\/\//i.test(config);
   const models = str(b.models) ? csv(str(b.models)) : csv(existing.models);
   return {
-    name: str(b.name) || existing.name, kind: existing.kind, baseUrl: isUrl ? (existing.kind === 'ollama' && !/\/v1\/?$/.test(config) ? `${config.replace(/\/+$/, '')}/v1` : config) : str(b.baseUrl) || existing.base_url,
-    apiKey: config && !isUrl && existing.kind !== 'ollama' ? (/^none$/i.test(config) ? '' : config) : undefined,
+    name: str(b.name) || existing.name, kind: existing.kind, baseUrl: str(b.baseUrl) || existing.base_url,
+    apiKey: config ? (/^none$/i.test(config) ? '' : config) : undefined,
     models, visionModels: csv(existing.vision_models), audioModels: csv(existing.audio_models), freeTier: existing.free_tier !== 0, supportsTools: existing.supports_tools !== 0,
     enabled: typeof b.enabled === 'boolean' ? b.enabled : existing.enabled !== 0, timeoutMs: existing.timeout_ms, notes: existing.notes,
   };
@@ -98,13 +97,13 @@ export function mayManageShared(req: Request): boolean {
 export async function runProviderTest(row: AiProviderRow): Promise<{ ok: boolean; detail: string; latencyMs: number; category?: string }> {
   const model = csv(row.models)[0] ?? csv(row.vision_models)[0];
   if (!model) return { ok: false, detail: 'No model is configured for this provider.', latencyMs: 0 };
-  const apiKey = row.kind === 'ollama' ? null : providerApiKey(row);
-  if (row.kind !== 'ollama' && !apiKey) { recordProviderTest(row.id, false, 'no usable API key saved'); return { ok: false, detail: 'No usable API key is saved for this provider.', latencyMs: 0 }; }
-  const candidate: RouteCandidate = { key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, baseUrl: row.base_url, apiKey, model, free: row.free_tier !== 0, image: null, audio: null, tools: row.supports_tools !== 0, timeoutMs: Math.min(row.timeout_ms, 30_000), local: row.kind === 'ollama', builtin: false };
+  const apiKey = providerApiKey(row);
+  if (!apiKey) { recordProviderTest(row.id, false, 'no usable API key saved'); return { ok: false, detail: 'No usable API key is saved for this provider.', latencyMs: 0 }; }
+  const candidate: RouteCandidate = { key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, baseUrl: row.base_url, apiKey, model, free: row.free_tier !== 0, image: null, audio: null, tools: row.supports_tools !== 0, timeoutMs: Math.min(row.timeout_ms, 30_000), builtin: false };
   const started = Date.now();
   try {
-    const response = await routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: 8, temperature: 0, deadline: Date.now() + 30_000, candidatesOverride: [candidate] });
-    const detail = `Model ${model} answered in ${((Date.now() - started) / 1000).toFixed(1)} s${response.servedBy?.source === 'local' ? ' (local)' : ''}.`;
+    await routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: 8, temperature: 0, deadline: Date.now() + 30_000, candidatesOverride: [candidate] });
+    const detail = `Model ${model} answered in ${((Date.now() - started) / 1000).toFixed(1)} s.`;
     recordProviderTest(row.id, true, detail);
     return { ok: true, detail, latencyMs: Date.now() - started };
   } catch (error) {
@@ -130,18 +129,18 @@ async function builtinSummary(accountId: number): Promise<Record<string, unknown
   const priced = await Promise.all(models.map(async (m) => { const info = await getModelInfo(m); return { model: m, free: info ? info.free : null, image: info ? info.image : null, tools: info ? info.tools : null }; }));
   return {
     openRouter: { hasKey: isUsableApiKey(key), source: diag.source, overrideStatus: diag.overrideStatus, chatModel: settings.openRouterModel, visionModel: settings.openRouterVisionModel, audioModel: settings.openRouterAudioModel, fallbackModels: settings.openRouterFallbackModels, models: priced, priority: BUILTIN_OPENROUTER_PRIORITY },
-    local: { configured: Boolean(env.OLLAMA_BASE_URL && csv(env.OLLAMA_MODELS).length), baseUrl: env.OLLAMA_BASE_URL ? env.OLLAMA_BASE_URL.replace(/\/\/[^/]+@/, '//') : '', models: csv(env.OLLAMA_MODELS), visionModels: csv(env.OLLAMA_VISION_MODELS), timeoutMs: env.OLLAMA_TIMEOUT_MS, priority: 900 },
     budget: { routingBudgetMs: env.AI_ROUTING_BUDGET_MS, maxRoutesPerMessage: env.AI_ROUTE_MAX_ATTEMPTS },
   };
 }
 
 /** What a business is told about its Default entry: how many shared providers can answer — never a name, an address or a key. */
-export function defaultPoolSummary(): { total: number; usable: number; disabled: number; builtinOpenRouter: boolean; builtinLocal: boolean } {
+export function defaultPoolSummary(): { total: number; usable: number; disabled: number; builtinOpenRouter: boolean } {
   const shared = listSharedProviders();
-  const usable = shared.filter((r) => r.enabled !== 0 && (r.kind === 'ollama' || providerApiKey(r) !== null)).length;
+  const usable = shared.filter((r) => r.enabled !== 0 && providerApiKey(r) !== null).length;
   return {
     total: shared.length, usable, disabled: shared.filter((r) => r.enabled === 0).length,
-    builtinOpenRouter: isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY')), builtinLocal: Boolean(env.OLLAMA_BASE_URL && csv(env.OLLAMA_MODELS).length),
+    // the built-in OpenRouter key counts as a Default member only while no shared OpenRouter provider has taken its place
+    builtinOpenRouter: isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY')) && !listSharedProviders().some((r) => r.kind === 'openrouter' && csv(r.models).length > 0),
   };
 }
 
@@ -162,9 +161,9 @@ export function buildEntries(accountId: number): Array<Record<string, unknown>> 
     }
     const row = own.get(entry.providerId as number);
     const view = row ? toView(row) : null;
-    const state: EntryState = !view ? 'empty' : !view.enabled ? 'off' : view.kind !== 'ollama' && view.keyStatus !== 'ok' ? 'no_key' : view.lastTestAt ? (view.lastTestOk ? 'ok' : 'failed') : 'untested';
+    const state: EntryState = !view ? 'empty' : !view.enabled ? 'off' : view.keyStatus !== 'ok' ? 'no_key' : view.lastTestAt ? (view.lastTestOk ? 'ok' : 'failed') : 'untested';
     const detail = !view ? '' : state === 'no_key' ? (view.keyStatus === 'undecryptable' ? 'The saved key cannot be read: enter it again.' : 'No API key saved.') : view.lastTestDetail ?? '';
-    return { key: entry.key, type: 'provider', id: entry.providerId, name: view?.name ?? '', provider: view?.kind, config: view ? (view.kind === 'ollama' ? view.baseUrl : view.keyMasked) : null, models: view?.models ?? [], position: entry.position, enabled: Boolean(view?.enabled), state, detail, lastTestAt: view?.lastTestAt ?? null };
+    return { key: entry.key, type: 'provider', id: entry.providerId, name: view?.name ?? '', provider: view?.kind, config: view ? view.keyMasked : null, models: view?.models ?? [], position: entry.position, enabled: Boolean(view?.enabled), state, detail, lastTestAt: view?.lastTestAt ?? null };
   });
 }
 
@@ -241,8 +240,8 @@ export function registerAiRoutingRoutes(router: Router): void {
       if (candidates.length === 0) { res.json({ ok: false, detail: 'No shared provider is usable right now (none configured, turned off, cooling down, or not free).' }); return; }
       const started = Date.now();
       try {
-        const response = await routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: 8, temperature: 0, deadline: Date.now() + 30_000, candidatesOverride: candidates.slice(0, 2) });
-        res.json({ ok: true, detail: `Answered in ${((Date.now() - started) / 1000).toFixed(1)} s${response.servedBy?.source === 'local' ? ' (local)' : ''}.`, latencyMs: Date.now() - started });
+        await routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: 8, temperature: 0, deadline: Date.now() + 30_000, candidatesOverride: candidates.slice(0, 2) });
+        res.json({ ok: true, detail: `Answered in ${((Date.now() - started) / 1000).toFixed(1)} s.`, latencyMs: Date.now() - started });
       } catch (error) {
         res.json({ ok: false, detail: describeFailure(error), latencyMs: Date.now() - started });
       }

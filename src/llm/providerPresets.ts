@@ -15,7 +15,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'google', name: 'Google AI Studio (Gemini)', kind: 'openai_compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', hint: 'Free tier of the Gemini API (daily limits, no card). Free-tier prompts may be used by Google to improve its products.', models: 'gemini-2.5-flash-lite,gemini-2.5-flash', keyPrefix: /^AIza/ },
   { id: 'cerebras', name: 'Cerebras', kind: 'openai_compatible', baseUrl: 'https://api.cerebras.ai/v1', hint: 'Free tier (daily token limits).', models: 'llama-3.3-70b,llama3.1-8b', keyPrefix: /^csk-/ },
   { id: 'mistral', name: 'Mistral', kind: 'openai_compatible', baseUrl: 'https://api.mistral.ai/v1', hint: 'Free experiment tier (rate limited; data may be used for training).', models: 'mistral-small-latest' },
-  { id: 'ollama', name: 'Local Ollama', kind: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', hint: 'A model running on this server (no key, no cost, slow on a CPU; never a public address). Customer replies stay off until it passes the latency and quality bar.', models: 'qwen2.5:3b-instruct-q4_K_M' },
   { id: 'custom', name: 'Custom OpenAI-compatible', kind: 'openai_compatible', baseUrl: '', hint: 'Any /v1/chat/completions endpoint.', models: '' },
 ];
 
@@ -37,31 +36,27 @@ export function detectPresetId(config: string): string | null {
 
 /**
  * The full provider input for the two-field form. `config` is an API key (the preset is recognised from its prefix, or named in `provider`)
- * or, for a local runtime / custom endpoint, the endpoint's address. Anything the preset does not decide is refused with the field names, so
- * nothing is guessed.
+ * (a custom endpoint also needs its HTTPS address under "More options"). Anything the preset does not decide is refused with the field
+ * names, so nothing is guessed.
  */
 export function resolveSimpleProvider(input: { name: string; config: string; provider?: string; models?: string; baseUrl?: string; timeoutMs?: number; enabled?: boolean }): AiProviderInput {
   const config = (input.config ?? '').trim();
   const asked = (input.provider ?? '').trim();
-  const presetId = asked && asked !== 'auto' ? asked : isUrl(config) ? (/:(11434)(\/|$)/.test(config) || /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(config) ? 'ollama' : 'custom') : detectPresetId(config);
+  const presetId = asked && asked !== 'auto' ? asked : isUrl(config) ? 'custom' : detectPresetId(config);
   const preset = PROVIDER_PRESETS.find((p) => p.id === presetId);
   if (!preset) throw new SimpleProviderError('provider_required', ['provider']);
   const models = csv(input.models) .length ? csv(input.models) : csv(preset.models);
-  const urlConfig = isUrl(config);
-  let baseUrl = input.baseUrl?.trim() || (urlConfig ? config : preset.baseUrl);
-  if (preset.kind === 'ollama' && urlConfig && !/\/v1\/?$/.test(baseUrl)) baseUrl = `${baseUrl.replace(/\/+$/, '')}/v1`;
-  if (preset.kind !== 'ollama' && urlConfig && !input.baseUrl) throw new SimpleProviderError('validation_failed', ['config']); // a cloud endpoint is selected by its key, not by pasting a URL
+  const baseUrl = input.baseUrl?.trim() || preset.baseUrl;
+  if (isUrl(config)) throw new SimpleProviderError('validation_failed', ['config']); // an endpoint is selected by its key (and "More options"), not by pasting a URL
   return {
     name: input.name,
     kind: preset.kind,
     baseUrl,
-    apiKey: preset.kind === 'ollama' || urlConfig ? undefined : config,
+    apiKey: config,
     models,
     freeTier: true,
     supportsTools: true,
-    // A local model is created SWITCHED OFF: on this server's CPU it has not met the latency / quality bar for customer replies, so it is never
-    // enabled by accident. It can still be tested; turning it on is a deliberate act (the dashboard asks to confirm).
-    enabled: input.enabled !== undefined ? input.enabled : preset.kind !== 'ollama',
-    timeoutMs: input.timeoutMs ?? (preset.kind === 'ollama' ? 45000 : 20000),
+    enabled: input.enabled !== false,
+    timeoutMs: input.timeoutMs ?? 20000,
   };
 }

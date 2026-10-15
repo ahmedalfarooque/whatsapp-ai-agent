@@ -4,7 +4,6 @@ import { env } from '../config/env';
 import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { credentialSavedAtMs, getCachedModelHealth, getCachedProviderHealth } from '../llm/aiProviderHealth';
 import { listProvidersForAccount, providerApiKey } from '../llm/providerRepo';
-import { hasLocalRoute } from '../llm/aiRouter';
 import { getBusinessSettings } from '../config/businessSettings';
 import { getAutomationSettings } from '../automation/settingsRepo';
 import { runWithAccount } from '../accounts/accountContext';
@@ -73,7 +72,7 @@ export function getAiState(accountId: number, now: number = Date.now()): AiState
   if (env.shouldUseMockProviders) return { ...base, state: 'mock', label: 'Test mode', detail: 'Mock providers: no real AI calls are made' };
   if (!settings.autoRepliesEnabled || !settings.aiRepliesEnabled) return { ...base, state: 'off', label: 'AI off', detail: 'Free-text AI replies are switched off for this account' };
   // The built-in OpenRouter key is one route among the configured providers and the local route: "needs a key" only when none exists.
-  const otherRoutes = listProvidersForAccount(accountId).some((p) => p.enabled !== 0 && (p.kind === 'ollama' || providerApiKey(p))) || hasLocalRoute(accountId);
+  const otherRoutes = listProvidersForAccount(accountId).some((p) => p.enabled !== 0 && providerApiKey(p));
   if (!isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY')) && !otherRoutes) return { ...base, state: 'needs_key', label: 'AI needs a key', detail: 'No usable AI provider key is saved' };
 
   const model = runWithAccount(accountId, () => getBusinessSettings(accountId).openRouterModel);

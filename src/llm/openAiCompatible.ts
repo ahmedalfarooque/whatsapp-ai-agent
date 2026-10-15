@@ -6,7 +6,7 @@ import type { ChatCompletionResponse, ChatMessage } from './types';
 import type { ToolDefinition } from '../tools';
 
 /**
- * ONE request to ONE OpenAI-compatible chat-completions endpoint (OpenRouter, Groq, Google AI Studio, Cerebras, Mistral, a local Ollama…),
+ * ONE request to ONE OpenAI-compatible chat-completions endpoint (OpenRouter, Groq, Google AI Studio, Cerebras, Mistral…),
  * with a hard timeout and no retry: the router decides what to try next. Every failure is a typed AiResponseError / AiCredentialError that
  * carries safe diagnostics only (category, HTTP status, model, the provider's short message) — never the key, the prompt or customer text.
  * Images and recordings are sent as data URLs / base64 parts and are never logged; this is the only place a request leaves the process.

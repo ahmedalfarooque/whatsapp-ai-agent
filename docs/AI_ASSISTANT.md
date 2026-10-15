@@ -22,8 +22,7 @@ Every AI task (chat, picture analysis, voice transcription) goes through one rou
 (table `ai_account_routing`, migration 029; `src/llm/routingOrder.ts`) and the router follows it exactly:
 
 * **Default** — ONE entry that stands for the shared pool the **Super Admin** manages on *Super Admin Settings* (profile menu): providers
-  saved with no owning business (`ai_providers.whatsapp_account_id IS NULL`), then the server's built-in OpenRouter key (priority 500) and
-  the built-in local route (priority 900). Every existing and future business inherits it (a new business starts with Default only); its keys
+  saved with no owning business (`ai_providers.whatsapp_account_id IS NULL`), then the server's built-in OpenRouter key (priority 500). Every existing and future business inherits it (a new business starts with Default only); its keys
   are never copied into a business and never shown to one (a business sees a one-line summary: how many shared providers can answer).
 * **The business's own providers** — each added on the *Providers & Legacy API* page with a **name** and an **API configuration** (an API key,
   recognised by its prefix — `gsk_` Groq, `AIza` Google AI Studio, `sk-or-` OpenRouter, `csk-` Cerebras — or the address of a local runtime);
@@ -34,8 +33,7 @@ A business reorders its entries (▲ ▼), switches Default on or off for itself
 order is saved on the server and is what the next customer message uses. Inside Default the shared providers keep the Super Admin's order
 (▲ ▼ on Super Admin Settings), then the built-in routes. Removing a shared provider needs an explicit confirmation (it names how many
 businesses inherit it); turning one off, or removing it, changes no business's order or data — Default just has fewer members, and says so.
-A **local Ollama** can be added as a provider but is created **switched off**: it does not answer customers until someone turns it on after a
-confirmation (see the evaluation below). Last, the pipeline's **deterministic customer-service fallback** (not an AI answer, labelled as
+There is **no local model**: Ollama was removed on 2026-10-15 (why, and the rollback: `docs/LOCAL_INFERENCE_EVALUATION.md`). Last, the pipeline's **deterministic customer-service fallback** (not an AI answer, labelled as
 such): the automated reply with the callback / message / next-opening choices — see `docs/AFTER_HOURS_AND_FOLLOWUPS.md`.
 Rules, all per business (`ai_free_only`, `ai_failover_enabled`, both ON by default; new businesses inherit them):
 
@@ -60,7 +58,7 @@ What is NOT promised: perfect uptime or unlimited free cloud AI (free tiers have
 Retention setting blocks every free OpenRouter endpoint until the owner changes it at openrouter.ai/settings/privacy), and local inference
 without a runtime installed on the host.
 
-**Local route, live since 2026-10-14**: Ollama v0.40.4 (official arm64 archive) in ~ubuntu/ollama, run as the user service ollama-local (systemctl --user, linger on, loopback 127.0.0.1:11434 only, MemoryMax=4G, one model at a time), model qwen2.5:1.5b-instruct-q4_K_M (986 MB), registered with OLLAMA_BASE_URL/OLLAMA_MODELS/OLLAMA_TIMEOUT_MS in the app .env (a timestamped .env.bak-* was kept). Measured on the host with a ~1.2k-token prompt: cold load 33 s, warm 11.5 s; a short Arabic greeting through the router 3.9 s; RAM stays ~9.7 GB free. A 1.5B model follows the facts it is given but is weaker than a cloud model: it is the LAST AI route, after the free cloud routes. Remove with systemctl --user disable --now ollama-local; rm -rf ~/ollama ~/.ollama and delete the three .env lines.
+**Local route: removed 2026-10-15.** It was an Ollama service on the production host (a user service, models and binaries under the application user's home). It was measured, did not meet the latency / quality bar for customer replies, and was removed from the application and the host (inventory, backup and rollback: `docs/LOCAL_INFERENCE_EVALUATION.md`). No provider kind, preset, environment setting or startup path refers to it.
 
 ## Model fallback (bounded, honest) — the built-in OpenRouter route's model list (now one source of candidates for the router above)
 

@@ -21,7 +21,6 @@ export { validateCompletion } from './openAiCompatible';
 export interface ChatCompletionRequest {
   messages: ChatMessage[];
   /** A shorter rendering of the same conversation, used for a slow local model. */
-  compactMessages?: ChatMessage[];
   tools?: ToolDefinition['schema'][];
   temperature?: number;
   maxTokens?: number;
@@ -72,7 +71,7 @@ async function pinnedCandidate(model: string, timeoutMs: number): Promise<RouteC
   const info = await getModelInfo(model);
   return {
     key: `builtin:${model}`, providerKey: 'provider:builtin', providerId: null, providerName: 'OpenRouter (built-in key)', kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey, model,
-    free: info ? info.free : null, image: info ? info.image : true, audio: info ? info.audio : true, tools: info ? info.tools : null, timeoutMs, local: false, builtin: true,
+    free: info ? info.free : null, image: info ? info.image : true, audio: info ? info.audio : true, tools: info ? info.tools : null, timeoutMs, builtin: true,
   };
 }
 
@@ -93,7 +92,7 @@ export async function chatCompletion(request: ChatCompletionRequest): Promise<Ch
   }
   const task: AiTask = request.task ?? 'chat';
   try {
-    return await routeCompletion({ task, messages: request.messages, compactMessages: request.compactMessages, tools: request.tools, temperature: request.temperature, maxTokens: request.maxTokens, deadline: request.deadline, needs: request.requires });
+    return await routeCompletion({ task, messages: request.messages, tools: request.tools, temperature: request.temperature, maxTokens: request.maxTokens, deadline: request.deadline, needs: request.requires });
   } catch (error) {
     if (error instanceof AiCredentialError && error.reason === 'rejected' && error.httpStatus) noteRejected(error.httpStatus);
     throw error;

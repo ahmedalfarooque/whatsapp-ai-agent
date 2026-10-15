@@ -363,7 +363,7 @@ Object.assign(window.I18N_AR, {
   'API / Agent name': 'اسم الواجهة / الوكيل',
   'API configuration': 'إعداد الواجهة البرمجية',
   'A name you will recognise, for example "Groq free".': 'اسم تتعرّف عليه، مثل «Groq المجاني».',
-  'Paste the API key (stored encrypted, shown masked afterwards). For a local runtime enter its address, for example http://127.0.0.1:11434.': 'الصق مفتاح الواجهة (يُخزَّن مشفّراً ويظهر مخفياً بعد ذلك). وللنموذج المحلي أدخل عنوانه، مثل http://127.0.0.1:11434.',
+  'Paste the API key (stored encrypted, shown masked afterwards).': 'الصق مفتاح الواجهة (يُخزَّن مشفّراً ويظهر مخفياً بعد ذلك).',
   'Leave empty to keep the saved configuration, or enter a new one to replace it.': 'اتركه فارغاً للإبقاء على الإعداد المحفوظ، أو أدخل إعداداً جديداً لاستبداله.',
   'Detect from the key': 'التعرّف من المفتاح',
   'More options': 'خيارات إضافية',
@@ -383,10 +383,8 @@ Object.assign(window.I18N_AR, {
   'Never use a route that may cost money (an unknown price counts as paid)': 'عدم استخدام أي مسار قد يكلّف مالاً (السعر المجهول يُعدّ مدفوعاً)',
   'Advanced — OpenRouter model overrides for this business': 'متقدم — نماذج OpenRouter الخاصة بهذا النشاط',
   'Optional. The built-in OpenRouter key is part of the Default entry above; these fields only choose the models and the reply language this business uses with it.': 'اختياري. مفتاح OpenRouter المدمج جزء من الإدخال الافتراضي أعلاه؛ وهذه الحقول تحدد فقط النماذج ولغة الرد التي يستخدمها هذا النشاط معه.',
-  'Local model (this server)': 'النموذج المحلي (هذا الخادم)',
   'KEY SAVED': 'المفتاح محفوظ', 'CONFIGURED': 'مُعدّ',
   'tried after the shared providers above': 'يُجرَّب بعد المزودات المشتركة أعلاه',
-  'A local model answers customers only after it passes the latency and quality checks.': 'لا يرد النموذج المحلي على العملاء إلا بعد اجتيازه فحوص السرعة والجودة.'
 });
 
 // Status sentences of the Default entry (sent by the server) and the compact provider list.
@@ -402,6 +400,14 @@ window.I18N_AR_PATTERNS.push(
   [/^(\d+) shared providers? available(?: \((\d+) turned off by the administrator\))?\.$/, function (n, off) { return n + ' من المزودات المشتركة متاحة' + (off ? ' (' + off + ' أوقفها المشرف)' : '') + '.'; }]
 );
 
+
+// OpenRouter as the shared Default: status badges and the "add the saved key" action.
 Object.assign(window.I18N_AR, {
-  'A local model on this server is slow and has not passed the speed and quality checks for customer replies. Turn it on anyway?': 'النموذج المحلي على هذا الخادم بطيء ولم يجتز فحوص السرعة والجودة للرد على العملاء. هل تريد تشغيله رغم ذلك؟'
+  'Added to the Default list': 'تمت الإضافة إلى قائمة الافتراضي',
+  'Add it to the Default list': 'أضفه إلى قائمة الافتراضي',
+  'The key stays on the server; it is not shown.': 'يبقى المفتاح على الخادم ولا يُعرض.',
+  'Already in the Default list above.': 'موجود بالفعل في قائمة الافتراضي أعلاه.',
+  'Add a provider above with its own key.': 'أضف مزوداً أعلاه بمفتاحه الخاص.',
+  'OpenRouter key saved on this server': 'مفتاح OpenRouter المحفوظ على هذا الخادم',
+  'ELIGIBLE MODEL TESTED': 'نموذج مؤهل ومُختبَر', 'LAST TEST FAILED': 'فشل آخر اختبار', 'NO ELIGIBLE MODEL': 'لا يوجد نموذج مؤهل'
 });

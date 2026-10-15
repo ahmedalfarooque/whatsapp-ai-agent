@@ -3,6 +3,24 @@ import { getDb } from '../memory/db';
 import { logger } from '../logger';
 import { listEnabledAccounts } from '../accounts/accountRepo';
 import { heartbeat } from './heartbeat';
+import { buildCandidates } from '../llm/aiRouter';
+import { routeStats } from '../llm/routeLog';
+
+/** Per enabled business: how many AI routes could take a chat message right now, and how the last hour went (counts only, no secrets). */
+async function aiHealth(accountIds: number[]): Promise<{ status: 'ok' | 'degraded'; accounts: Array<{ id: number; eligibleRoutes: number; lastHour: { ok: number; failed: number } }>; noEligibleRoute: number[] }> {
+  const accounts: Array<{ id: number; eligibleRoutes: number; lastHour: { ok: number; failed: number } }> = [];
+  for (const id of accountIds) {
+    try {
+      const plan = await buildCandidates(id, 'chat', { wantsTools: true });
+      const totals = routeStats(id, 1).totals;
+      accounts.push({ id, eligibleRoutes: plan.eligible.length, lastHour: { ok: totals.ok, failed: totals.failed } });
+    } catch {
+      accounts.push({ id, eligibleRoutes: 0, lastHour: { ok: 0, failed: 0 } });
+    }
+  }
+  const noEligibleRoute = accounts.filter((a) => a.eligibleRoutes === 0).map((a) => a.id);
+  return { status: noEligibleRoute.length ? 'degraded' : 'ok', accounts, noEligibleRoute };
+}
 
 export function createHealthRouter(): Router {
   const router = Router();
@@ -18,7 +36,7 @@ export function createHealthRouter(): Router {
    * never as ready) and the worker heartbeat (when a customer message was last received and finished). `status` is 'ready' when every
    * enabled account is connected, 'degraded' when at least one is not; both answer 200 because the process itself is serving.
    */
-  router.get('/readiness', (_req: Request, res: Response) => {
+  router.get('/readiness', async (_req: Request, res: Response) => {
     try {
       getDb().prepare('SELECT 1').get();
     } catch (error) {
@@ -33,10 +51,13 @@ export function createHealthRouter(): Router {
       /* a database from before the multi-account migration: no account table yet */
     }
     const notConnected = accounts.filter((a) => !a.connected).map((a) => a.id);
+    // An unavailable AI provider is reported, not hidden: with no eligible route a customer gets the automated choices and the message waits for a safe replay.
+    const ai = await aiHealth(accounts.map((a) => a.id));
     res.status(200).json({
-      status: notConnected.length ? 'degraded' : 'ready',
+      status: notConnected.length || ai.status === 'degraded' ? 'degraded' : 'ready',
       accounts,
       notConnected,
+      ai,
       workers: heartbeat(),
     });
   });

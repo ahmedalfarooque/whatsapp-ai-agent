@@ -42,7 +42,8 @@ describe('AI routing dashboard API', () => {
     expect(res.body.providers).toEqual([]);
     expect(res.body.plan.chat).toHaveProperty('eligible');
     expect(res.body.builtin.openRouter.hasKey).toBe(true);
-    expect(res.body.presets.map((p: { id: string }) => p.id)).toEqual(expect.arrayContaining(['groq', 'google', 'cerebras', 'mistral', 'ollama', 'openrouter']));
+    expect(res.body.presets.map((p: { id: string }) => p.id)).not.toContain('ollama'); // no local runtime is offered any more
+    expect(res.body.presets.map((p: { id: string }) => p.id)).toEqual(expect.arrayContaining(['groq', 'google', 'cerebras', 'mistral', 'openrouter']));
     expect(JSON.stringify(res.body)).not.toMatch(/test-openrouter-key|sk-or-/);
   });
 
@@ -111,9 +112,12 @@ describe('AI routing dashboard API', () => {
     const bad = await agent.post('/api/dashboard/ai-routing/providers').send({ name: '', kind: 'magic', baseUrl: 'ftp://x', apiKey: 'short', models: '' });
     expect(bad.status).toBe(400);
     expect(bad.body.fields).toEqual(expect.arrayContaining(['name', 'kind', 'baseUrl', 'models', 'apiKey']));
-    const exposed = await agent.post('/api/dashboard/ai-routing/providers').send({ name: 'Leaky', kind: 'ollama', baseUrl: 'http://203.0.113.9:11434/v1', models: 'qwen2.5:1.5b' });
-    expect(exposed.status).toBe(400);
-    expect(exposed.body.fields).toContain('baseUrl');
+    const clear = await agent.post('/api/dashboard/ai-routing/providers').send({ name: 'Plain http', kind: 'openai_compatible', baseUrl: 'http://api.example.test/v1', apiKey: GROQ_KEY, models: 'm' });
+    expect(clear.status).toBe(400); // an API key is never sent over plain http
+    expect(clear.body.fields).toContain('baseUrl');
+    const local = await agent.post('/api/dashboard/ai-routing/providers').send({ name: 'Old kind', kind: 'ollama', baseUrl: 'https://127.0.0.1/v1', models: 'm' });
+    expect(local.status).toBe(400); // Ollama is not a provider kind any more
+    expect(local.body.fields).toContain('kind');
   });
 
   it('switches are per business; a provider of one business is invisible to another; a shared provider is visible to both and needs the super administrator', async () => {

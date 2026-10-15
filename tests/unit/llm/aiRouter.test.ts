@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/config/env', async () => {
   const actual = await vi.importActual<typeof import('../../../src/config/env')>('../../../src/config/env');
-  return { ...actual, env: { ...actual.env, shouldUseMockProviders: false, OPENROUTER_FALLBACK_MODELS: '', OLLAMA_BASE_URL: '', OLLAMA_MODELS: '', AI_ROUTING_BUDGET_MS: 6000, AI_ROUTE_MAX_ATTEMPTS: 4 } };
+  return { ...actual, env: { ...actual.env, shouldUseMockProviders: false, OPENROUTER_FALLBACK_MODELS: '', AI_ROUTING_BUDGET_MS: 6000, AI_ROUTE_MAX_ATTEMPTS: 4 } };
 });
 
 import { env } from '../../../src/config/env';
@@ -22,13 +22,14 @@ import { listRouteLog, routeStats } from '../../../src/llm/routeLog';
 /**
  * The AI routing layer with the real client code and a scripted network. Every scenario the owner asked for is isolated here:
  * OpenRouter quota exhaustion and immediate failover, several providers and keys in priority order, strict free-only enforcement
- * (paid routes rejected, fail-closed on an unknown price), privacy-restricted / unsupported / unreachable routes, a local model that
+ * (paid routes rejected, fail-closed on an unknown price), privacy-restricted / unsupported / unreachable routes, a slow provider that
  * times out or is offline, every route failing without a message being lost, duplicate side effects, Arabic and English messages
  * crossing the failover unchanged, account isolation and key secrecy, and the routing time bound.
  */
 const mutableEnv = env as unknown as Record<string, unknown>;
 const ORK = 'sk-or-v1-routerrouterrouterrouterrouterrouter0000000';
 const GROQ_KEY = 'gsk_groqgroqgroqgroqgroqgroqgroqgroq000000000';
+const CEREBRAS_KEY = 'csk-cerebrascerebrascerebrascerebras0000';
 const GEMINI_KEY = 'AIzaSyGeminiGeminiGeminiGeminiGemini000000';
 const PAID = 'openai/gpt-4.1-mini';
 const FREE_OR = 'google/gemma-4-31b-it:free';
@@ -72,7 +73,7 @@ beforeEach(() => {
     providerIds = {
       groq: createProvider({ name: 'Groq free tier', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', apiKey: GROQ_KEY, models: ['llama-3.3-70b-versatile'], priority: 10, freeTier: true, timeoutMs: 3000 }, { accountId: ACC, updatedBy: 1 }).id,
       gemini: createProvider({ name: 'Google AI Studio', kind: 'openai_compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKey: GEMINI_KEY, models: ['gemini-2.5-flash-lite'], visionModels: ['gemini-2.5-flash-lite'], priority: 20, freeTier: true, timeoutMs: 3000 }, { accountId: ACC, updatedBy: 1 }).id,
-      local: createProvider({ name: 'Local Ollama', kind: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', models: ['qwen2.5:1.5b-instruct-q4_K_M'], priority: 900, timeoutMs: 2500 }, { accountId: ACC, updatedBy: 1 }).id,
+      local: createProvider({ name: 'Cerebras free tier', kind: 'openai_compatible', baseUrl: 'https://api.cerebras.ai/v1', apiKey: CEREBRAS_KEY, models: ['llama3.1-8b'], priority: 900, freeTier: true, timeoutMs: 2500 }, { accountId: ACC, updatedBy: 1 }).id,
     };
   }
   runWithAccount(ACC, () => updateBusinessSettings({ openRouterModel: PAID, openRouterFallbackModels: FREE_OR, aiFreeOnly: true, aiFailoverEnabled: true }, ACC));
@@ -94,14 +95,14 @@ afterEach(() => {
 const ask = (extra: Partial<Parameters<typeof chatCompletion>[0]> = {}) => runWithAccount(ACC, () => chatCompletion({ task: 'chat', messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'مرحبا، كم سعر التظليل؟' }], deadline: Date.now() + 6000, ...extra }));
 
 describe('route order, free-only enforcement and the live plan', () => {
-  it('orders routes by priority: the free providers first, then the built-in OpenRouter key (paid model REJECTED in strict mode, free one kept), then the local route; a text-only provider never gets pictures', async () => {
+  it('orders routes by priority: the free providers first, then the built-in OpenRouter key (paid model REJECTED in strict mode, free one kept), then the third own provider; a text-only provider never gets pictures', async () => {
     const plan = await explainRoutes(ACC, 'chat');
     expect(plan.freeOnly).toBe(true);
-    expect(plan.eligible.map((r) => `${r.providerName}/${r.model}`)).toEqual(['Groq free tier/llama-3.3-70b-versatile', 'Google AI Studio/gemini-2.5-flash-lite', `OpenRouter (built-in key)/${FREE_OR}`, 'Local Ollama/qwen2.5:1.5b-instruct-q4_K_M']);
+    expect(plan.eligible.map((r) => `${r.providerName}/${r.model}`)).toEqual(['Groq free tier/llama-3.3-70b-versatile', 'Google AI Studio/gemini-2.5-flash-lite', `OpenRouter (built-in key)/${FREE_OR}`, 'Cerebras free tier/llama3.1-8b']);
     expect(plan.skipped.find((s) => s.route.model === PAID)).toMatchObject({ category: 'free_only', reason: expect.stringMatching(/costs money/) });
     expect(JSON.stringify(plan)).not.toMatch(/gsk_|AIza|sk-or-/); // the plan never carries a key
     const vision = await explainRoutes(ACC, 'vision');
-    expect(vision.eligible.map((r) => r.providerName)).toEqual(['Google AI Studio', 'OpenRouter (built-in key)']); // Groq (no vision models) and the local route (no vision model) are not offered a picture
+    expect(vision.eligible.map((r) => r.providerName)).toEqual(['Google AI Studio', 'OpenRouter (built-in key)']); // Groq and Cerebras (no vision models) are not offered a picture
     expect([...vision.eligible, ...vision.skipped.map((s) => s.route)].some((r) => r.providerName === 'Groq free tier')).toBe(false); // a provider with no vision model is not even a candidate for pictures
   });
 
@@ -109,7 +110,7 @@ describe('route order, free-only enforcement and the live plan', () => {
     setModelCatalogForTests(null);
     getDb().prepare('UPDATE ai_providers SET free_tier = 0 WHERE id = ?').run(providerIds.groq);
     const plan = await explainRoutes(ACC, 'chat');
-    expect(plan.eligible.map((r) => r.providerName)).toEqual(['Google AI Studio', 'Local Ollama']);
+    expect(plan.eligible.map((r) => r.providerName)).toEqual(['Google AI Studio', 'Cerebras free tier']);
     expect(plan.skipped.filter((s) => s.category === 'free_only').map((s) => s.route.providerName)).toEqual(expect.arrayContaining(['Groq free tier', 'OpenRouter (built-in key)']));
     expect(plan.skipped.find((s) => s.route.model === PAID)!.reason).toMatch(/price unknown — treated as paid/);
     getDb().prepare('UPDATE ai_providers SET free_tier = 1 WHERE id = ?').run(providerIds.groq);
@@ -126,29 +127,17 @@ describe('route order, free-only enforcement and the live plan', () => {
 describe('failover', () => {
   it('OpenRouter quota exhaustion (402) on the only cloud key: the next eligible route answers at once, the same ARABIC messages are sent, and both attempts are logged with latency', async () => {
     getDb().prepare('UPDATE ai_providers SET enabled = 0 WHERE id IN (?, ?)').run(providerIds.groq, providerIds.gemini);
-    network({ 'openrouter.ai': [() => fail(402, CAP_402)], '127.0.0.1:11434': [() => ok('التظليل يبدأ من 450 ريال')] });
+    network({ 'openrouter.ai': [() => fail(402, CAP_402)], 'api.cerebras.ai': [() => ok('التظليل يبدأ من 450 ريال')] });
     const result = await ask();
     expect(result.choices[0]!.message.content).toBe('التظليل يبدأ من 450 ريال');
-    expect(result.servedBy).toMatchObject({ provider: 'Local Ollama', source: 'local', fallbackFrom: `OpenRouter (built-in key) · ${FREE_OR}`, fallbackReason: 'credit' });
+    expect(result.servedBy).toMatchObject({ provider: 'Cerebras free tier', fallbackFrom: `OpenRouter (built-in key) · ${FREE_OR}`, fallbackReason: 'credit' });
     expect(callsTo('openrouter.ai')).toHaveLength(1); // a 402 is never retried
-    expect(bodyOf(callsTo('127.0.0.1:11434')[0]!).messages).toEqual(bodyOf(callsTo('openrouter.ai')[0]!).messages);
-    expect(authOf(callsTo('127.0.0.1:11434')[0]!)).toBe(''); // the local route gets no key
+    expect(bodyOf(callsTo('api.cerebras.ai')[0]!).messages).toEqual(bodyOf(callsTo('openrouter.ai')[0]!).messages);
+    expect(authOf(callsTo('api.cerebras.ai')[0]!)).toBe(`Bearer ${CEREBRAS_KEY}`); // each route is called with its own key only
     const log = listRouteLog(ACC, 10);
-    expect(log.map((l) => [l.provider_name, l.outcome, l.category])).toEqual([['Local Ollama', 'ok', null], ['OpenRouter (built-in key)', 'failed', 'credit']]);
+    expect(log.map((l) => [l.provider_name, l.outcome, l.category])).toEqual([['Cerebras free tier', 'ok', null], ['OpenRouter (built-in key)', 'failed', 'credit']]);
     expect(log.every((l) => Number.isFinite(l.latency_ms) && l.latency_ms >= 0)).toBe(true);
     expect(JSON.stringify(log)).not.toMatch(/sk-or-|rules|مرحبا/); // never the key, the prompt or the customer's words
-  });
-
-  it('the local route receives the LEAN text-only request: the compact messages and no tool schemas, while a cloud route keeps the full prompt and the tools', async () => {
-    getDb().prepare('UPDATE ai_providers SET enabled = 0 WHERE id IN (?, ?)').run(providerIds.groq, providerIds.gemini);
-    network({ 'openrouter.ai': [() => fail(402, CAP_402)], '127.0.0.1:11434': [() => ok('lean answer')] });
-    const tools = [{ type: 'function' as const, function: { name: 'search_catalogues', description: 'x', parameters: { type: 'object', properties: {} } } }];
-    const result = await ask({ tools, compactMessages: [{ role: 'system', content: 'LEAN prompt' }, { role: 'user', content: 'مرحبا' }] } as never);
-    expect(result.servedBy?.source).toBe('local');
-    expect(bodyOf(callsTo('openrouter.ai')[0]!).tools).toBeDefined();
-    expect(bodyOf(callsTo('openrouter.ai')[0]!).messages[0].content).toBe('rules');
-    expect(bodyOf(callsTo('127.0.0.1:11434')[0]!).tools).toBeUndefined();
-    expect(bodyOf(callsTo('127.0.0.1:11434')[0]!).messages[0].content).toBe('LEAN prompt');
   });
 
   it('several providers and keys: Groq rate limited (Retry-After honoured as its cooldown) → Google answers; the next message skips Groq without calling it', async () => {
@@ -167,9 +156,9 @@ describe('failover', () => {
 
   it('privacy restriction (OpenRouter ZDR 404), an unsupported model (404) and an unreachable provider (network) are each classified, skipped at once and the next route is tried', async () => {
     getDb().prepare('UPDATE ai_providers SET enabled = 0 WHERE id IN (?, ?)').run(providerIds.groq, providerIds.gemini);
-    network({ 'openrouter.ai': [() => fail(404, ZDR_404)], '127.0.0.1:11434': [() => ok('local answer')] });
+    network({ 'openrouter.ai': [() => fail(404, ZDR_404)], 'api.cerebras.ai': [() => ok('local answer')] });
     const r1 = await ask();
-    expect(r1.servedBy).toMatchObject({ provider: 'Local Ollama', fallbackReason: 'policy' });
+    expect(r1.servedBy).toMatchObject({ provider: 'Cerebras free tier', fallbackReason: 'policy' });
     expect(classifyRouteFailure(new AiResponseError('model_unavailable', 404, FREE_OR, ZDR_404))).toBe('policy');
     expect(classifyRouteFailure(new AiResponseError('model_unavailable', 404, 'x/y', 'No endpoints found for x/y'))).toBe('model_unavailable');
     expect(classifyRouteFailure(new AiResponseError('model_unavailable', 400, 'x/y', 'This model does not support image input'))).toBe('capability');
@@ -187,12 +176,12 @@ describe('failover', () => {
     getDb().prepare('UPDATE ai_providers SET timeout_ms = 2000 WHERE id = ?').run(providerIds.local);
     saveAccountRouting(ACC, [{ key: providerEntryKey(providerIds.local) }, { key: DEFAULT_ENTRY }], 1); // the business tries its local runtime first
     const started = Date.now();
-    network({ '127.0.0.1:11434': [() => new Promise((_resolve, reject) => { setTimeout(() => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), 50); })], 'openrouter.ai': [() => ok('cloud answer')] });
+    network({ 'api.cerebras.ai': [() => new Promise((_resolve, reject) => { setTimeout(() => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), 50); })], 'openrouter.ai': [() => ok('cloud answer')] });
     const r = await ask();
     expect(r.servedBy).toMatchObject({ provider: 'OpenRouter (built-in key)', fallbackReason: 'timeout' });
     expect(Date.now() - started).toBeLessThan(3000);
     const plan = await explainRoutes(ACC, 'chat');
-    expect(plan.skipped.find((s) => s.route.providerName === 'Local Ollama')).toMatchObject({ category: 'cooldown', reason: expect.stringMatching(/timeout/) });
+    expect(plan.skipped.find((s) => s.route.providerName === 'Cerebras free tier')).toMatchObject({ category: 'cooldown', reason: expect.stringMatching(/timeout/) });
     resetAiRouterForTests();
     network({ 'openrouter.ai': [() => ok('cloud answer')] }); // 127.0.0.1 not scripted = connection refused
     const r2 = await ask();
@@ -208,7 +197,7 @@ describe('failover', () => {
     expect(e.reason).toBe('rate_limited'); // the first route's failure is the headline
     expect(e.attempts.map((a) => a.reason)).toEqual(['rate_limited', 'provider_error', 'payment_required', 'provider_error']);
     expect(e.attempts).toHaveLength(4); // the 4-route limit for one message
-    expect(e.describe()).toMatch(/also tried Google AI Studio[^;]*OpenRouter[^;]*Local Ollama/);
+    expect(e.describe()).toMatch(/also tried Google AI Studio[^;]*OpenRouter[^;]*Cerebras free tier/);
     expect(e.fallbackSkipped).toMatch(/strict free-only mode|costs money/);
     expect(Date.now() - started).toBeLessThan(6000);
     expect(fetchSpy).toHaveBeenCalledTimes(4); // one attempt per route, no serial retries against failing routes
@@ -315,12 +304,12 @@ describe('context limits and a crashing local runtime', () => {
     const down = await ask();
     expect(down.servedBy).toMatchObject({ provider: 'OpenRouter (built-in key)', fallbackReason: 'network' });
     fetchSpy.mockClear();
-    network({ '127.0.0.1:11434': [() => ok('local answer')], 'openrouter.ai': [() => ok('cloud answer')] });
+    network({ 'api.cerebras.ai': [() => ok('local answer')], 'openrouter.ai': [() => ok('cloud answer')] });
     const stillCooling = await ask();
     expect(stillCooling.servedBy?.provider).toBe('OpenRouter (built-in key)'); // known-failing route is not retried
-    expect(callsTo('127.0.0.1:11434')).toHaveLength(0);
+    expect(callsTo('api.cerebras.ai')).toHaveLength(0);
     resetAiRouterForTests(); // the cooldown elapsed
     const back = await ask();
-    expect(back.servedBy).toMatchObject({ provider: 'Local Ollama', source: 'local' });
+    expect(back.servedBy).toMatchObject({ provider: 'Cerebras free tier' });
   });
 });

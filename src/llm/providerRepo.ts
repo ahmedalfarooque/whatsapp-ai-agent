@@ -8,12 +8,12 @@ import { ensureAccountRouting, forgetProviderEntry } from './routingOrder';
 
 /**
  * AI providers configured in the dashboard (table ai_providers, migration 027). A provider is a chat-completions endpoint with its own
- * key: OpenRouter, any OpenAI-compatible free tier (Groq, Google AI Studio, Cerebras, Mistral, ...) or a local Ollama. A row with
+ * key: OpenRouter or any OpenAI-compatible free tier (Groq, Google AI Studio, Cerebras, Mistral, ...). A row with
  * whatsapp_account_id NULL is shared by every business; a row with an account id belongs to that business alone and is never visible
  * to, or used by, another one. Keys are encrypted with the dashboard master key (the credential_overrides framing) and are returned
  * only masked; the plaintext leaves this module solely for the HTTP Authorization header of a request to that provider.
  */
-export type ProviderKind = 'openrouter' | 'openai_compatible' | 'ollama';
+export type ProviderKind = 'openrouter' | 'openai_compatible';
 
 export interface AiProviderRow {
   id: number;
@@ -82,9 +82,10 @@ export interface AiProviderInput {
   notes?: string | null;
 }
 
-export const PROVIDER_KINDS: readonly ProviderKind[] = ['openrouter', 'openai_compatible', 'ollama'];
+export const PROVIDER_KINDS: readonly ProviderKind[] = ['openrouter', 'openai_compatible'];
 const MODEL_ID = /^[A-Za-z0-9._:/@-]{1,120}$/;
-const URL_RE = /^https?:\/\/[^\s"'<>]{3,200}$/;
+// Every provider is reached over HTTPS: an API key is never sent in clear text.
+const URL_RE = /^https:\/\/[^\s"'<>]{3,200}$/;
 
 export class ProviderValidationError extends Error {
   constructor(message: string, public readonly fields: string[]) {
@@ -100,9 +101,6 @@ function validate(input: AiProviderInput): void {
   if (!input.name || input.name.trim().length < 1 || input.name.length > 80) fields.push('name');
   if (!PROVIDER_KINDS.includes(input.kind)) fields.push('kind');
   if (!URL_RE.test(input.baseUrl ?? '')) fields.push('baseUrl');
-  // A public local endpoint is a leak: a local runtime must be reached on the loopback or a private address only, never over plain
-  // HTTP on the public internet (an https URL is allowed for a private, authenticated network).
-  if (input.kind === 'ollama' && /^http:\/\//.test(input.baseUrl ?? '') && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(input.baseUrl)) fields.push('baseUrl');
   for (const list of [input.models, input.visionModels ?? [], input.audioModels ?? []]) for (const m of list) if (!MODEL_ID.test(m)) fields.push('models');
   if (input.models.length === 0 && (input.visionModels ?? []).length === 0 && (input.audioModels ?? []).length === 0) fields.push('models');
   if (input.apiKey !== undefined && input.apiKey !== '' && !isUsableApiKey(input.apiKey)) fields.push('apiKey');

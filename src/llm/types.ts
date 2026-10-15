@@ -33,7 +33,7 @@ export interface ChatCompletionResponse {
   choices: ChatCompletionChoice[];
   /** Added by the router: which provider/model produced this answer, whether it ran in the cloud or locally, and, when a failover
    *  happened, which route failed first and why (safe text only). */
-  servedBy?: { model: string; provider?: string; source?: 'cloud' | 'local'; fallbackFrom?: string; fallbackReason?: string };
+  servedBy?: { model: string; provider?: string; fallbackFrom?: string; fallbackReason?: string };
 }
 
 /** The text of a message's content whatever its shape (a string or content parts; image parts contribute nothing). */

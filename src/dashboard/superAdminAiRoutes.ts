@@ -6,8 +6,8 @@ import { isSuperAdmin, type AuthUser } from './permissions';
 import { createProvider, deleteProvider, getSharedProvider, listSharedProviders, ProviderValidationError, reorderSharedProviders, setProviderEnabled, toView, updateProvider } from '../llm/providerRepo';
 import { PROVIDER_PRESETS } from '../llm/providerPresets';
 import { createInputFromSimple, defaultPoolSummary, fail, idParam, inputFrom, isSimpleBody, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
-import { env } from '../config/env';
-import { csv } from '../llm/providerRepo';
+import { buildCandidates } from '../llm/aiRouter';
+import { adoptBuiltinOpenRouter } from '../llm/adoptOpenRouter';
 import { describeCredential, getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 
 /**
@@ -26,24 +26,59 @@ function requireSuper(req: Request, res: Response): boolean {
 
 const accountCount = (): number => (getDb().prepare('SELECT COUNT(*) AS n FROM whatsapp_accounts').get() as { n: number }).n;
 
+type DefaultState = 'ok' | 'failed' | 'untested' | 'none';
+
+/**
+ * Is there an eligible model in Default that has been tested? `eligibleRoutes` counts the routes a chat message could really use right now
+ * (free under strict free-only mode, enabled, with a key, not cooling down); `state` combines that with the last test of the shared providers.
+ * It is a statement about configuration and tests — never a claim that a customer reply works.
+ */
+async function defaultStatus(accountId: number): Promise<{ state: DefaultState; eligibleRoutes: number; detail: string }> {
+  const plan = await buildCandidates(accountId, 'chat', { wantsTools: true });
+  const shared = listSharedProviders();
+  const sharedIds = new Set(shared.map((r) => r.id));
+  const eligible = plan.eligible.filter((c) => c.builtin || (c.providerId !== null && sharedIds.has(c.providerId))).length;
+  const tested = shared.filter((r) => r.last_test_at);
+  const passed = tested.find((r) => r.last_test_ok === 1);
+  const failed = tested.filter((r) => r.last_test_ok === 0).sort((a, b) => String(b.last_test_at).localeCompare(String(a.last_test_at)))[0];
+  if (eligible === 0 && failed) return { state: 'failed', eligibleRoutes: 0, detail: `The last test of "${failed.name}" failed: ${failed.last_test_detail ?? 'see the provider'} No route is usable right now (a failed route rests for a while before it is tried again).` };
+  if (eligible === 0) return { state: 'none', eligibleRoutes: 0, detail: shared.length ? 'No shared provider is usable right now: each one is turned off, has no key, is cooling down, or is not free.' : 'No shared provider is configured yet.' };
+  if (passed) return { state: 'ok', eligibleRoutes: eligible, detail: `${eligible} eligible route${eligible === 1 ? '' : 's'}; "${passed.name}" passed its last test.` };
+  if (failed) return { state: 'failed', eligibleRoutes: eligible, detail: `${eligible} eligible route${eligible === 1 ? '' : 's'}, but the last test of "${failed.name}" failed: ${failed.last_test_detail ?? 'see the provider'}` };
+  return { state: 'untested', eligibleRoutes: eligible, detail: `${eligible} eligible route${eligible === 1 ? '' : 's'}, not tested yet. Press Test.` };
+}
+
 export function registerSuperAdminAiRoutes(router: Router): void {
   router.get('/api/dashboard/super-admin/ai', (req, res) => {
     if (!requireSuper(req, res)) return;
-    try {
+    void (async () => { try {
       const key = getEffectiveCredential('OPENROUTER_API_KEY');
       const diag = describeCredential('OPENROUTER_API_KEY');
       res.json({
+        status: await defaultStatus(currentAccountId()),
         providers: listSharedProviders().map(toView),
         presets: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, kind: p.kind, baseUrl: p.baseUrl, hint: p.hint, models: p.models })),
         pool: defaultPoolSummary(),
         accounts: accountCount(),
         // Server-level routes that are part of Default (configured on the server, shown here read-only; their keys are never returned).
         builtin: {
-          openRouter: { hasKey: isUsableApiKey(key), source: diag.source },
-          local: { configured: Boolean(env.OLLAMA_BASE_URL && csv(env.OLLAMA_MODELS).length), baseUrl: env.OLLAMA_BASE_URL ? env.OLLAMA_BASE_URL.replace(/\/\/[^/]+@/, '//') : '', models: csv(env.OLLAMA_MODELS) },
+          openRouter: { hasKey: isUsableApiKey(key), source: diag.source, adopted: listSharedProviders().some((r) => r.kind === 'openrouter') },
         },
         enforced: { freeOnly: true, failover: true, note: 'Strict free-only mode and automatic failover are on for every business by default; a paid or unknown-price route is never called while free-only is on.' },
       });
+    } catch (error) {
+      fail(res, error);
+    } })();
+  });
+
+  /** Adds the OpenRouter key already saved on this server to the shared Default pool as an ordinary provider (the key never leaves the server). */
+  router.post('/api/dashboard/super-admin/ai/adopt-openrouter', (req, res) => {
+    if (!requireSuper(req, res)) return;
+    try {
+      const result = adoptBuiltinOpenRouter(req.adminUserId as number);
+      if (result.status === 'no_key') { res.status(409).json({ error: 'no_key', message: 'No usable OpenRouter key is saved on this server. Add one on Providers & Legacy API, or add a provider with its own key.' }); return; }
+      logger.info({ providerId: result.provider?.id, status: result.status, adminUserId: req.adminUserId }, 'OpenRouter key adopted into the shared Default pool');
+      res.status(result.status === 'created' ? 201 : 200).json({ status: result.status, provider: result.provider ? toView(result.provider) : null, pool: defaultPoolSummary() });
     } catch (error) {
       fail(res, error);
     }

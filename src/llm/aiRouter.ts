@@ -7,7 +7,7 @@ import { AiCredentialError } from './aiCredentialError';
 import { AiResponseError, type AiResponseReason, type ModelAttemptRecord } from './aiResponseError';
 import { completeOnce, openRouterHeaders } from './openAiCompatible';
 import { getModelInfo } from './modelCatalog';
-import { csv, listProvidersForAccount, providerApiKey, type AiProviderRow, type ProviderKind } from './providerRepo';
+import { csv, listProvidersForAccount, listSharedProviders, providerApiKey, type AiProviderRow, type ProviderKind } from './providerRepo';
 import { recordRouteAttempt } from './routeLog';
 import { DEFAULT_ENTRY, getAccountRouting, providerEntryKey } from './routingOrder';
 import type { ChatCompletionResponse, ChatMessage } from './types';
@@ -16,9 +16,9 @@ import type { ToolDefinition } from '../tools';
 /**
  * The central AI routing layer: every AI task (chat, picture analysis, voice transcription) goes through here.
  *
- *  Order of routes: the business's providers by priority (shared ones and its own; see providerRepo) — the built-in OpenRouter key
- *  (dashboard / .env) sits at priority 50 so an administrator can put a free provider before or after it — then the built-in local
- *  Ollama route (env OLLAMA_BASE_URL, priority 900), and finally the pipeline's deterministic customer-service fallback (not here).
+ *  Order of routes: the business's saved order (routingOrder.ts): its Default entry (the shared pool the Super Admin manages, then the
+ *  server's built-in OpenRouter key when no shared OpenRouter provider exists) and its own providers; finally the pipeline's deterministic
+ *  customer-service fallback (not here).
  *
  *  A route is skipped, with the reason recorded, when: the provider is disabled or has no usable key; it is cooling down after a recent
  *  failure; strict free-only mode is on and the route may cost money (an OpenRouter model whose catalog price is not 0, a provider the
@@ -48,7 +48,6 @@ export interface RouteCandidate {
   audio: boolean | null;
   tools: boolean | null;
   timeoutMs: number;
-  local: boolean;
   builtin: boolean;
 }
 
@@ -57,8 +56,6 @@ export interface SkippedRoute { candidate: RouteCandidate; category: SkipCategor
 export interface RouteRequest {
   task: AiTask;
   messages: ChatMessage[];
-  /** A shorter rendering of the same conversation for a slow local model (same facts, less text). */
-  compactMessages?: ChatMessage[];
   tools?: ToolDefinition['schema'][];
   temperature?: number;
   maxTokens?: number;
@@ -72,12 +69,11 @@ export interface RouteRequest {
 export interface RouteAttempt { candidate: RouteCandidate; outcome: 'ok' | 'failed'; category: FailureCategory | null; httpStatus: number | null; latencyMs: number; detail: string | null }
 
 export interface RoutedResponse extends ChatCompletionResponse {
-  route: { candidate: RouteCandidate; attempts: RouteAttempt[]; skipped: SkippedRoute[]; source: 'cloud' | 'local'; totalMs: number };
+  route: { candidate: RouteCandidate; attempts: RouteAttempt[]; skipped: SkippedRoute[]; totalMs: number };
 }
 
-// Inside the Default entry the shared providers (priority 1-499, set by the Super Admin's order) come first, then the server's built-in OpenRouter key, then the built-in local route.
+// Inside the Default entry the shared providers (priority 1-499, set by the Super Admin's order) come first, then the server's built-in OpenRouter key.
 export const BUILTIN_OPENROUTER_PRIORITY = 500;
-export const BUILTIN_LOCAL_PRIORITY = 900;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const MIN_ATTEMPT_MS = 1500;
 
@@ -98,9 +94,9 @@ export function coolingUntil(key: string, now = Date.now()): { until: number; wh
   return entry;
 }
 
-function cooldownFor(category: FailureCategory, error: AiResponseError | null, local: boolean): { ms: number; scope: 'route' | 'provider' } {
+function cooldownFor(category: FailureCategory, error: AiResponseError | null): { ms: number; scope: 'route' | 'provider' } {
   switch (category) {
-    // A prompt that is too long for THIS model says nothing about the route: a shorter prompt (or the compact local one) may fit.
+    // A prompt that is too long for THIS model says nothing about the route: a shorter prompt may fit.
     case 'context': return { ms: 0, scope: 'route' };
     case 'auth': return { ms: 10 * 60_000, scope: 'provider' };
     case 'credit': return { ms: 30 * 60_000, scope: 'provider' };
@@ -108,8 +104,8 @@ function cooldownFor(category: FailureCategory, error: AiResponseError | null, l
     case 'capability': return { ms: 60 * 60_000, scope: 'route' };
     case 'rate_limited': return { ms: error?.retryAfterMs ?? 60_000, scope: 'route' };
     case 'model_unavailable': return { ms: 5 * 60_000, scope: 'route' };
-    case 'timeout': return { ms: local ? 3 * 60_000 : 60_000, scope: 'route' };
-    case 'network': return { ms: local ? 2 * 60_000 : 60_000, scope: 'provider' };
+    case 'timeout': return { ms: 60_000, scope: 'route' };
+    case 'network': return { ms: 60_000, scope: 'provider' };
     case 'provider_error': return { ms: 60_000, scope: 'route' };
     // One empty or malformed answer says nothing about the next one: no cooldown (the failure is still logged and counted).
     case 'empty':
@@ -168,26 +164,29 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
     const entryKey = row.whatsapp_account_id === null ? DEFAULT_ENTRY : providerEntryKey(row.id);
     const models = modelsFor(row, task);
     if (models.length === 0) continue;
-    const apiKey = row.kind === 'ollama' ? null : providerApiKey(row);
-    const disabled = row.enabled === 0 ? 'provider disabled' : row.kind !== 'ollama' && !apiKey ? (row.key_ciphertext ? 'the stored key cannot be read (enter it again)' : 'no API key saved') : undefined;
+    const apiKey = providerApiKey(row);
+    const disabled = row.enabled === 0 ? 'provider disabled' : !apiKey ? (row.key_ciphertext ? 'the stored key cannot be read (enter it again)' : 'no API key saved') : undefined;
     for (const model of models) {
       const facts = await describeModel(row.kind, model, row, task);
       all.push({ priority: row.priority, order: order++, disabled, entryKey, candidate: {
         key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, baseUrl: row.base_url, apiKey, model, ...facts,
-        timeoutMs: row.timeout_ms, local: row.kind === 'ollama', builtin: false,
+        timeoutMs: row.timeout_ms, builtin: false,
       } });
     }
   }
 
-  // 2. the built-in OpenRouter route (the dashboard / .env key with the business's own models)
+  // 2. the built-in OpenRouter route (the dashboard / .env key with the business's own models). Once the Super Admin has a shared OpenRouter
+  // provider in the Default pool (the key adopted into it), that provider IS the OpenRouter entry: the built-in route stays out of the way so
+  // one key is never tried twice and turning the shared provider off really turns OpenRouter off.
   const builtinKey = getEffectiveCredential('OPENROUTER_API_KEY');
+  const sharedOpenRouter = task === 'chat' && listSharedProviders().some((r) => r.kind === 'openrouter' && csv(r.models).length > 0);
   const builtinModels = task === 'chat'
     ? [settings.openRouterModel, ...settings.openRouterFallbackModels]
     : task === 'vision'
       ? [settings.openRouterVisionModel, settings.openRouterModel, ...settings.openRouterFallbackModels]
       : settings.openRouterAudioModel ? [settings.openRouterAudioModel] : [];
   const seen = new Set<string>();
-  for (const model of builtinModels) {
+  for (const model of sharedOpenRouter ? [] : builtinModels) {
     if (!model || seen.has(model)) continue;
     seen.add(model);
     const facts = await describeModel('openrouter', model, null, task);
@@ -196,19 +195,8 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
     const explicit = task === 'vision' && (model === settings.openRouterVisionModel || model === settings.openRouterModel);
     all.push({ priority: BUILTIN_OPENROUTER_PRIORITY, order: order++, entryKey: DEFAULT_ENTRY, disabled: isUsableApiKey(builtinKey) ? undefined : builtinKey.trim() ? 'the saved OpenRouter key is not a usable key (wrong format or length)' : 'no OpenRouter key saved', candidate: {
       key: `builtin:${model}`, providerKey: 'provider:builtin', providerId: null, providerName: 'OpenRouter (built-in key)', kind: 'openrouter', baseUrl: OPENROUTER_BASE_URL, apiKey: isUsableApiKey(builtinKey) ? builtinKey : null, model,
-      free: facts.free, image: facts.image ?? (explicit ? true : null), audio: facts.audio, tools: facts.tools, timeoutMs: env.OPENROUTER_TIMEOUT_MS, local: false, builtin: true,
+      free: facts.free, image: facts.image ?? (explicit ? true : null), audio: facts.audio, tools: facts.tools, timeoutMs: env.OPENROUTER_TIMEOUT_MS, builtin: true,
     } });
-  }
-
-  // 3. the built-in local route (env OLLAMA_BASE_URL): free by nature, slow on a CPU, last among AI routes
-  if (env.OLLAMA_BASE_URL) {
-    const localModels = csv(task === 'chat' ? env.OLLAMA_MODELS : task === 'vision' ? env.OLLAMA_VISION_MODELS : '');
-    for (const model of localModels) {
-      all.push({ priority: BUILTIN_LOCAL_PRIORITY, order: order++, entryKey: DEFAULT_ENTRY, candidate: {
-        key: `local:${model}`, providerKey: 'provider:local', providerId: null, providerName: 'Local Ollama (built-in)', kind: 'ollama', baseUrl: env.OLLAMA_BASE_URL, apiKey: null, model,
-        free: true, image: task === 'vision' ? true : null, audio: null, tools: true, timeoutMs: env.OLLAMA_TIMEOUT_MS, local: true, builtin: true,
-      } });
-    }
   }
 
   // The business's saved order decides which ENTRY is tried first; inside the Default entry the shared pool keeps its own priorities.
@@ -238,7 +226,7 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
 const routeCoolKey = (task: AiTask, candidate: RouteCandidate): string => `${task}:${candidate.key}`;
 
 function markFailure(task: AiTask, candidate: RouteCandidate, category: FailureCategory, error: AiResponseError | null, now = Date.now()): void {
-  const { ms, scope } = cooldownFor(category, error, candidate.local);
+  const { ms, scope } = cooldownFor(category, error);
   if (ms <= 0) return;
   const entry = { until: now + ms, why: category.replace(/_/g, ' ') };
   if (scope === 'provider') providerCooling.set(candidate.providerKey, entry); else routeCooling.set(routeCoolKey(task, candidate), entry);
@@ -280,13 +268,13 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
     const now = Date.now();
     if (now + MIN_ATTEMPT_MS > budgetEnd) { skipped.push({ candidate, category: 'no_time', reason: 'no time left in the routing budget' }); continue; }
     const timeoutMs = Math.min(candidate.timeoutMs, budgetEnd - now);
-    const messages = candidate.local && request.compactMessages ? request.compactMessages : request.messages;
+    const messages = request.messages;
     const onlyRoute = queue.length === 1;
     for (let attempt = 0; attempt < (onlyRoute ? 2 : 1); attempt += 1) {
       const t0 = Date.now();
       try {
         const response = await completeOnce({
-          baseUrl: candidate.baseUrl, apiKey: candidate.apiKey, model: candidate.model, messages, tools: candidate.local && request.compactMessages ? undefined : request.tools, temperature: request.temperature, maxTokens: request.maxTokens, // the lean local prompt is text-only: no tool schemas to process
+          baseUrl: candidate.baseUrl, apiKey: candidate.apiKey, model: candidate.model, messages, tools: request.tools, temperature: request.temperature, maxTokens: request.maxTokens,
           timeoutMs: Math.min(timeoutMs, Math.max(MIN_ATTEMPT_MS, budgetEnd - Date.now())), headers: candidate.kind === 'openrouter' ? openRouterHeaders() : undefined,
         });
         const latencyMs = Date.now() - t0;
@@ -294,9 +282,9 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
         attempts.push(record);
         recordRouteAttempt({ accountId, task: request.task, providerId: candidate.providerId, providerName: candidate.providerName, model: candidate.model, outcome: 'ok', latencyMs });
         if (i > 0 || attempt > 0) logger.info({ account: accountId, task: request.task, provider: candidate.providerName, model: candidate.model, after: attempts.slice(0, -1).map((a) => `${a.candidate.providerName}/${a.candidate.model}:${a.category}`), latencyMs }, 'AI route answered after a failover');
-        const servedBy = { model: candidate.model, provider: candidate.providerName, source: candidate.local ? 'local' as const : 'cloud' as const, ...(attempts.length > 1 ? { fallbackFrom: `${attempts[0]!.candidate.providerName} · ${attempts[0]!.candidate.model}`, fallbackReason: attempts[0]!.category ?? 'failed' } : {}) };
+        const servedBy = { model: candidate.model, provider: candidate.providerName, ...(attempts.length > 1 ? { fallbackFrom: `${attempts[0]!.candidate.providerName} · ${attempts[0]!.candidate.model}`, fallbackReason: attempts[0]!.category ?? 'failed' } : {}) };
         // The route information travels with the answer; the key never does.
-        return { ...response, servedBy, route: { candidate: publicCandidate(candidate), attempts: attempts.map((a) => ({ ...a, candidate: publicCandidate(a.candidate) })), skipped: skipped.map((s) => ({ ...s, candidate: publicCandidate(s.candidate) })), source: candidate.local ? 'local' : 'cloud', totalMs: Date.now() - started } };
+        return { ...response, servedBy, route: { candidate: publicCandidate(candidate), attempts: attempts.map((a) => ({ ...a, candidate: publicCandidate(a.candidate) })), skipped: skipped.map((s) => ({ ...s, candidate: publicCandidate(s.candidate) })), totalMs: Date.now() - started } };
       } catch (error) {
         const latencyMs = Date.now() - t0;
         const category = classifyRouteFailure(error);
@@ -305,7 +293,7 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
         attempts.push(record);
         errors.push(error);
         recordRouteAttempt({ accountId, task: request.task, providerId: candidate.providerId, providerName: candidate.providerName, model: candidate.model, outcome: 'failed', category, httpStatus: record.httpStatus, latencyMs, detail: record.detail });
-        logger.warn({ account: accountId, task: request.task, provider: candidate.providerName, model: candidate.model, category, reason: responseError?.reason ?? (error instanceof AiCredentialError ? 'credential' : 'unknown'), httpStatus: record.httpStatus, latencyMs, local: candidate.local }, 'AI route failed');
+        logger.warn({ account: accountId, task: request.task, provider: candidate.providerName, model: candidate.model, category, reason: responseError?.reason ?? (error instanceof AiCredentialError ? 'credential' : 'unknown'), httpStatus: record.httpStatus, latencyMs }, 'AI route failed');
         // One bounded retry against the SAME route only when it is the only eligible route and the failure is transient.
         const transient = category === 'rate_limited' || category === 'provider_error' || category === 'empty' || category === 'network' || category === 'timeout';
         if (onlyRoute && attempt === 0 && transient && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) { await new Promise((r) => setTimeout(r, 300)); continue; }
@@ -344,12 +332,6 @@ export async function explainRoutes(accountId: number, task: AiTask): Promise<{ 
   const plan = await buildCandidates(accountId, task, { needs: task === 'vision' ? { image: true } : task === 'audio' ? { audio: true } : undefined, wantsTools: task === 'chat' });
   const strip = (c: RouteCandidate): Omit<RouteCandidate, 'apiKey'> => { const { apiKey: _k, ...rest } = c; return rest; };
   return { eligible: plan.eligible.map(strip), skipped: plan.skipped.map((s) => ({ route: strip(s.candidate), category: s.category, reason: s.reason })), freeOnly: plan.freeOnly, failover: plan.failover };
-}
-
-/** True when a local inference route exists for this business (built-in env route or a configured, enabled Ollama provider). */
-export function hasLocalRoute(accountId: number): boolean {
-  if (env.OLLAMA_BASE_URL && csv(env.OLLAMA_MODELS).length > 0) return true;
-  return listProvidersForAccount(accountId).some((p) => p.kind === 'ollama' && p.enabled !== 0 && csv(p.models).length > 0);
 }
 
 export function resetAiRouterForTests(): void {

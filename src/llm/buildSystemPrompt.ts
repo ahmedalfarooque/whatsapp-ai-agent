@@ -1,3 +1,4 @@
+import { customerRecordSection } from '../customers/customerRecordContext';
 import { env } from '../config/env';
 import { getBusinessSettings, formatBusinessHours, formatAddress } from '../config/businessSettings';
 import { listCustomerVisibleOffers, renderOfferLine } from '../offers/offerRepo';
@@ -199,13 +200,20 @@ export function buildSystemPrompt(knowledge: KnowledgeBase, language?: string, n
   const catalogueSection = accountHasFeature(accountId, FEATURES.CATALOGUES) ? CATALOGUE_RULES : '';
   // The real estate business (add-on) works from ITS OWN open enquiries and published projects; no other business gets this section.
   const realEstate = accountHasFeature(accountId, FEATURES.REAL_ESTATE) ? realEstateSection(accountId, context.customerId) : '';
+  // What THIS business has on record about the customer who is writing (requests and their status, callbacks, files, older conversations).
+  let customerRecord = '';
+  try {
+    customerRecord = context.customerId ? customerRecordSection(context.customerId, context.knowledgeScale ?? 1, undefined, accountId) : '';
+  } catch {
+    /* tables may not exist in very old test databases: the prompt simply carries no record block */
+  }
 
   return `You are the WhatsApp customer assistant for ${settings.businessName}.
 
 BUSINESS PROFILE (published by staff — authoritative):
 ${profileLines}
 
-${offersSection}${documentsSection}${catalogueSection}${realEstate}
+${offersSection}${documentsSection}${catalogueSection}${realEstate}${customerRecord}
 ${INTENT_RULES}${STYLE_RULES}${context.compactMediaRules && (context.knowledgeScale ?? 1) < 1 ? COMPACT_MEDIA_RULES : IMAGE_RULES}${env.WEB_SEARCH_ENABLED ? WEB_RULES : ''}${menuReference()}
 
 SCOPE AND HONESTY RULES (never break these):

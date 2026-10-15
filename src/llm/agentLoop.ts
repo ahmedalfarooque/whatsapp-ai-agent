@@ -25,7 +25,7 @@ export interface AgentLoopResult {
   finalText: string;
   generatedMessages: GeneratedMessage[];
   /** The route that wrote the final answer (provider, model, cloud or local) and, when a failover happened on any round, which route failed first and why. */
-  servedBy?: { model: string; provider?: string; source?: 'cloud' | 'local'; fallbackFrom?: string; fallbackReason?: string };
+  servedBy?: { model: string; provider?: string; fallbackFrom?: string; fallbackReason?: string };
 }
 
 /**
@@ -60,8 +60,6 @@ const NOT_DONE = 'The action did NOT complete. Do not tell the customer it was d
 export interface RunAgentLoopParams {
   systemPrompt: string;
   history: ChatMessageForLlm[];
-  /** A shorter system prompt + history with the same facts, for a slow local model (the router uses it for local routes only). */
-  compact?: { systemPrompt: string; history: ChatMessageForLlm[] };
   /** Threaded through to every tool call so handlers (e.g. book_appointment) can scope idempotency to this conversation. */
   conversationId: number;
   maxToolRounds?: number;
@@ -85,11 +83,6 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
     { role: 'system', content: params.systemPrompt },
     ...historyToChatMessages(params.history),
   ];
-  // The compact rendering (for a local route) follows the same rounds: every assistant / tool message is appended to both lists, so a
-  // local model that takes over on a later round sees the tool results that already exist and never asks for them again.
-  const compactMessages: ChatMessage[] | undefined = params.compact
-    ? [{ role: 'system', content: params.compact.systemPrompt }, ...historyToChatMessages(params.compact.history)]
-    : undefined;
   const generatedMessages: GeneratedMessage[] = [];
   const executed = new Map<string, string>(); // canonical call -> the result it produced
   let servedBy: AgentLoopResult['servedBy'];
@@ -102,7 +95,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
     const accountTools = toolSchemasForAccount(currentAccountId());
     let response: Awaited<ReturnType<typeof chatCompletion>>;
     try {
-      response = await chatCompletion({ task: 'chat', messages, compactMessages, tools: accountTools.length ? accountTools : undefined, deadline });
+      response = await chatCompletion({ task: 'chat', messages, tools: accountTools.length ? accountTools : undefined, deadline });
     } catch (error) {
       if (error instanceof AiResponseError && round > 1) error.afterToolCalls = true; // tools ran in an earlier round: the caller must not re-run this loop
       throw error;
@@ -126,7 +119,6 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
     }
 
     messages.push(assistantMessage);
-    compactMessages?.push(assistantMessage);
     const toolSummary = toolCalls.map((tc) => tc.function.name).join(', ');
     generatedMessages.push({
       role: 'assistant',
@@ -172,7 +164,6 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
 
       const toolRow: ChatMessage = { role: 'tool', tool_call_id: toolCall.id, name: toolName, content: resultContent };
       messages.push(toolRow);
-      compactMessages?.push(toolRow);
       generatedMessages.push({
         role: 'tool',
         content: resultContent,

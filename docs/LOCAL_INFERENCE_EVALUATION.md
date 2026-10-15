@@ -35,3 +35,26 @@ This workstation (6-core i5-10400F, 16 GB, RTX 2060 SUPER 4 GB) could answer in 
 not always on, sits behind a home connection, and would need a private tunnel to the Oracle server (for example an SSH reverse tunnel or
 a private network): it adds an availability dependency to a 24/7 service. It would only ever be an *additional* provider in the order,
 behind the free cloud entries, with the same failover — and it is a hosting and electricity cost, not free inference. Nothing was installed.
+
+---
+
+# Removal of Ollama (2026-10-15) — inventory, backup and rollback
+
+The owner decided not to use Ollama in this application. The measurements above stay as history; the feature itself was removed.
+
+## Inventory (verified before anything was deleted)
+| where | what | owner / use |
+|---|---|---|
+| repository | provider kind, preset and routing branches, the built-in local route, the lean local prompt (`localPrompt.ts`), the compact-prompt path through the agent loop and router, `OLLAMA_*` settings in `src/config/env.ts` and `.env.example`, dashboard strings, tests | this application only |
+| Oracle host | user service `ollama-local` (loopback 127.0.0.1:11434), `~/ollama` (2.1 GB binaries, v0.40.4), `~/.ollama` (7.2 GB: three model families pulled for the evaluation, plus Ollama's own key pair), three `OLLAMA_*` lines in the application's `.env`, evaluation scripts and outputs in the home folder and `/tmp`, user linger (enabled only for that service) | created for this application on 2026-10-14; no other project or service references port 11434 |
+| this PC | nothing (no Ollama, no `OLLAMA_*` in the local `.env`) | — |
+| Vercel (`whatsapp-ai-agent`) | no environment variables at all; no `vercel.json` in the repository | nothing to remove |
+| Supabase | the application does not use Supabase at runtime (only unused packages in `package.json`, unrelated to Ollama) | nothing to remove |
+| database | no provider row of kind `ollama` existed on production; migration 030 deletes any such row anywhere | — |
+
+## What was removed
+Application code and configuration (above); on the host: the service, its unit file, `~/ollama`, `~/.ollama`, the evaluation scripts and the three `.env` lines, and linger. Not touched: the application, its database, WhatsApp sessions, customer data, other files, other services.
+
+## Backup and rollback
+Before deleting, the host kept `~/whatsapp-backups/ollama-removal-20261015/` (the unit file, a copy of the application's `.env` as it was, and the benchmark outputs). Model weights are public and re-downloadable, so they were not backed up.
+To restore the application code: `git checkout -B master 7d7cae6`, `npm run build`, restart only `whatsapp-ai-agent` (migration 030 only removes rows that no longer exist). To restore the host runtime (not recommended): download the Ollama arm64 release v0.40.4 to `~/ollama`, copy the unit file from the backup to `~/.config/systemd/user/`, `loginctl enable-linger ubuntu`, `systemctl --user enable --now ollama-local`, put the three `OLLAMA_*` lines back from the backup `.env`, and re-pull a model. The previous application code (7d7cae6) is required for the local route to exist again.

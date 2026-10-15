@@ -84,14 +84,6 @@ const envSchema = z
      *  this many routes are tried for one message (each with its own hard timeout; a known-failing route is skipped by its cooldown). */
     AI_ROUTING_BUDGET_MS: z.coerce.number().int().positive().default(45000),
     AI_ROUTE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(8).default(4),
-    /** Built-in LOCAL inference route, shared by every business: an Ollama (or any OpenAI-compatible local runtime) reachable on the loopback
-     *  or a private network, e.g. http://127.0.0.1:11434/v1 — never a public address. Empty = no local route. OLLAMA_MODELS is the
-     *  comma-separated chat model list (smallest first); OLLAMA_VISION_MODELS the models that take pictures (empty = none). A CPU-only host is
-     *  slow: the per-attempt timeout is OLLAMA_TIMEOUT_MS and the local route gets the COMPACT prompt (same facts, less text). */
-    OLLAMA_BASE_URL: z.string().optional().default(''),
-    OLLAMA_MODELS: z.string().optional().default(''),
-    OLLAMA_VISION_MODELS: z.string().optional().default(''),
-    OLLAMA_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
     /** Prompt size guards (characters): the knowledge base is selected by relevance within this budget, the history is trimmed to this budget,
      *  and at most this many business documents (each cut to this length) are pasted into a prompt. A prompt that grows without bound hits the
      *  provider's per-request token cap (OpenRouter answers HTTP 402 "Prompt tokens limit exceeded" when the credit is low). */

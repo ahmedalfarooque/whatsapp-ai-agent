@@ -1246,7 +1246,8 @@ function recoveryHtml(recovery) {
 
 // ---- compact provider list (the account's "AI providers" card and the Super Admin's shared pool use the same pieces) -----------------------
 
-const LOCAL_MODEL_WARNING = 'A local model on this server is slow and has not passed the speed and quality checks for customer replies. Turn it on anyway?';
+const AI_DEFAULT_BADGE = { ok: ['ELIGIBLE MODEL TESTED', 'green'], failed: ['LAST TEST FAILED', 'red'], untested: ['NOT TESTED', 'amber'], none: ['NO ELIGIBLE MODEL', 'red'] };
+const aiDefaultBadge = (status) => { const s = AI_DEFAULT_BADGE[(status && status.state) || 'none']; return badge(s[0], s[1]); };
 const AI_STATE = {
   ok: ['OK', 'green'], failed: ['TEST FAILED', 'red'], untested: ['NOT TESTED', 'muted'], off: ['OFF', 'muted'], no_key: ['NO KEY', 'red'], empty: ['NOT SET UP', 'amber'],
 };
@@ -1262,7 +1263,7 @@ function aiProviderFormHtml(presets, entry) {
       ${autofillDecoy()}
       <input type="hidden" name="id" value="${entry && entry.id ? entry.id : ''}" />
       ${textField('name', 'API / Agent name', 'A name you will recognise, for example "Groq free".', entry ? entry.name : '')}
-      ${pwField('config', 'API configuration', isNew ? 'Paste the API key (stored encrypted, shown masked afterwards). For a local runtime enter its address, for example http://127.0.0.1:11434.' : 'Leave empty to keep the saved configuration, or enter a new one to replace it.', !isNew)}
+      ${pwField('config', 'API configuration', isNew ? 'Paste the API key (stored encrypted, shown masked afterwards).' : 'Leave empty to keep the saved configuration, or enter a new one to replace it.', !isNew)}
       ${isNew ? `<div class="field"><label for="wa-field-provider">Provider</label><select id="wa-field-provider" name="provider"><option value="auto">Detect from the key</option>${presetOptions}</select></div>` : ''}
       <details class="ai-more"><summary>More options</summary>
         ${textField('models', 'Models (comma-separated, best first)', 'Leave empty to use the provider\'s suggested free models.', entry && entry.models ? entry.models.join(', ') : '')}
@@ -1428,7 +1429,6 @@ async function renderAiRouting(host) {
             toast('Order saved', 'success');
           } else if (act === 'toggle') {
             const entry = entries[index];
-            if (!entry.enabled && entry.provider === 'ollama' && !window.confirm(LOCAL_MODEL_WARNING)) return;
             if (entry.type === 'default') await save(entries.map((e) => ({ key: e.key, enabled: e.key === key ? !e.enabled : e.type === 'default' ? e.enabled : undefined })));
             else await api(`/api/dashboard/ai-routing/providers/${id}/${entry.enabled ? 'disable' : 'enable'}`, { method: 'POST' });
           } else if (act === 'remove') {
@@ -1475,14 +1475,15 @@ route('#/super-admin-settings', 'Super Admin Settings', 'Shared AI defaults for 
   async function draw() {
     const data = await api('/api/dashboard/super-admin/ai');
     const providers = data.providers.map((p) => ({
-      key: `provider:${p.id}`, type: 'provider', id: p.id, name: p.name, provider: p.kind, enabled: p.enabled, config: p.kind === 'ollama' ? p.baseUrl : p.keyMasked || '', models: p.models,
-      state: !p.enabled ? 'off' : p.kind !== 'ollama' && p.keyStatus !== 'ok' ? 'no_key' : p.lastTestAt ? (p.lastTestOk ? 'ok' : 'failed') : 'untested',
-      detail: p.kind !== 'ollama' && p.keyStatus === 'undecryptable' ? 'The saved key cannot be read: enter it again.' : p.lastTestDetail || (p.freeTier ? '' : 'Declared as a paid endpoint: never used while free-only mode is on.'),
+      key: `provider:${p.id}`, type: 'provider', id: p.id, name: p.name, provider: p.kind, enabled: p.enabled, config: p.keyMasked || '', models: p.models,
+      state: !p.enabled ? 'off' : p.keyStatus !== 'ok' ? 'no_key' : p.lastTestAt ? (p.lastTestOk ? 'ok' : 'failed') : 'untested',
+      detail: p.keyStatus === 'undecryptable' ? 'The saved key cannot be read: enter it again.' : p.lastTestDetail || (p.freeTier ? '' : 'Declared as a paid endpoint: never used while free-only mode is on.'),
     }));
     const editingEntry = typeof editing === 'number' ? providers.find((p) => p.id === editing) : null;
     view.innerHTML = `
       <section class="panel setup-card">
         <h3>Default AI providers</h3>
+        <div class="ai-default-status" role="status">${aiDefaultBadge(data.status)} <span class="muted">${esc(data.status.detail)}</span></div>
         <p class="muted">The providers below form the shared Default entry that every business, present and future, inherits. Keys stay here, encrypted and masked; a business only sees one line saying how many shared providers can answer, and decides where Default sits in its own order.</p>
         <p class="muted" style="font-size:12px"><span>Businesses inheriting Default:</span> <b>${data.accounts}</b></p>
         <p class="muted" style="font-size:12px">${esc(data.enforced.note)}</p>
@@ -1494,12 +1495,22 @@ route('#/super-admin-settings', 'Super Admin Settings', 'Shared AI defaults for 
       <section class="panel setup-card" style="margin-top:16px">
         <h3>Also part of Default (set on the server)</h3>
         <div class="detail-grid">
-          <label class="muted">OpenRouter (built-in key)</label><div>${data.builtin.openRouter.hasKey ? badge('KEY SAVED', 'green') : badge('NO KEY', 'muted')} <span class="muted">tried after the shared providers above</span></div>
-          <label class="muted">Local model (this server)</label><div>${data.builtin.local.configured ? `${badge('CONFIGURED', 'green')} <span class="file">${esc(data.builtin.local.baseUrl)}</span> · ${esc(data.builtin.local.models.join(', '))}` : `${badge('OFF', 'muted')} <span class="muted">A local model answers customers only after it passes the latency and quality checks.</span>`}</div>
+          <label class="muted">OpenRouter key saved on this server</label><div>${data.builtin.openRouter.hasKey ? badge('KEY SAVED', 'green') : badge('NO KEY', 'muted')} ${data.builtin.openRouter.adopted ? '<span class="muted">Already in the Default list above.</span>' : data.builtin.openRouter.hasKey ? '<button type="button" class="btn small" id="ai-adopt">Add it to the Default list</button> <span class="muted">The key stays on the server; it is not shown.</span>' : '<span class="muted">Add a provider above with its own key.</span>'}</div>
         </div>
       </section>`;
 
     view.querySelector('#ai-add').addEventListener('click', () => { editing = 'new'; draw(); });
+    const adopt = view.querySelector('#ai-adopt');
+    if (adopt) adopt.addEventListener('click', async () => {
+      adopt.disabled = true;
+      try {
+        await api('/api/dashboard/super-admin/ai/adopt-openrouter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        toast('Added to the Default list', 'success');
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+      await draw();
+    });
     bindAiForm(view, {
       endpoint: '/api/dashboard/super-admin/ai/providers',
       itemUrl: (id) => `/api/dashboard/super-admin/ai/providers/${id}`,
@@ -1520,7 +1531,6 @@ route('#/super-admin-settings', 'Super Admin Settings', 'Shared AI defaults for 
             await api('/api/dashboard/super-admin/ai/providers/order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
             toast('Order saved', 'success');
           } else if (act === 'toggle') {
-            if (!providers[index].enabled && providers[index].provider === 'ollama' && !window.confirm(LOCAL_MODEL_WARNING)) return;
             await api(`/api/dashboard/super-admin/ai/providers/${id}/${providers[index].enabled ? 'disable' : 'enable'}`, { method: 'POST' });
           } else if (act === 'remove') {
             if (!window.confirm(`Remove "${providers[index].name}" and its saved key? Every business that uses Default (${data.accounts} now) stops using it.`)) return;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-15 — Ollama removed; OpenRouter as the shared Default; customer record in the prompt
+* **Ollama removed** from the application (provider kind, preset, built-in local route, lean local prompt, compact-prompt path, `OLLAMA_*` settings, dashboard strings) and from the production host (service, binaries, models, `.env` lines, evaluation files); migration 030. Evidence and rollback: `docs/LOCAL_INFERENCE_EVALUATION.md`. Every provider endpoint must now be HTTPS.
+* **OpenRouter as the shared Default**: Super Admin Settings can add the OpenRouter key already saved on the server to the Default list as an ordinary provider (the key never leaves the server); it replaces the built-in OpenRouter route for chat. A status line says whether an eligible model is configured and tested.
+* **/readiness** now reports per-business AI health (eligible routes, last hour) and degrades honestly when no route is usable.
+* **Customer record**: the prompt carries a bounded, verified record of the customer who is writing (identity on record, requests and status, callbacks, files, their older messages, dated), from this business's own data only; staff-only notes are excluded.
+
 ## 2026-10-15 — Super Admin Settings and the simplified account AI list
 * **Super Admin Settings** (profile menu, Super Admin only; API `/api/dashboard/super-admin/ai`): manage the shared **Default** providers
   (add with a name and an API key, test, turn on/off, edit, reorder, remove with confirmation). Keys encrypted and masked; never shown to a business.

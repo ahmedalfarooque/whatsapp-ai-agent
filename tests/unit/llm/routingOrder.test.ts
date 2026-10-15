@@ -77,9 +77,9 @@ describe('the two-field provider form', () => {
     expect(resolveSimpleProvider({ name: 'M', config: 'whatever-key-value-123456789012345678901', provider: 'mistral' })).toMatchObject({ baseUrl: 'https://api.mistral.ai/v1' });
   });
 
-  it('a local runtime is given by its address (no key, /v1 added, private addresses only); a cloud endpoint is never selected by pasting a URL', () => {
-    expect(resolveSimpleProvider({ name: 'L', config: 'http://127.0.0.1:11434' })).toMatchObject({ kind: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', apiKey: undefined, timeoutMs: 45000, enabled: false }); // a local model starts SWITCHED OFF
-    expect(resolveSimpleProvider({ name: 'G', config: 'gsk_abcdefghijklmnopqrstuvwxyz0123456789' }).enabled).toBe(true);
+  it('a URL is never accepted as the configuration (the endpoint comes from the preset or "More options"), and no local runtime preset exists', () => {
     expect(() => resolveSimpleProvider({ name: 'X', config: 'https://api.example.com/v1', provider: 'groq' })).toThrow(SimpleProviderError);
+    expect(() => resolveSimpleProvider({ name: 'X', config: 'http://127.0.0.1:11434', provider: 'ollama' })).toThrow(SimpleProviderError);
+    expect(resolveSimpleProvider({ name: 'G', config: 'gsk_abcdefghijklmnopqrstuvwxyz0123456789' }).enabled).toBe(true);
   });
 });

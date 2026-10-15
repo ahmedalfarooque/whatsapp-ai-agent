@@ -29,13 +29,11 @@ import { createCustomerRequest } from '../memory/customerRequestRepo';
 import { notifyBusinessNewRequest } from '../requests/requestService';
 import { isRestartCommand } from '../restart/isRestartCommand';
 import { buildSystemPrompt } from '../llm/buildSystemPrompt';
-import { buildLocalPrompt } from '../llm/localPrompt';
 import { openPendingReply, settlePendingReply } from '../replay/pendingReplyRepo';
 import { renderPublishedProjects } from '../realestate/realEstateRepo';
 import { redactSensitiveText } from '../realestate/leadFields';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { runAgentLoop, CONTEXT_TOOL_ROWS } from '../llm/agentLoop';
-import { hasLocalRoute } from '../llm/aiRouter';
 import { IMAGE_ANALYSIS_TOOL, analyzeImage, imageContextLine, type ImageAnalysis } from '../llm/vision';
 import fs from 'node:fs';
 import { sendTextMessage, sendDocumentMessage, sendImageMessage, ImageDeliveryUnsupportedError, DocumentDeliveryUnsupportedError } from '../whatsapp/client';
@@ -400,13 +398,6 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   let { history, systemPrompt } = buildPrompt(promptScale);
   // A local model on a CPU is slow in proportion to the prompt: when a local route exists it is given a COMPACT rendering of the same
   // facts (a third of the knowledge / history budgets); cloud routes get the full prompt. Nothing is built when no local route exists.
-  // The LEAN prompt (src/llm/localPrompt.ts: identity, facts, hours, the knowledge passages relevant to THIS message, honesty rules; no tool
-  // or media rules) with only the last few turns: a small model on a CPU is slow in proportion to the prompt.
-  const compactFor = (_scale: number) => {
-    if (!hasLocalRoute(promptAccountId)) return undefined;
-    const recent = trimHistoryToBudget(getRecentMessages(conversation.id, 6, undefined, env.CONVERSATION_MEMORY_HOURS), 1500);
-    return { history: recent, systemPrompt: buildLocalPrompt(deps.knowledge, customer.language ?? undefined, { latestText }) };
-  };
 
   let finalText = '';
   let kind: 'ai' | 'error' = 'ai';
@@ -419,7 +410,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   try {
     let loopResult: Awaited<ReturnType<typeof runAgentLoop>>;
     try {
-      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id, compact: compactFor(promptScale) });
+      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
     } catch (firstError) {
       // HTTP 402 "Prompt tokens limit exceeded: N > CAP": send less (same model, no extra cost) and try ONCE more; anything else rethrows.
       const cap = firstError instanceof AiResponseError && firstError.reason === 'payment_required' && !firstError.afterToolCalls ? parsePromptCap(firstError.providerMessage) : null;
@@ -429,14 +420,14 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
       rememberPromptScale(promptAccountId, promptScale);
       logger.warn({ waId: maskedId, account: promptAccountId, promptTokens: cap.used, tokenCap: cap.cap, scale: Number(promptScale.toFixed(2)), systemChars: systemPrompt.length, historyChars: history.reduce((n, h) => n + (h.content?.length ?? 0), 0), historyMessages: history.length }, 'provider token cap is below the prompt size; retrying once with a smaller prompt');
       ({ history, systemPrompt } = buildPrompt(promptScale));
-      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id, compact: compactFor(promptScale) });
+      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
     }
     logger.info({ waId: maskedId, account: currentAccountId(), totalMs: Date.now() - startedAt, visionMs: analysis?.durationMs ?? 0, picture: Boolean(picture), model: loopResult.servedBy?.model, fallbackFrom: loopResult.servedBy?.fallbackFrom, rounds: loopResult.generatedMessages.filter((g) => g.content.startsWith('[requested tools:')).length + 1 }, 'AI reply ready');
     finalText = loopResult.finalText;
     // The activity says honestly where the answer came from: cloud AI or local AI, which provider / model, and whether a failover happened.
     if (loopResult.servedBy) {
       const s = loopResult.servedBy;
-      servedByNote = `${s.source === 'local' ? 'local AI' : 'cloud AI'} (${[s.provider, s.model].filter(Boolean).join(' · ')})${s.fallbackFrom ? ` after failover from ${s.fallbackFrom} (${s.fallbackReason ?? 'failed'})` : ''}`;
+      servedByNote = `cloud AI (${[s.provider, s.model].filter(Boolean).join(' · ')})${s.fallbackFrom ? ` after failover from ${s.fallbackFrom} (${s.fallbackReason ?? 'failed'})` : ''}`;
     }
     // The model took a while: ownership may have changed meanwhile. Decide from the database NOW, before anything is stored or sent.
     heldBy = getHold(customer.id);
