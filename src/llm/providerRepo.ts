@@ -4,6 +4,7 @@ import { decryptWithKey, encryptWithKey, maskSecret } from '../config/secretStor
 import { getSecretEncryptionKey } from '../config/masterKey';
 import { isUsableApiKey } from '../config/effectiveConfig';
 import { logger } from '../logger';
+import { ensureAccountRouting, forgetProviderEntry } from './routingOrder';
 
 /**
  * AI providers configured in the dashboard (table ai_providers, migration 027). A provider is a chat-completions endpoint with its own
@@ -134,6 +135,24 @@ export function listProvidersForAccount(accountId: number, db: Database.Database
   return db.prepare('SELECT * FROM ai_providers WHERE whatsapp_account_id IS NULL OR whatsapp_account_id = ? ORDER BY priority, id').all(accountId) as AiProviderRow[];
 }
 
+/** The shared provider pool (the "Default" entry of every business): rows with no owning business, by priority. */
+export function listSharedProviders(db: Database.Database = getDb()): AiProviderRow[] {
+  return db.prepare('SELECT * FROM ai_providers WHERE whatsapp_account_id IS NULL ORDER BY priority, id').all() as AiProviderRow[];
+}
+
+export function getSharedProvider(id: number, db: Database.Database = getDb()): AiProviderRow | undefined {
+  return db.prepare('SELECT * FROM ai_providers WHERE id = ? AND whatsapp_account_id IS NULL').get(id) as AiProviderRow | undefined;
+}
+
+/** Puts the shared providers in this order (priority 10, 20, 30 …); ids that are not shared providers are ignored. Returns how many moved. */
+export function reorderSharedProviders(ids: number[], updatedBy: number, db: Database.Database = getDb()): number {
+  const known = new Set(listSharedProviders(db).map((r) => r.id));
+  const ordered = ids.filter((id, i) => known.has(id) && ids.indexOf(id) === i);
+  const write = db.transaction(() => ordered.forEach((id, i) => db.prepare("UPDATE ai_providers SET priority = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND whatsapp_account_id IS NULL").run((i + 1) * 10, updatedBy, id)));
+  write();
+  return ordered.length;
+}
+
 export function getProvider(id: number, accountId: number, db: Database.Database = getDb()): AiProviderRow | undefined {
   return db.prepare('SELECT * FROM ai_providers WHERE id = ? AND (whatsapp_account_id IS NULL OR whatsapp_account_id = ?)').get(id, accountId) as AiProviderRow | undefined;
 }
@@ -162,6 +181,8 @@ export function createProvider(input: AiProviderInput, scope: { accountId: numbe
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(scope.accountId, input.name.trim(), input.kind, input.baseUrl.replace(/\/+$/, ''), ciphertext, input.models.join(','), (input.visionModels ?? []).join(','), (input.audioModels ?? []).join(','),
       input.freeTier === false ? 0 : 1, input.supportsTools === false ? 0 : 1, input.enabled === false ? 0 : 1, input.priority ?? 100, input.timeoutMs ?? 20000, input.notes?.trim() || null, scope.updatedBy);
+  // A business's own provider joins ITS routing order (at the end); a shared one lives inside the Default entry of every business.
+  if (scope.accountId !== null) ensureAccountRouting(scope.accountId, db);
   return db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(result.lastInsertRowid) as AiProviderRow;
 }
 
@@ -189,7 +210,9 @@ export function setProviderEnabled(id: number, accountId: number, enabled: boole
 
 export function deleteProvider(id: number, accountId: number, db: Database.Database = getDb()): boolean {
   if (!getProvider(id, accountId, db)) return false;
-  return db.prepare('DELETE FROM ai_providers WHERE id = ?').run(id).changes === 1;
+  const removed = db.prepare('DELETE FROM ai_providers WHERE id = ?').run(id).changes === 1;
+  if (removed) forgetProviderEntry(id, db);
+  return removed;
 }
 
 export function recordProviderTest(id: number, ok: boolean, detail: string, db: Database.Database = getDb()): void {

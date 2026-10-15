@@ -14,6 +14,7 @@ import { chatCompletion } from '../../../src/llm/openRouterClient';
 import { AiResponseError } from '../../../src/llm/aiResponseError';
 import { AiCredentialError } from '../../../src/llm/aiCredentialError';
 import { setModelCatalogForTests, type ModelInfo } from '../../../src/llm/modelCatalog';
+import { DEFAULT_ENTRY, providerEntryKey, saveAccountRouting } from '../../../src/llm/routingOrder';
 import { allowUnknownPriceForTests, buildCandidates, classifyRouteFailure, explainRoutes, resetAiRouterForTests, routeCompletion } from '../../../src/llm/aiRouter';
 import { createProvider, listProvidersForAccount, providerApiKey, toView } from '../../../src/llm/providerRepo';
 import { listRouteLog, routeStats } from '../../../src/llm/routeLog';
@@ -76,6 +77,8 @@ beforeEach(() => {
   }
   runWithAccount(ACC, () => updateBusinessSettings({ openRouterModel: PAID, openRouterFallbackModels: FREE_OR, aiFreeOnly: true, aiFailoverEnabled: true }, ACC));
   for (const p of listProvidersForAccount(ACC)) getDb().prepare('UPDATE ai_providers SET enabled = 1 WHERE id = ?').run(p.id);
+  // the business's saved order: its two free cloud providers first, then Default (the built-in OpenRouter key), then its own local runtime
+  saveAccountRouting(ACC, [{ key: providerEntryKey(providerIds.groq) }, { key: providerEntryKey(providerIds.gemini) }, { key: DEFAULT_ENTRY }, { key: providerEntryKey(providerIds.local) }], 1);
   setModelCatalogForTests(CATALOG);
   allowUnknownPriceForTests(false); // the real rule: an unknown price is NOT free
   resetAiRouterForTests();
@@ -181,7 +184,8 @@ describe('failover', () => {
 
   it('LOCAL model: a timeout is classified as such, the local route cools down longer, and a local runtime that is OFFLINE (connection refused) is skipped without stalling', async () => {
     getDb().prepare('UPDATE ai_providers SET enabled = 0 WHERE id IN (?, ?)').run(providerIds.groq, providerIds.gemini);
-    getDb().prepare('UPDATE ai_providers SET priority = 1, timeout_ms = 2000 WHERE id = ?').run(providerIds.local);
+    getDb().prepare('UPDATE ai_providers SET timeout_ms = 2000 WHERE id = ?').run(providerIds.local);
+    saveAccountRouting(ACC, [{ key: providerEntryKey(providerIds.local) }, { key: DEFAULT_ENTRY }], 1); // the business tries its local runtime first
     const started = Date.now();
     network({ '127.0.0.1:11434': [() => new Promise((_resolve, reject) => { setTimeout(() => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), 50); })], 'openrouter.ai': [() => ok('cloud answer')] });
     const r = await ask();
@@ -193,7 +197,7 @@ describe('failover', () => {
     network({ 'openrouter.ai': [() => ok('cloud answer')] }); // 127.0.0.1 not scripted = connection refused
     const r2 = await ask();
     expect(r2.servedBy).toMatchObject({ provider: 'OpenRouter (built-in key)', fallbackReason: 'network' });
-    getDb().prepare('UPDATE ai_providers SET priority = 900, timeout_ms = 2500 WHERE id = ?').run(providerIds.local);
+    getDb().prepare('UPDATE ai_providers SET timeout_ms = 2500 WHERE id = ?').run(providerIds.local);
   });
 
   it('EVERY route fails: the error names the first cause, lists every attempt and why the rest were skipped, stays within the routing budget — the caller keeps the message (no exception is swallowed, nothing is lost)', async () => {
@@ -306,7 +310,7 @@ describe('context limits and a crashing local runtime', () => {
 
   it('a local runtime that crashes (connection refused) is skipped within its cooldown, and once it is back (service restarted) the next window uses it again', async () => {
     getDb().prepare('UPDATE ai_providers SET enabled = 0 WHERE id IN (?, ?)').run(providerIds.groq, providerIds.gemini);
-    getDb().prepare('UPDATE ai_providers SET priority = 1 WHERE id = ?').run(providerIds.local);
+    saveAccountRouting(ACC, [{ key: providerEntryKey(providerIds.local) }, { key: DEFAULT_ENTRY }], 1);
     network({ 'openrouter.ai': [() => ok('cloud answer')] }); // local not scripted = refused
     const down = await ask();
     expect(down.servedBy).toMatchObject({ provider: 'OpenRouter (built-in key)', fallbackReason: 'network' });
@@ -318,6 +322,5 @@ describe('context limits and a crashing local runtime', () => {
     resetAiRouterForTests(); // the cooldown elapsed
     const back = await ask();
     expect(back.servedBy).toMatchObject({ provider: 'Local Ollama', source: 'local' });
-    getDb().prepare('UPDATE ai_providers SET priority = 900 WHERE id = ?').run(providerIds.local);
   });
 });

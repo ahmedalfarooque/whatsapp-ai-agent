@@ -1014,9 +1014,11 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
         ${waStatus.lastSyncDetail ? `<p class="muted" style="margin-top:4px">${esc(waStatus.lastSyncDetail)}</p>` : ''}
       </section>
 
-      <section class="panel setup-card ai-card" style="margin-top:16px">
-        <h3>AI</h3>
-        <p class="muted">Your OpenRouter API key powers the assistant's replies.</p>
+      <section id="ai-routing-host" class="panel setup-card ai-card" style="margin-top:16px">${loadingView()}</section>
+
+      <details class="panel setup-card ai-card" style="margin-top:16px">
+        <summary><h3 style="display:inline">Advanced — OpenRouter model overrides for this business</h3></summary>
+        <p class="muted" style="margin-top:10px">Optional. The built-in OpenRouter key is part of the Default entry above; these fields only choose the models and the reply language this business uses with it.</p>
         ${aiNeedsKey ? '<p class="muted" role="alert" style="color:#c0453f;font-size:13px">The key saved earlier can no longer be read (it was stored under a different master key), so the assistant cannot reply. Enter your OpenRouter key again below and press Save &amp; Test AI.</p>' : ''}
         <form id="ai-form" autocomplete="off">
           ${autofillDecoy()}
@@ -1031,9 +1033,7 @@ route('#/integrations', 'Providers & Legacy API', 'AI provider credentials, plus
           </div>
         </form>
         <div id="ai-result" class="muted" style="font-size:12px"></div>
-      </section>
-
-      <section id="ai-routing-host" class="panel setup-card" style="margin-top:16px">${loadingView()}</section>
+      </details>
 
       <details class="panel setup-card" style="margin-top:16px">
         <summary><h3 style="display:inline">Optional integrations</h3></summary>
@@ -1231,51 +1231,6 @@ function routeLatencySvg(hourly) {
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img" aria-label="Average AI answer latency per hour"><line x1="${pad}" y1="${h - pad}" x2="${w - pad}" y2="${h - pad}" stroke="currentColor" stroke-opacity="0.25"></line><path d="${path}" fill="none" stroke="#2f6fed" stroke-width="2"></path>${dots}<text x="${pad}" y="14" font-size="10" fill="currentColor" fill-opacity="0.7">max ${(max / 1000).toFixed(1)} s</text></svg>`;
 }
 
-function providerFormHtml(presets, provider, canManageShared) {
-  const p = provider || {};
-  const options = presets.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
-  return `
-    <form id="provider-form" autocomplete="off" class="provider-form">
-      ${autofillDecoy()}
-      <input type="hidden" name="id" value="${p.id || ''}" />
-      ${!provider ? `<div class="field"><label for="wa-field-preset">Preset</label><select id="wa-field-preset" name="preset"><option value="">Choose a provider preset…</option>${options}</select><p class="field-help">Fills the endpoint, the kind and example free models. Keys are never pre-filled.</p></div>` : ''}
-      ${textField('name', 'Provider name', 'Shown in the activity and the history, e.g. "Groq free tier".', p.name || '')}
-      <div class="field"><label for="wa-field-kind">Kind</label><select id="wa-field-kind" name="kind">
-        <option value="openai_compatible" ${p.kind === 'openai_compatible' || !p.kind ? 'selected' : ''}>OpenAI-compatible endpoint (Groq, Google AI Studio, Cerebras, Mistral, custom)</option>
-        <option value="openrouter" ${p.kind === 'openrouter' ? 'selected' : ''}>OpenRouter (free models recognised from its public catalog)</option>
-        <option value="ollama" ${p.kind === 'ollama' ? 'selected' : ''}>Local Ollama (no key; loopback or private network only)</option>
-      </select></div>
-      ${textField('baseUrl', 'Base URL', 'The /v1 base, e.g. https://api.groq.com/openai/v1 or http://127.0.0.1:11434/v1. A local runtime on a public address is refused.', p.baseUrl || '')}
-      ${pwField('apiKey', 'API key', provider ? 'Leave empty to keep the stored key. Enter a new key to replace it; type the word none to remove it.' : 'Stored encrypted under the dashboard master key; shown masked afterwards, never in full.', p.hasKey)}
-      ${textField('models', 'Chat models (comma-separated, best first)', 'Only models you are allowed to use for free on this key. The router tries ONE at a time.', (p.models || []).join(', '))}
-      ${textField('visionModels', 'Vision models (pictures)', 'Models of this provider that accept image input. Empty = this provider never gets pictures.', (p.visionModels || []).join(', '))}
-      ${textField('audioModels', 'Audio models (voice notes)', 'Models that accept audio input. Empty = never gets voice notes.', (p.audioModels || []).join(', '))}
-      <div class="field"><label><input type="checkbox" name="freeTier" ${p.freeTier === false ? '' : 'checked'} /> This key is a free tier with no billing attached</label><p class="field-help">Unchecked = treated as paid: never used while strict free-only mode is on (fail-closed).</p></div>
-      <div class="field"><label><input type="checkbox" name="supportsTools" ${p.supportsTools === false ? '' : 'checked'} /> Supports tool calling (bookings, hand-off)</label><p class="field-help">Unchecked = never given a request that offers tools; nothing is silently degraded.</p></div>
-      ${textField('priority', 'Priority (1 = first; the built-in OpenRouter key is 50, the built-in local route 900)', '', String(p.priority || 100), { numeric: true })}
-      ${textField('timeoutMs', 'Timeout per attempt (ms, 2000–120000)', 'A slow local CPU model needs 30000–60000.', String(p.timeoutMs || 20000), { numeric: true })}
-      ${textField('notes', 'Notes', '', p.notes || '')}
-      ${!provider && canManageShared ? `<div class="field"><label><input type="checkbox" name="shared" /> Shared by every business (super administrator)</label><p class="field-help">Unchecked = this business only. A shared provider's key is used by all businesses but never shown to any.</p></div>` : ''}
-      <div class="toolbar" style="margin-top:8px">
-        <button type="submit" class="btn primary">Save provider</button>
-        <button type="button" class="btn" id="provider-cancel">Cancel</button>
-      </div>
-      <div id="provider-form-result" class="muted" style="font-size:12px"></div>
-    </form>`;
-}
-
-function readProviderForm(form) {
-  const f = readFormFields(form, ['id', 'preset', 'name', 'kind', 'baseUrl', 'apiKey', 'models', 'visionModels', 'audioModels', 'priority', 'timeoutMs', 'notes']);
-  const payload = {
-    name: f.name, kind: f.kind, baseUrl: f.baseUrl, models: f.models, visionModels: f.visionModels, audioModels: f.audioModels, notes: f.notes,
-    priority: f.priority ? Number(f.priority) : undefined, timeoutMs: f.timeoutMs ? Number(f.timeoutMs) : undefined,
-    freeTier: Boolean(form.elements.namedItem('freeTier')?.checked), supportsTools: Boolean(form.elements.namedItem('supportsTools')?.checked),
-    shared: Boolean(form.elements.namedItem('shared')?.checked),
-  };
-  if (f.apiKey) payload.apiKey = /^none$/i.test(f.apiKey.trim()) ? '' : f.apiKey;
-  return { id: f.id, payload };
-}
-
 // Messages waiting for an AI answer, recovered ones and the five-minute escalations (counts only: never a customer's words).
 function recoveryHtml(recovery) {
   if (!recovery) return '';
@@ -1289,6 +1244,142 @@ function recoveryHtml(recovery) {
     ${(voice.alternatives || []).length ? `<ul class="muted" style="font-size:12px;margin:4px 0 0 18px">${voice.alternatives.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}`;
 }
 
+// ---- compact provider list (the account's "AI providers" card and the Super Admin's shared pool use the same pieces) -----------------------
+
+const LOCAL_MODEL_WARNING = 'A local model on this server is slow and has not passed the speed and quality checks for customer replies. Turn it on anyway?';
+const AI_STATE = {
+  ok: ['OK', 'green'], failed: ['TEST FAILED', 'red'], untested: ['NOT TESTED', 'muted'], off: ['OFF', 'muted'], no_key: ['NO KEY', 'red'], empty: ['NOT SET UP', 'amber'],
+};
+const aiStateBadge = (state) => { const s = AI_STATE[state] || AI_STATE.untested; return badge(s[0], s[1]); };
+const shortText = (text, n) => { const t = String(text || ''); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+
+/** The two-field form: a recognisable name and the API configuration (a key, or the address of a local runtime). Everything else is under "More options". */
+function aiProviderFormHtml(presets, entry) {
+  const isNew = !entry;
+  const presetOptions = presets.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+  return `
+    <form class="ai-entry-form" autocomplete="off">
+      ${autofillDecoy()}
+      <input type="hidden" name="id" value="${entry && entry.id ? entry.id : ''}" />
+      ${textField('name', 'API / Agent name', 'A name you will recognise, for example "Groq free".', entry ? entry.name : '')}
+      ${pwField('config', 'API configuration', isNew ? 'Paste the API key (stored encrypted, shown masked afterwards). For a local runtime enter its address, for example http://127.0.0.1:11434.' : 'Leave empty to keep the saved configuration, or enter a new one to replace it.', !isNew)}
+      ${isNew ? `<div class="field"><label for="wa-field-provider">Provider</label><select id="wa-field-provider" name="provider"><option value="auto">Detect from the key</option>${presetOptions}</select></div>` : ''}
+      <details class="ai-more"><summary>More options</summary>
+        ${textField('models', 'Models (comma-separated, best first)', 'Leave empty to use the provider\'s suggested free models.', entry && entry.models ? entry.models.join(', ') : '')}
+        ${isNew ? textField('baseUrl', 'Endpoint address', 'Only for a custom endpoint; every known provider fills this in.', '') : ''}
+      </details>
+      <div class="toolbar" style="margin-top:8px">
+        <button type="submit" class="btn primary">Save</button>
+        <button type="button" class="btn ai-cancel">Cancel</button>
+      </div>
+      <div class="ai-form-result muted" style="font-size:12px" role="status"></div>
+    </form>`;
+}
+
+/** One row of the list: order, name, configuration, a one-line status and the actions that apply. */
+function aiEntryRowHtml(entry, index, count, opts) {
+  const isDefault = entry.type === 'default';
+  const detail = entry.detail ? `<span class="muted ai-detail" title="${esc(entry.detail)}">${esc(shortText(entry.detail, 90))}</span>` : '';
+  const config = isDefault ? 'Shared providers managed by the Super Admin' : entry.config || '';
+  return `
+    <li class="ai-entry${entry.enabled ? '' : ' off'}" data-key="${esc(entry.key || '')}" data-id="${entry.id == null ? '' : entry.id}">
+      <span class="ai-pos" aria-hidden="true">${index + 1}</span>
+      <div class="ai-main"><strong>${esc(entry.name)}</strong> ${isDefault ? badge('SHARED', 'blue') : ''}<div class="muted ai-config">${isDefault ? `<span>${esc(config)}</span>` : `<span class="file">${esc(config)}</span>`}</div></div>
+      <div class="ai-state">${aiStateBadge(entry.state)} ${detail}</div>
+      <div class="ai-actions">
+        ${opts.reorder ? `<button type="button" class="btn small" data-act="up" aria-label="Move up" ${index === 0 ? 'disabled' : ''}>▲</button><button type="button" class="btn small" data-act="down" aria-label="Move down" ${index === count - 1 ? 'disabled' : ''}>▼</button>` : ''}
+        <button type="button" class="btn small" data-act="test">Test</button>
+        <button type="button" class="btn small" data-act="toggle">${entry.enabled ? 'Turn off' : 'Turn on'}</button>
+        ${isDefault ? '' : '<button type="button" class="btn small" data-act="edit">Edit</button><button type="button" class="btn small danger" data-act="remove">Remove</button>'}
+      </div>
+    </li>`;
+}
+
+function readAiForm(form) {
+  const f = readFormFields(form, ['id', 'name', 'config', 'provider', 'models', 'baseUrl']);
+  const payload = { name: f.name, config: f.config, models: f.models };
+  if (f.provider && f.provider !== 'auto') payload.provider = f.provider;
+  if (f.baseUrl) payload.baseUrl = f.baseUrl;
+  return { id: f.id, payload };
+}
+
+/** Shows one compact test / error line (the long diagnostics stay out of the page). */
+function showAiStatus(host, text, ok) {
+  const line = host.querySelector('.ai-status-line');
+  if (!line) return;
+  line.textContent = text || '';
+  line.style.color = ok === false ? '#c0453f' : ok === true ? '#0e8f68' : '';
+}
+
+/** Wires the form shown by either page. `endpoint` is the create URL; `itemUrl(id)` the URL of one provider. */
+function bindAiForm(host, { endpoint, itemUrl, extraPayload, onDone }) {
+  const form = host.querySelector('.ai-entry-form');
+  if (!form) return;
+  host.querySelectorAll('.pw-toggle').forEach((btn) => btn.addEventListener('click', () => {
+    const input = host.querySelector(`#${btn.dataset.for}`);
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.textContent = showing ? 'Show' : 'Hide';
+  }));
+  form.querySelector('.ai-cancel').addEventListener('click', () => onDone(false));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { id, payload } = readAiForm(form);
+    const result = form.querySelector('.ai-form-result');
+    try {
+      if (id) await api(itemUrl(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      else await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, ...(extraPayload || {}) }) });
+      toast('Saved', 'success');
+      onDone(true);
+    } catch (error) {
+      result.textContent = error.fields ? `${error.message}: check ${error.fields.join(', ')}` : error.message;
+      result.style.color = '#c0453f';
+    }
+  });
+}
+
+// The routing diagnostics (plan, cooldowns, charts, recovery, history) live in one collapsed block so the page stays short.
+function routingDiagnosticsHtml(data) {
+  const { settings, plan, cooldowns, history, stats, statsWeek, builtin } = data;
+  const planList = (p) => p.eligible.length
+    ? `<ol class="route-plan">${p.eligible.map((r) => `<li>${esc(r.providerName)} · <span class="file">${esc(r.model)}</span> ${priceBadge(r.free)}${r.local ? badge('LOCAL', 'blue') : ''}</li>`).join('')}</ol>`
+    : `<p class="muted" style="color:#c0453f">No eligible route: every customer message gets the automated choices (not an AI answer).</p>`;
+  const skippedList = (p) => p.skipped.length
+    ? `<ul class="muted route-skipped">${p.skipped.map((s) => `<li>${esc(s.route.providerName)} · <span class="file">${esc(s.route.model)}</span> — ${badge(categoryLabel(s.category), categoryTone(s.category))} ${esc(s.reason)}</li>`).join('')}</ul>`
+    : '';
+  const perRoute = (stats.perRoute || []).map((r) => `<tr><td>${esc(r.providerName)}</td><td><span class="file">${esc(r.model)}</span></td><td>${r.ok}</td><td>${r.failed}</td><td>${r.avgLatencyMs != null ? `${(r.avgLatencyMs / 1000).toFixed(1)} s` : '—'}</td><td>${r.lastOutcome ? badge(r.lastOutcome === 'ok' ? 'OK' : categoryLabel(r.lastCategory), r.lastOutcome === 'ok' ? 'green' : categoryTone(r.lastCategory) || 'red') : '—'}</td></tr>`).join('');
+  const historyRows = (history || []).map((h) => `<tr><td class="muted" style="white-space:nowrap">${esc(formatDate(h.created_at))}</td><td>${esc(h.task)}</td><td>${esc(h.provider_name)} · <span class="file">${esc(h.model)}</span></td><td>${h.outcome === 'ok' ? badge('OK', 'green') : badge(categoryLabel(h.category), categoryTone(h.category) || 'red')}</td><td>${h.http_status ?? ''}</td><td>${(h.latency_ms / 1000).toFixed(1)} s</td><td class="muted" style="font-size:12px">${esc(h.detail || '')}</td></tr>`).join('');
+  const coolRows = (cooldowns || []).map((c) => `<li>${esc(c.key)} — ${esc(c.why)} until ${esc(formatDate(c.untilIso))}</li>`).join('');
+  return `
+    <details class="ai-diagnostics" style="margin-top:14px"><summary><strong>Routing status and history</strong></summary>
+      <div class="detail-grid" style="margin-top:12px">
+        <label class="muted">Strict free-only mode</label>
+        <div><label><input type="checkbox" id="routing-free-only" ${settings.freeOnly ? 'checked' : ''} /> Never use a route that may cost money (an unknown price counts as paid)</label></div>
+        <label class="muted">Automatic failover</label>
+        <div><label><input type="checkbox" id="routing-failover" ${settings.failover ? 'checked' : ''} /> After a failure, try the next provider at once (at most ${builtin.budget.maxRoutesPerMessage} routes within ${Math.round(builtin.budget.routingBudgetMs / 1000)} s)</label></div>
+        <span></span>
+        <div class="toolbar"><button type="button" class="btn" id="routing-save">Save routing switches</button><span id="routing-save-result" class="muted" style="font-size:12px"></span></div>
+      </div>
+      <h4 style="margin-top:14px">Providers used right now (in order)</h4>
+      <div class="detail-grid">
+        <label class="muted">Chat</label><div>${planList(plan.chat)}${skippedList(plan.chat)}</div>
+        <label class="muted">Pictures</label><div>${planList(plan.vision)}</div>
+        <label class="muted">Voice notes</label><div>${planList(plan.audio)}</div>
+      </div>
+      ${coolRows ? `<p class="muted" style="margin-top:8px">Cooling down now:</p><ul class="muted">${coolRows}</ul>` : ''}
+      <h4 style="margin-top:14px">Last 24 hours</h4>
+      <p class="muted" style="font-size:12px">${stats.totals.ok} answered · ${stats.totals.failed} failed${stats.totals.avgLatencyMs != null ? ` · average answer ${(stats.totals.avgLatencyMs / 1000).toFixed(1)} s` : ''} · last 7 days: ${statsWeek.totals.ok} answered, ${statsWeek.totals.failed} failed</p>
+      ${routeBarsSvg(stats.hourly)}
+      ${perRoute ? `<div class="table-wrap" style="margin-top:12px"><table class="data-table"><thead><tr><th>Provider</th><th>Model</th><th>OK</th><th>Failed</th><th>Avg time</th><th>Last</th></tr></thead><tbody>${perRoute}</tbody></table></div>` : ''}
+      <h4 style="margin-top:14px">Unanswered messages and escalations</h4>
+      ${recoveryHtml(data.recovery)}
+      <h4 style="margin-top:14px">Latest attempts</h4>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>When</th><th>Task</th><th>Route</th><th>Outcome</th><th>HTTP</th><th>Time</th><th>Detail</th></tr></thead><tbody>${historyRows || `<tr><td colspan="7" class="muted">No attempts yet.</td></tr>`}</tbody></table></div>
+    </details>`;
+}
+
+// ---- the account's AI providers: Default (the shared pool) + its own providers, in the order the server follows -----------------------------
+
 async function renderAiRouting(host) {
   let editing = null; // null = list, 'new' = add form, number = edit form
   async function draw() {
@@ -1299,110 +1390,59 @@ async function renderAiRouting(host) {
       host.innerHTML = errorView(error.message, draw);
       return;
     }
-    const { settings, providers, presets, builtin, plan, cooldowns, history, stats, statsWeek, canManageShared } = data;
-    const planList = (p) => p.eligible.length
-      ? `<ol class="route-plan">${p.eligible.map((r) => `<li>${esc(r.providerName)} · <span class="file">${esc(r.model)}</span> ${priceBadge(r.free)}${r.local ? badge('LOCAL', 'blue') : ''}</li>`).join('')}</ol>`
-      : `<p class="muted" style="color:#c0453f">No eligible route: every customer message gets the automated choices (not an AI answer).</p>`;
-    const skippedList = (p) => p.skipped.length
-      ? `<ul class="muted route-skipped">${p.skipped.map((s) => `<li>${esc(s.route.providerName)} · <span class="file">${esc(s.route.model)}</span> — ${badge(categoryLabel(s.category), categoryTone(s.category))} ${esc(s.reason)}</li>`).join('')}</ul>`
-      : '';
-    const providerRows = providers.length
-      ? providers.map((p) => `
-        <tr data-provider="${p.id}">
-          <td><strong>${esc(p.name)}</strong><br><span class="muted" style="font-size:12px">${esc(p.kind)} · ${esc(p.baseUrl)}${p.shared ? ' · shared' : ''}</span></td>
-          <td><span class="file">${esc((p.models || []).join(', ') || '—')}</span>${p.visionModels?.length ? `<br><span class="muted" style="font-size:12px">pictures: ${esc(p.visionModels.join(', '))}</span>` : ''}${p.audioModels?.length ? `<br><span class="muted" style="font-size:12px">audio: ${esc(p.audioModels.join(', '))}</span>` : ''}</td>
-          <td>${p.kind === 'ollama' ? badge('NO KEY NEEDED', 'green') : p.keyStatus === 'ok' ? `<span class="file">${esc(p.keyMasked || '')}</span>` : p.keyStatus === 'undecryptable' ? badge('RE-ENTER KEY', 'red') : badge('NO KEY', 'red')}</td>
-          <td>${p.freeTier ? badge('FREE TIER', 'green') : badge('PAID', 'red')}${p.supportsTools ? '' : `<br>${badge('NO TOOLS', 'muted')}`}</td>
-          <td>${p.priority}</td>
-          <td>${p.enabled ? badge('ENABLED', 'green') : badge('DISABLED', 'muted')}</td>
-          <td>${p.lastTestAt ? `${badge(p.lastTestOk ? 'OK' : 'FAILED', p.lastTestOk ? 'green' : 'red')}<br><span class="muted" style="font-size:12px">${esc(formatDate(p.lastTestAt))}${p.lastTestDetail ? ` · ${esc(p.lastTestDetail)}` : ''}</span>` : badge('NOT TESTED', 'muted')}</td>
-          <td class="toolbar" style="white-space:nowrap">
-            <button type="button" class="btn small" data-act="test">Test</button>
-            <button type="button" class="btn small" data-act="${p.enabled ? 'disable' : 'enable'}">${p.enabled ? 'Disable' : 'Enable'}</button>
-            <button type="button" class="btn small" data-act="edit">Edit</button>
-            <button type="button" class="btn small danger" data-act="remove">Remove</button>
-          </td>
-        </tr>`).join('')
-      : `<tr><td colspan="8" class="muted">No provider added yet. The built-in OpenRouter key and, when configured on the server, the local route are the only AI routes.</td></tr>`;
-    const perRoute = (stats.perRoute || []).map((r) => `<tr><td>${esc(r.providerName)}</td><td><span class="file">${esc(r.model)}</span></td><td>${r.ok}</td><td>${r.failed}</td><td>${r.avgLatencyMs != null ? `${(r.avgLatencyMs / 1000).toFixed(1)} s` : '—'}</td><td>${r.lastOutcome ? badge(r.lastOutcome === 'ok' ? 'OK' : categoryLabel(r.lastCategory), r.lastOutcome === 'ok' ? 'green' : categoryTone(r.lastCategory) || 'red') : '—'}</td></tr>`).join('');
-    const historyRows = (history || []).map((h) => `<tr><td class="muted" style="white-space:nowrap">${esc(formatDate(h.created_at))}</td><td>${esc(h.task)}</td><td>${esc(h.provider_name)} · <span class="file">${esc(h.model)}</span></td><td>${h.outcome === 'ok' ? badge('OK', 'green') : badge(categoryLabel(h.category), categoryTone(h.category) || 'red')}</td><td>${h.http_status ?? ''}</td><td>${(h.latency_ms / 1000).toFixed(1)} s</td><td class="muted" style="font-size:12px">${esc(h.detail || '')}</td></tr>`).join('');
-    const coolRows = (cooldowns || []).map((c) => `<li>${esc(c.key)} — ${esc(c.why)} until ${esc(formatDate(c.untilIso))}</li>`).join('');
-    const builtinModels = (builtin.openRouter.models || []).map((m) => `<li><span class="file">${esc(m.model)}</span> ${priceBadge(m.free)}${m.image ? badge('PICTURES', 'blue') : ''}</li>`).join('');
+    const entries = data.entries || [];
+    const editingEntry = typeof editing === 'number' ? entries.find((e) => e.id === editing) : null;
     host.innerHTML = `
-      <h3>AI routing — providers, keys and failover</h3>
-      <p class="muted">Every AI task goes through one routing layer: the providers below (by priority), the built-in OpenRouter key (priority 50) and the server's local route (priority 900). A failing route is skipped at once and cools down; when no route answers, the customer gets the automated choices — never silence. Keys are stored encrypted and shown masked only.</p>
+      <h3>AI providers</h3>
+      <p class="muted">Providers are tried from the top. If one fails, times out or runs out of its free usage, the next one is used at once. Only free usage is ever allowed.</p>
+      <ul class="ai-list">${entries.map((e, i) => aiEntryRowHtml(e, i, entries.length, { reorder: true })).join('')}</ul>
+      <div class="toolbar" style="margin-top:8px"><button type="button" class="btn primary" id="ai-add">Add provider</button></div>
+      <div class="ai-status-line muted" style="font-size:12px;margin-top:6px" role="status" aria-live="polite"></div>
+      <div id="ai-form-host" style="margin-top:10px">${editing === 'new' ? aiProviderFormHtml(data.presets, null) : editingEntry ? aiProviderFormHtml(data.presets, editingEntry) : ''}</div>
+      ${routingDiagnosticsHtml(data)}`;
 
-      <div class="detail-grid" style="margin-top:12px">
-        <label class="muted">Strict free-only mode</label>
-        <div><label><input type="checkbox" id="routing-free-only" ${settings.freeOnly ? 'checked' : ''} /> Never use a route that may cost money (fail-closed: an unknown price counts as paid)</label></div>
-        <label class="muted">Automatic failover</label>
-        <div><label><input type="checkbox" id="routing-failover" ${settings.failover ? 'checked' : ''} /> After a failure, try the next eligible route at once (at most ${builtin.budget.maxRoutesPerMessage} routes within ${Math.round(builtin.budget.routingBudgetMs / 1000)} s)</label></div>
-        <span></span>
-        <div class="toolbar"><button type="button" class="btn primary" id="routing-save">Save routing switches</button><span id="routing-save-result" class="muted" style="font-size:12px"></span></div>
-      </div>
-
-      <h4 style="margin-top:18px">Live routing plan for this business</h4>
-      <div class="detail-grid">
-        <label class="muted">Chat</label><div>${planList(plan.chat)}${skippedList(plan.chat)}</div>
-        <label class="muted">Pictures</label><div>${planList(plan.vision)}${skippedList(plan.vision)}</div>
-        <label class="muted">Voice notes</label><div>${planList(plan.audio)}${skippedList(plan.audio)}</div>
-      </div>
-      ${coolRows ? `<p class="muted" style="margin-top:8px">Cooling down now:</p><ul class="muted">${coolRows}</ul>` : ''}
-
-      <h4 style="margin-top:18px">Built-in routes</h4>
-      <div class="detail-grid">
-        <label class="muted">OpenRouter (built-in key)</label>
-        <div>${builtin.openRouter.hasKey ? badge('KEY SAVED', 'green') : badge('NO KEY', 'red')} <span class="muted">source: ${esc(builtin.openRouter.source)}</span><ul style="margin:6px 0 0 18px">${builtinModels}</ul><p class="muted" style="font-size:12px">A PAID model is never used while strict free-only mode is on. Free OpenRouter models are unavailable while the OpenRouter account enforces Zero Data Retention (openrouter.ai/settings/privacy) — shown here as "privacy / data policy" when tried.</p></div>
-        <label class="muted">Local route (server)</label>
-        <div>${builtin.local.configured ? `${badge('CONFIGURED', 'green')} <span class="file">${esc(builtin.local.baseUrl)}</span> · ${esc(builtin.local.models.join(', '))}${builtin.local.visionModels.length ? ` · pictures: ${esc(builtin.local.visionModels.join(', '))}` : ''} · timeout ${Math.round(builtin.local.timeoutMs / 1000)} s` : `${badge('NOT CONFIGURED', 'muted')} <span class="muted">Set OLLAMA_BASE_URL and OLLAMA_MODELS on the server (an Ollama on 127.0.0.1), or add a Local Ollama provider below.</span>`}</div>
-      </div>
-
-      <h4 style="margin-top:18px">Providers and API keys</h4>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>Provider</th><th>Models</th><th>Key</th><th>Billing</th><th>Priority</th><th>State</th><th>Last test</th><th></th></tr></thead><tbody>${providerRows}</tbody></table></div>
-      <div class="toolbar" style="margin-top:8px"><button type="button" class="btn primary" id="provider-add">Add provider</button></div>
-      <div id="provider-form-host" style="margin-top:10px">${editing === 'new' ? providerFormHtml(presets, null, canManageShared) : typeof editing === 'number' ? providerFormHtml(presets, providers.find((p) => p.id === editing), canManageShared) : ''}</div>
-
-      <h4 style="margin-top:18px">Route success and failures — last 24 hours</h4>
-      <p class="muted" style="font-size:12px">${stats.totals.ok} answered · ${stats.totals.failed} failed${stats.totals.avgLatencyMs != null ? ` · average answer ${(stats.totals.avgLatencyMs / 1000).toFixed(1)} s` : ''} · last 7 days: ${statsWeek.totals.ok} answered, ${statsWeek.totals.failed} failed</p>
-      ${routeBarsSvg(stats.hourly)}
-      <h4 style="margin-top:12px">Average answer time per hour</h4>
-      ${routeLatencySvg(stats.hourly)}
-      ${perRoute ? `<div class="table-wrap" style="margin-top:12px"><table class="data-table"><thead><tr><th>Provider</th><th>Model</th><th>OK</th><th>Failed</th><th>Avg time</th><th>Last</th></tr></thead><tbody>${perRoute}</tbody></table></div>` : ''}
-
-      <h4 style="margin-top:18px">Unanswered messages and escalations</h4>
-      ${recoveryHtml(data.recovery)}
-
-      <h4 style="margin-top:18px">Routing history (latest attempts)</h4>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>When</th><th>Task</th><th>Route</th><th>Outcome</th><th>HTTP</th><th>Time</th><th>Detail</th></tr></thead><tbody>${historyRows || `<tr><td colspan="7" class="muted">No attempts yet.</td></tr>`}</tbody></table></div>`;
-
-    host.querySelector('#routing-save').addEventListener('click', async () => {
-      const result = host.querySelector('#routing-save-result');
-      try {
-        await api('/api/dashboard/ai-routing/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ freeOnly: host.querySelector('#routing-free-only').checked, failover: host.querySelector('#routing-failover').checked }) });
-        toast('Routing switches saved', 'success');
-        await draw();
-      } catch (error) {
-        result.textContent = error.message;
-      }
+    host.querySelector('#ai-add').addEventListener('click', () => { editing = 'new'; draw(); });
+    bindAiForm(host, {
+      endpoint: '/api/dashboard/ai-routing/providers',
+      itemUrl: (id) => `/api/dashboard/ai-routing/providers/${id}`,
+      onDone: (saved) => { editing = null; if (saved) draw(); else draw(); },
     });
-    host.querySelector('#provider-add').addEventListener('click', () => { editing = 'new'; draw(); });
-    host.querySelectorAll('tr[data-provider] [data-act]').forEach((btn) => {
+
+    const save = async (list) => {
+      await api('/api/dashboard/ai-routing/order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entries: list }) });
+    };
+    host.querySelectorAll('.ai-entry [data-act]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const id = Number(btn.closest('tr').dataset.provider);
+        const row = btn.closest('.ai-entry');
+        const key = row.dataset.key;
+        const id = row.dataset.id ? Number(row.dataset.id) : null;
         const act = btn.dataset.act;
+        const index = entries.findIndex((e) => e.key === key);
         try {
           if (act === 'edit') { editing = id; await draw(); return; }
-          if (act === 'remove') {
-            if (!window.confirm('Remove this provider and its stored key?')) return;
+          if (act === 'up' || act === 'down') {
+            const list = entries.map((e) => ({ key: e.key, enabled: e.type === 'default' ? e.enabled : undefined }));
+            const to = act === 'up' ? index - 1 : index + 1;
+            [list[index], list[to]] = [list[to], list[index]];
+            await save(list);
+            toast('Order saved', 'success');
+          } else if (act === 'toggle') {
+            const entry = entries[index];
+            if (!entry.enabled && entry.provider === 'ollama' && !window.confirm(LOCAL_MODEL_WARNING)) return;
+            if (entry.type === 'default') await save(entries.map((e) => ({ key: e.key, enabled: e.key === key ? !e.enabled : e.type === 'default' ? e.enabled : undefined })));
+            else await api(`/api/dashboard/ai-routing/providers/${id}/${entry.enabled ? 'disable' : 'enable'}`, { method: 'POST' });
+          } else if (act === 'remove') {
+            if (!window.confirm('Remove this provider and its saved configuration?')) return;
             await api(`/api/dashboard/ai-routing/providers/${id}`, { method: 'DELETE' });
             toast('Provider removed', 'success');
           } else if (act === 'test') {
             btn.disabled = true; btn.textContent = 'Testing…';
-            const res = await api(`/api/dashboard/ai-routing/providers/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-            toast(res.ok ? 'Provider test passed' : 'Provider test failed', res.ok ? 'success' : 'error');
-          } else {
-            await api(`/api/dashboard/ai-routing/providers/${id}/${act}`, { method: 'POST' });
-            toast(act === 'enable' ? 'Provider enabled' : 'Provider disabled', 'success');
+            const res = entries[index].type === 'default'
+              ? await api('/api/dashboard/ai-routing/entries/default/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+              : await api(`/api/dashboard/ai-routing/providers/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            await draw();
+            showAiStatus(host, `${entries[index].name}: ${res.ok ? 'passed' : 'failed'} — ${res.detail}`, res.ok);
+            return;
           }
           await draw();
         } catch (error) {
@@ -1411,39 +1451,98 @@ async function renderAiRouting(host) {
         }
       });
     });
-    const form = host.querySelector('#provider-form');
-    if (form) {
-      const preset = form.elements.namedItem('preset');
-      if (preset) preset.addEventListener('change', () => {
-        const chosen = presets.find((x) => x.id === preset.value);
-        if (!chosen) return;
-        form.elements.namedItem('name').value = chosen.name;
-        form.elements.namedItem('kind').value = chosen.kind;
-        form.elements.namedItem('baseUrl').value = chosen.baseUrl;
-        if (!form.elements.namedItem('models').value) form.elements.namedItem('models').value = chosen.models;
-        if (chosen.kind === 'ollama') form.elements.namedItem('timeoutMs').value = '45000';
-        form.querySelector('#provider-form-result').textContent = chosen.hint;
-      });
-      form.querySelector('#provider-cancel').addEventListener('click', () => { editing = null; draw(); });
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const { id, payload } = readProviderForm(form);
-        const result = form.querySelector('#provider-form-result');
-        try {
-          if (id) await api(`/api/dashboard/ai-routing/providers/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-          else await api('/api/dashboard/ai-routing/providers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-          toast('Provider saved', 'success');
-          editing = null;
-          await draw();
-        } catch (error) {
-          result.textContent = error.fields ? `${error.message}: check ${error.fields.join(', ')}` : error.message;
-          result.style.color = '#c0453f';
-        }
-      });
-    }
+
+    host.querySelector('#routing-save').addEventListener('click', async () => {
+      const result = host.querySelector('#routing-save-result');
+      try {
+        await api('/api/dashboard/ai-routing/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ freeOnly: host.querySelector('#routing-free-only').checked, failover: host.querySelector('#routing-failover').checked }) });
+        toast('Routing switches saved', 'success');
+        result.textContent = 'Saved.';
+      } catch (error) {
+        result.textContent = error.message;
+      }
+    });
   }
   await draw();
 }
+
+// ---------------------------------------------------------------------
+// Super Admin Settings: the shared AI defaults (Default pool) of every business
+// ---------------------------------------------------------------------
+
+route('#/super-admin-settings', 'Super Admin Settings', 'Shared AI defaults for every business — managed by the Super Admin only.', async (view) => {
+  let editing = null;
+  async function draw() {
+    const data = await api('/api/dashboard/super-admin/ai');
+    const providers = data.providers.map((p) => ({
+      key: `provider:${p.id}`, type: 'provider', id: p.id, name: p.name, provider: p.kind, enabled: p.enabled, config: p.kind === 'ollama' ? p.baseUrl : p.keyMasked || '', models: p.models,
+      state: !p.enabled ? 'off' : p.kind !== 'ollama' && p.keyStatus !== 'ok' ? 'no_key' : p.lastTestAt ? (p.lastTestOk ? 'ok' : 'failed') : 'untested',
+      detail: p.kind !== 'ollama' && p.keyStatus === 'undecryptable' ? 'The saved key cannot be read: enter it again.' : p.lastTestDetail || (p.freeTier ? '' : 'Declared as a paid endpoint: never used while free-only mode is on.'),
+    }));
+    const editingEntry = typeof editing === 'number' ? providers.find((p) => p.id === editing) : null;
+    view.innerHTML = `
+      <section class="panel setup-card">
+        <h3>Default AI providers</h3>
+        <p class="muted">The providers below form the shared Default entry that every business, present and future, inherits. Keys stay here, encrypted and masked; a business only sees one line saying how many shared providers can answer, and decides where Default sits in its own order.</p>
+        <p class="muted" style="font-size:12px"><span>Businesses inheriting Default:</span> <b>${data.accounts}</b></p>
+        <p class="muted" style="font-size:12px">${esc(data.enforced.note)}</p>
+        <ul class="ai-list">${providers.length ? providers.map((e, i) => aiEntryRowHtml(e, i, providers.length, { reorder: true })).join('') : '<li class="muted">No shared provider yet. Add one below; until then each business uses only the providers it added itself.</li>'}</ul>
+        <div class="toolbar" style="margin-top:8px"><button type="button" class="btn primary" id="ai-add">Add provider</button></div>
+        <div class="ai-status-line muted" style="font-size:12px;margin-top:6px" role="status" aria-live="polite"></div>
+        <div id="ai-form-host" style="margin-top:10px">${editing === 'new' ? aiProviderFormHtml(data.presets, null) : editingEntry ? aiProviderFormHtml(data.presets, editingEntry) : ''}</div>
+      </section>
+      <section class="panel setup-card" style="margin-top:16px">
+        <h3>Also part of Default (set on the server)</h3>
+        <div class="detail-grid">
+          <label class="muted">OpenRouter (built-in key)</label><div>${data.builtin.openRouter.hasKey ? badge('KEY SAVED', 'green') : badge('NO KEY', 'muted')} <span class="muted">tried after the shared providers above</span></div>
+          <label class="muted">Local model (this server)</label><div>${data.builtin.local.configured ? `${badge('CONFIGURED', 'green')} <span class="file">${esc(data.builtin.local.baseUrl)}</span> · ${esc(data.builtin.local.models.join(', '))}` : `${badge('OFF', 'muted')} <span class="muted">A local model answers customers only after it passes the latency and quality checks.</span>`}</div>
+        </div>
+      </section>`;
+
+    view.querySelector('#ai-add').addEventListener('click', () => { editing = 'new'; draw(); });
+    bindAiForm(view, {
+      endpoint: '/api/dashboard/super-admin/ai/providers',
+      itemUrl: (id) => `/api/dashboard/super-admin/ai/providers/${id}`,
+      onDone: () => { editing = null; draw(); },
+    });
+    view.querySelectorAll('.ai-entry [data-act]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('.ai-entry');
+        const id = Number(row.dataset.id);
+        const index = providers.findIndex((p) => p.id === id);
+        const act = btn.dataset.act;
+        try {
+          if (act === 'edit') { editing = id; await draw(); return; }
+          if (act === 'up' || act === 'down') {
+            const ids = providers.map((p) => p.id);
+            const to = act === 'up' ? index - 1 : index + 1;
+            [ids[index], ids[to]] = [ids[to], ids[index]];
+            await api('/api/dashboard/super-admin/ai/providers/order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
+            toast('Order saved', 'success');
+          } else if (act === 'toggle') {
+            if (!providers[index].enabled && providers[index].provider === 'ollama' && !window.confirm(LOCAL_MODEL_WARNING)) return;
+            await api(`/api/dashboard/super-admin/ai/providers/${id}/${providers[index].enabled ? 'disable' : 'enable'}`, { method: 'POST' });
+          } else if (act === 'remove') {
+            if (!window.confirm(`Remove "${providers[index].name}" and its saved key? Every business that uses Default (${data.accounts} now) stops using it.`)) return;
+            await api(`/api/dashboard/super-admin/ai/providers/${id}?confirm=yes`, { method: 'DELETE' });
+            toast('Provider removed', 'success');
+          } else if (act === 'test') {
+            btn.disabled = true; btn.textContent = 'Testing…';
+            const res = await api(`/api/dashboard/super-admin/ai/providers/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            await draw();
+            showAiStatus(view, `${providers[index].name}: ${res.ok ? 'passed' : 'failed'} — ${res.detail}`, res.ok);
+            return;
+          }
+          await draw();
+        } catch (error) {
+          toast(error.message, 'error');
+          await draw();
+        }
+      });
+    });
+  }
+  await draw();
+});
 
 // ---------------------------------------------------------------------
 // System

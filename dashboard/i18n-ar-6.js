@@ -346,3 +346,62 @@ window.I18N_AR_PATTERNS.push(
   [/^Stale — last synced (just now|\d+ s ago|\d+ min ago)$/, function (when) { var m = /^(\d+) (s|min) ago$/.exec(when); return 'قديم — آخر مزامنة ' + (when === 'just now' ? 'الآن' : 'منذ ' + m[1] + (m[2] === 's' ? ' ث' : ' د')); }],
   [/^Sync error — last synced (just now|\d+ s ago|\d+ min ago), retrying$/, function (when) { var m = /^(\d+) (s|min) ago$/.exec(when); return 'خطأ في المزامنة — آخر مزامنة ' + (when === 'just now' ? 'الآن' : 'منذ ' + m[1] + (m[2] === 's' ? ' ث' : ' د')) + '، تجري إعادة المحاولة'; }]
 );
+
+// Super Admin Settings (shared AI defaults) and the compact AI providers list.
+Object.assign(window.I18N_AR, {
+  'Super Admin Settings': 'إعدادات المشرف الأعلى',
+  'Shared AI defaults for every business — managed by the Super Admin only.': 'إعدادات الذكاء الاصطناعي المشتركة لكل الأنشطة — يديرها المشرف الأعلى فقط.',
+  'AI providers': 'مزودو الذكاء الاصطناعي',
+  'Default AI providers': 'مزودو الذكاء الاصطناعي الافتراضيون',
+  'Also part of Default (set on the server)': 'ضمن الافتراضي أيضاً (يُضبط على الخادم)',
+  'Providers are tried from the top. If one fails, times out or runs out of its free usage, the next one is used at once. Only free usage is ever allowed.': 'تُجرَّب المزودات من الأعلى. إذا فشل أحدها أو انتهت مهلته أو نفد استخدامه المجاني فسيُستخدم التالي فوراً. لا يُسمح إلا بالاستخدام المجاني.',
+  'The providers below form the shared Default entry that every business, present and future, inherits. Keys stay here, encrypted and masked; a business only sees one line saying how many shared providers can answer, and decides where Default sits in its own order.': 'تشكّل المزودات أدناه الإدخال الافتراضي المشترك الذي يرثه كل نشاط، الحالي والمستقبلي. تبقى المفاتيح هنا مشفّرة ومخفية؛ ولا يرى النشاط سوى سطر واحد يذكر عدد المزودات المشتركة القادرة على الرد، ويحدد بنفسه موضع «الافتراضي» في ترتيبه.',
+  'Businesses inheriting Default:': 'الأنشطة التي ترث الافتراضي:',
+  'Strict free-only mode and automatic failover are on for every business by default; a paid or unknown-price route is never called while free-only is on.': 'الوضع المجاني الصارم والتبديل التلقائي عند الفشل مفعّلان لكل نشاط افتراضياً؛ ولا يُستدعى أي مسار مدفوع أو مجهول السعر ما دام الوضع المجاني مفعّلاً.',
+  'No shared provider yet. Add one below; until then each business uses only the providers it added itself.': 'لا يوجد مزود مشترك بعد. أضف واحداً أدناه؛ وإلى ذلك الحين يستخدم كل نشاط المزودات التي أضافها بنفسه فقط.',
+  'Shared providers managed by the Super Admin': 'مزودات مشتركة يديرها المشرف الأعلى',
+  'API / Agent name': 'اسم الواجهة / الوكيل',
+  'API configuration': 'إعداد الواجهة البرمجية',
+  'A name you will recognise, for example "Groq free".': 'اسم تتعرّف عليه، مثل «Groq المجاني».',
+  'Paste the API key (stored encrypted, shown masked afterwards). For a local runtime enter its address, for example http://127.0.0.1:11434.': 'الصق مفتاح الواجهة (يُخزَّن مشفّراً ويظهر مخفياً بعد ذلك). وللنموذج المحلي أدخل عنوانه، مثل http://127.0.0.1:11434.',
+  'Leave empty to keep the saved configuration, or enter a new one to replace it.': 'اتركه فارغاً للإبقاء على الإعداد المحفوظ، أو أدخل إعداداً جديداً لاستبداله.',
+  'Detect from the key': 'التعرّف من المفتاح',
+  'More options': 'خيارات إضافية',
+  'Models (comma-separated, best first)': 'النماذج (مفصولة بفواصل، الأفضل أولاً)',
+  'Leave empty to use the provider\'s suggested free models.': 'اتركه فارغاً لاستخدام النماذج المجانية المقترحة من المزود.',
+  'Endpoint address': 'عنوان نقطة الاتصال',
+  'Only for a custom endpoint; every known provider fills this in.': 'لنقطة اتصال مخصصة فقط؛ فكل مزود معروف يملأ هذا الحقل تلقائياً.',
+  'SHARED': 'مشترك', 'Turn on': 'تشغيل', 'Turn off': 'إيقاف',
+  'OK': 'سليم', 'TEST FAILED': 'فشل الاختبار', 'NOT TESTED': 'لم يُختبر', 'OFF': 'متوقف', 'NO KEY': 'لا مفتاح', 'NOT SET UP': 'غير مُعدّ',
+  'Saved': 'تم الحفظ', 'Order saved': 'تم حفظ الترتيب',
+  'Remove this provider and its saved configuration?': 'هل تريد إزالة هذا المزود وإعداده المحفوظ؟',
+  'Routing status and history': 'حالة التوجيه والسجل',
+  'Providers used right now (in order)': 'المزودات المستخدمة الآن (بالترتيب)',
+  'Last 24 hours': 'آخر 24 ساعة',
+  'Latest attempts': 'أحدث المحاولات',
+  'Unanswered messages and escalations': 'الرسائل غير المُجاب عنها والتصعيدات',
+  'Never use a route that may cost money (an unknown price counts as paid)': 'عدم استخدام أي مسار قد يكلّف مالاً (السعر المجهول يُعدّ مدفوعاً)',
+  'Advanced — OpenRouter model overrides for this business': 'متقدم — نماذج OpenRouter الخاصة بهذا النشاط',
+  'Optional. The built-in OpenRouter key is part of the Default entry above; these fields only choose the models and the reply language this business uses with it.': 'اختياري. مفتاح OpenRouter المدمج جزء من الإدخال الافتراضي أعلاه؛ وهذه الحقول تحدد فقط النماذج ولغة الرد التي يستخدمها هذا النشاط معه.',
+  'Local model (this server)': 'النموذج المحلي (هذا الخادم)',
+  'KEY SAVED': 'المفتاح محفوظ', 'CONFIGURED': 'مُعدّ',
+  'tried after the shared providers above': 'يُجرَّب بعد المزودات المشتركة أعلاه',
+  'A local model answers customers only after it passes the latency and quality checks.': 'لا يرد النموذج المحلي على العملاء إلا بعد اجتيازه فحوص السرعة والجودة.'
+});
+
+// Status sentences of the Default entry (sent by the server) and the compact provider list.
+Object.assign(window.I18N_AR, {
+  'Switched off for this business.': 'متوقف لهذا النشاط.',
+  'No shared provider is configured yet. The Super Admin adds them under Super Admin Settings.': 'لم يُضبط أي مزود مشترك بعد. يضيفه المشرف الأعلى من «إعدادات المشرف الأعلى».',
+  'The shared providers are turned off or have no usable key. Ask the Super Admin.': 'المزودات المشتركة متوقفة أو بلا مفتاح صالح. راجع المشرف الأعلى.',
+  'The saved key cannot be read: enter it again.': 'تعذّرت قراءة المفتاح المحفوظ: أدخله من جديد.',
+  'No API key saved.': 'لا يوجد مفتاح محفوظ.',
+  'Declared as a paid endpoint: never used while free-only mode is on.': 'مُعلن كنقطة اتصال مدفوعة: لا تُستخدم أبداً ما دام الوضع المجاني مفعّلاً.'
+});
+window.I18N_AR_PATTERNS.push(
+  [/^(\d+) shared providers? available(?: \((\d+) turned off by the administrator\))?\.$/, function (n, off) { return n + ' من المزودات المشتركة متاحة' + (off ? ' (' + off + ' أوقفها المشرف)' : '') + '.'; }]
+);
+
+Object.assign(window.I18N_AR, {
+  'A local model on this server is slow and has not passed the speed and quality checks for customer replies. Turn it on anyway?': 'النموذج المحلي على هذا الخادم بطيء ولم يجتز فحوص السرعة والجودة للرد على العملاء. هل تريد تشغيله رغم ذلك؟'
+});

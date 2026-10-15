@@ -86,8 +86,10 @@ describe('dashboard shell', () => {
     const intentionallySuperOnly = new Set<string>();
     for (const call of calls) {
       const spec = specFor('GET', call);
-      if (spec.t === 'super') intentionallySuperOnly.add(call);
+      // Super Admin Settings is super-only ON PURPOSE: it has its own explicit rule (asserted below), so it is not an accidental fall-through.
+      if (spec.t === 'super' && !/^\/super-admin(\/|$)/.test(call)) intentionallySuperOnly.add(call);
     }
+    for (const method of ['GET', 'POST', 'PUT', 'DELETE']) expect(specFor(method, '/super-admin/ai/providers')).toEqual({ t: 'super' });
     expect([...intentionallySuperOnly], 'API paths used by the pages that have no access rule').toEqual([]);
   });
 

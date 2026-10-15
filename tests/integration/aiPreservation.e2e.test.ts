@@ -17,6 +17,7 @@ import { getOrCreateActiveConversation, appendMessage } from '../../src/memory/c
 import { getBusinessSettings, updateBusinessSettings } from '../../src/config/businessSettings';
 import { getAutomationSettings } from '../../src/automation/settingsRepo';
 import { createProvider } from '../../src/llm/providerRepo';
+import { DEFAULT_ENTRY, providerEntryKey, saveAccountRouting } from '../../src/llm/routingOrder';
 import { ensureTemplateDefaults } from '../../src/templates/templateRepo';
 import { loadKnowledgeBase } from '../../src/knowledge/loader';
 import { getDb } from '../../src/memory/db';
@@ -93,6 +94,9 @@ describe('provider incidents never touch history, memory, settings or reply mode
       updateBusinessSettings({ openRouterModel: 'vendor/free-model:free', conversationHistoryLimit: 20 }, ACC);
       createProvider({ name: 'Groq key A', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', apiKey: 'gsk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', models: ['llama-3.3-70b-versatile'], priority: 10, timeoutMs: 3000 }, { accountId: ACC, updatedBy: 1 });
       createProvider({ name: 'Groq key B', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', apiKey: 'gsk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', models: ['llama-3.1-8b-instant'], priority: 20, timeoutMs: 3000 }, { accountId: ACC, updatedBy: 1 });
+      // this business tries its own two keys first (A then B), then Default
+      const own = (getDb().prepare('SELECT id FROM ai_providers WHERE whatsapp_account_id = ? ORDER BY priority, id').all(ACC) as Array<{ id: number }>).map((r) => ({ key: providerEntryKey(r.id) }));
+      saveAccountRouting(ACC, [...own, { key: DEFAULT_ENTRY }], 1);
     });
     // establish memory: language + a prior conversation
     runWithAccount(ACC, () => {

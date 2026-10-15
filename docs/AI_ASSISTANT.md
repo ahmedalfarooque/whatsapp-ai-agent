@@ -18,18 +18,25 @@
 
 ## The AI routing layer (24/7, zero API spending by default) — `src/llm/aiRouter.ts`, `providerRepo.ts`, `routeLog.ts`, `openAiCompatible.ts`
 
-Every AI task (chat, picture analysis, voice transcription) goes through one router. The routes, in order:
+Every AI task (chat, picture analysis, voice transcription) goes through one router. **Each business has a saved, ordered list** of entries
+(table `ai_account_routing`, migration 029; `src/llm/routingOrder.ts`) and the router follows it exactly:
 
-1. **Providers configured in the dashboard** (Providers page → *AI routing*; table `ai_providers`, migration 027): OpenRouter, any
-   OpenAI-compatible free tier (presets: Groq, Google AI Studio, Cerebras, Mistral, custom) or a **local Ollama**. A provider is shared by
-   every business (super administrator) or belongs to one business; each has its own key (AES-GCM under the dashboard master key, returned
-   masked only), its chat / vision / audio model lists, a priority, a timeout, a *free tier* declaration and a *supports tools* flag.
-2. **The built-in OpenRouter key** (priority 50) with the business's own models and fallback list.
-3. **The built-in local route** (priority 900): `OLLAMA_BASE_URL` + `OLLAMA_MODELS` on the server (loopback / private address only). A local
-   route receives a **compact prompt** (a third of the knowledge / history budgets, same facts) because a CPU-only host is slow.
-4. The pipeline's **deterministic customer-service fallback** (not an AI answer, labelled as such): the automated reply with the
-   callback / message / next-opening choices — see `docs/AFTER_HOURS_AND_FOLLOWUPS.md`.
+* **Default** — ONE entry that stands for the shared pool the **Super Admin** manages on *Super Admin Settings* (profile menu): providers
+  saved with no owning business (`ai_providers.whatsapp_account_id IS NULL`), then the server's built-in OpenRouter key (priority 500) and
+  the built-in local route (priority 900). Every existing and future business inherits it (a new business starts with Default only); its keys
+  are never copied into a business and never shown to one (a business sees a one-line summary: how many shared providers can answer).
+* **The business's own providers** — each added on the *Providers & Legacy API* page with a **name** and an **API configuration** (an API key,
+  recognised by its prefix — `gsk_` Groq, `AIza` Google AI Studio, `sk-or-` OpenRouter, `csk-` Cerebras — or the address of a local runtime);
+  the preset fills endpoint, kind and example free models, "More options" holds the models and endpoint. Own providers are visible to, and used
+  by, that business only.
 
+A business reorders its entries (▲ ▼), switches Default on or off for itself, and tests, turns on/off, edits or removes its own providers. The
+order is saved on the server and is what the next customer message uses. Inside Default the shared providers keep the Super Admin's order
+(▲ ▼ on Super Admin Settings), then the built-in routes. Removing a shared provider needs an explicit confirmation (it names how many
+businesses inherit it); turning one off, or removing it, changes no business's order or data — Default just has fewer members, and says so.
+A **local Ollama** can be added as a provider but is created **switched off**: it does not answer customers until someone turns it on after a
+confirmation (see the evaluation below). Last, the pipeline's **deterministic customer-service fallback** (not an AI answer, labelled as
+such): the automated reply with the callback / message / next-opening choices — see `docs/AFTER_HOURS_AND_FOLLOWUPS.md`.
 Rules, all per business (`ai_free_only`, `ai_failover_enabled`, both ON by default; new businesses inherit them):
 
 * **Strict free-only, fail-closed**: a route that may cost money is never used — an OpenRouter model whose public-catalog price is not 0

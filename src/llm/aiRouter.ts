@@ -9,6 +9,7 @@ import { completeOnce, openRouterHeaders } from './openAiCompatible';
 import { getModelInfo } from './modelCatalog';
 import { csv, listProvidersForAccount, providerApiKey, type AiProviderRow, type ProviderKind } from './providerRepo';
 import { recordRouteAttempt } from './routeLog';
+import { DEFAULT_ENTRY, getAccountRouting, providerEntryKey } from './routingOrder';
 import type { ChatCompletionResponse, ChatMessage } from './types';
 import type { ToolDefinition } from '../tools';
 
@@ -74,7 +75,8 @@ export interface RoutedResponse extends ChatCompletionResponse {
   route: { candidate: RouteCandidate; attempts: RouteAttempt[]; skipped: SkippedRoute[]; source: 'cloud' | 'local'; totalMs: number };
 }
 
-export const BUILTIN_OPENROUTER_PRIORITY = 50;
+// Inside the Default entry the shared providers (priority 1-499, set by the Super Admin's order) come first, then the server's built-in OpenRouter key, then the built-in local route.
+export const BUILTIN_OPENROUTER_PRIORITY = 500;
 export const BUILTIN_LOCAL_PRIORITY = 900;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const MIN_ATTEMPT_MS = 1500;
@@ -158,18 +160,19 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
   const now = opts.now ?? Date.now();
   const settings = getBusinessSettings(accountId);
   const freeOnly = settings.aiFreeOnly;
-  const all: Array<{ priority: number; order: number; candidate: RouteCandidate; disabled?: string }> = [];
+  const all: Array<{ priority: number; order: number; candidate: RouteCandidate; disabled?: string; entryKey: string }> = [];
   let order = 0;
 
-  // 1. configured providers (shared and this account's own)
+  // 1. configured providers: the shared pool (= the "Default" entry of every business) and this business's own providers (one entry each)
   for (const row of listProvidersForAccount(accountId)) {
+    const entryKey = row.whatsapp_account_id === null ? DEFAULT_ENTRY : providerEntryKey(row.id);
     const models = modelsFor(row, task);
     if (models.length === 0) continue;
     const apiKey = row.kind === 'ollama' ? null : providerApiKey(row);
     const disabled = row.enabled === 0 ? 'provider disabled' : row.kind !== 'ollama' && !apiKey ? (row.key_ciphertext ? 'the stored key cannot be read (enter it again)' : 'no API key saved') : undefined;
     for (const model of models) {
       const facts = await describeModel(row.kind, model, row, task);
-      all.push({ priority: row.priority, order: order++, disabled, candidate: {
+      all.push({ priority: row.priority, order: order++, disabled, entryKey, candidate: {
         key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, baseUrl: row.base_url, apiKey, model, ...facts,
         timeoutMs: row.timeout_ms, local: row.kind === 'ollama', builtin: false,
       } });
@@ -191,7 +194,7 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
     // The business's own vision / chat model was configured for pictures by the administrator: with the catalog unavailable it is still
     // tried (that is exactly what worked on production); a generic fallback with unknown capability is not.
     const explicit = task === 'vision' && (model === settings.openRouterVisionModel || model === settings.openRouterModel);
-    all.push({ priority: BUILTIN_OPENROUTER_PRIORITY, order: order++, disabled: isUsableApiKey(builtinKey) ? undefined : builtinKey.trim() ? 'the saved OpenRouter key is not a usable key (wrong format or length)' : 'no OpenRouter key saved', candidate: {
+    all.push({ priority: BUILTIN_OPENROUTER_PRIORITY, order: order++, entryKey: DEFAULT_ENTRY, disabled: isUsableApiKey(builtinKey) ? undefined : builtinKey.trim() ? 'the saved OpenRouter key is not a usable key (wrong format or length)' : 'no OpenRouter key saved', candidate: {
       key: `builtin:${model}`, providerKey: 'provider:builtin', providerId: null, providerName: 'OpenRouter (built-in key)', kind: 'openrouter', baseUrl: OPENROUTER_BASE_URL, apiKey: isUsableApiKey(builtinKey) ? builtinKey : null, model,
       free: facts.free, image: facts.image ?? (explicit ? true : null), audio: facts.audio, tools: facts.tools, timeoutMs: env.OPENROUTER_TIMEOUT_MS, local: false, builtin: true,
     } });
@@ -201,18 +204,23 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
   if (env.OLLAMA_BASE_URL) {
     const localModels = csv(task === 'chat' ? env.OLLAMA_MODELS : task === 'vision' ? env.OLLAMA_VISION_MODELS : '');
     for (const model of localModels) {
-      all.push({ priority: BUILTIN_LOCAL_PRIORITY, order: order++, candidate: {
+      all.push({ priority: BUILTIN_LOCAL_PRIORITY, order: order++, entryKey: DEFAULT_ENTRY, candidate: {
         key: `local:${model}`, providerKey: 'provider:local', providerId: null, providerName: 'Local Ollama (built-in)', kind: 'ollama', baseUrl: env.OLLAMA_BASE_URL, apiKey: null, model,
         free: true, image: task === 'vision' ? true : null, audio: null, tools: true, timeoutMs: env.OLLAMA_TIMEOUT_MS, local: true, builtin: true,
       } });
     }
   }
 
-  all.sort((a, b) => a.priority - b.priority || a.order - b.order);
+  // The business's saved order decides which ENTRY is tried first; inside the Default entry the shared pool keeps its own priorities.
+  const routing = getAccountRouting(accountId);
+  const position = new Map(routing.map((r) => [r.key, r.position]));
+  const switchedOff = new Set(routing.filter((r) => !r.enabled).map((r) => r.key));
+  all.sort((a, b) => (position.get(a.entryKey) ?? 9999) - (position.get(b.entryKey) ?? 9999) || a.priority - b.priority || a.order - b.order);
   const eligible: RouteCandidate[] = [];
   const skipped: SkippedRoute[] = [];
   for (const entry of all) {
     const c = entry.candidate;
+    if (switchedOff.has(entry.entryKey)) { skipped.push({ candidate: c, category: 'disabled', reason: entry.entryKey === DEFAULT_ENTRY ? 'the Default entry is switched off for this business' : 'switched off for this business' }); continue; }
     if (entry.disabled) { skipped.push({ candidate: c, category: entry.disabled.includes('key') ? 'no_key' : 'disabled', reason: entry.disabled }); continue; }
     const cooling = coolingUntil(routeCoolKey(task, c), now) ?? coolingUntil(c.providerKey, now);
     if (cooling) { skipped.push({ candidate: c, category: 'cooldown', reason: `cooling down until ${new Date(cooling.until).toISOString().slice(11, 19)} UTC (${cooling.why})` }); continue; }

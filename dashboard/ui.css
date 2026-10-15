@@ -675,3 +675,20 @@ body.palette-open{overflow:hidden}
 .route-skipped{margin:4px 0 0 18px;padding:0;font-size:12px}
 .provider-form{max-width:760px}
 
+
+/* ---- AI providers list (account page and Super Admin Settings): compact rows instead of a wide table ---- */
+.ai-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ai-entry { display: grid; grid-template-columns: 28px minmax(0, 1.4fr) minmax(0, 1.2fr) auto; align-items: center; gap: 10px 14px; padding: 10px 12px; border: 1px solid var(--line, rgba(127, 127, 127, 0.28)); border-radius: 10px; }
+.ai-entry.off { opacity: 0.72; }
+.ai-pos { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; background: rgba(127, 127, 127, 0.18); }
+.ai-main { min-width: 0; }
+.ai-config { font-size: 12px; overflow-wrap: anywhere; }
+.ai-state { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ai-detail { font-size: 12px; overflow-wrap: anywhere; }
+.ai-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.ai-more { margin-top: 8px; }
+.ai-more > summary { cursor: pointer; font-size: 13px; }
+@media (max-width: 760px) {
+  .ai-entry { grid-template-columns: 28px minmax(0, 1fr); }
+  .ai-state, .ai-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}

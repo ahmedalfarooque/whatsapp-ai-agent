@@ -236,6 +236,8 @@ function renderProfile() {
   if (hasCap('users')) items.push('<a role="menuitem" href="#/users">Users &amp; permissions</a>');
   items.push('<a role="menuitem" href="#/accounts">WhatsApp accounts</a>');
   if (hasCap('configuration')) items.push('<a role="menuitem" href="#/settings">Settings</a>');
+  // Shared AI defaults of every business: the permanent Super Admin only (the page and its API are closed to everyone else as well).
+  if (me.superAdmin) items.push('<a role="menuitem" href="#/super-admin-settings">Super Admin Settings</a>');
   menu.innerHTML = items.join('');
 }
 

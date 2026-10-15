@@ -73,6 +73,8 @@ const RULES: readonly Rule[] = [
   { test: /^\/ai\/configure$/, spec: { t: 'configuration' } },
   // AI routing: providers, keys, free-only / failover switches, route history (keys are never returned, only masked)
   { test: /^\/ai-routing(\/|$)/, spec: { t: 'configuration' } },
+  // Super Admin Settings: the shared AI defaults of the whole application (the permanent Super Admin only)
+  { test: /^\/super-admin(\/|$)/, spec: { t: 'super' } },
   { test: /^\/system$/, spec: { t: 'configuration' } },
   { test: /^\/settings$/, spec: { t: 'configuration' } },
   { test: /^\/project-sync$/, spec: { t: 'configuration' } },

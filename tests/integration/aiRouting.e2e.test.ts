@@ -56,9 +56,14 @@ describe('AI routing dashboard API', () => {
     const stored = getDb().prepare('SELECT key_ciphertext FROM ai_providers WHERE id = ?').get(id) as { key_ciphertext: string };
     expect(stored.key_ciphertext).not.toContain('gsk_'); // encrypted at rest
 
-    // the plan now starts with it
+    // a new own provider joins the business's order AFTER Default; the business then moves it first and the router follows at once
     const state = await agent.get('/api/dashboard/ai-routing');
-    expect(state.body.plan.chat.eligible[0]).toMatchObject({ providerName: 'Groq free tier', model: 'llama-3.3-70b-versatile' });
+    expect(state.body.entries.map((e: { name: string }) => e.name)).toEqual(['Default', 'Groq free tier']);
+    const moved = await agent.put('/api/dashboard/ai-routing/order').send({ entries: [{ key: `provider:${id}` }, { key: 'default' }] });
+    expect(moved.status).toBe(200);
+    expect(moved.body.entries.map((e: { name: string }) => e.name)).toEqual(['Groq free tier', 'Default']);
+    const reordered = await agent.get('/api/dashboard/ai-routing');
+    expect(reordered.body.plan.chat.eligible[0]).toMatchObject({ providerName: 'Groq free tier', model: 'llama-3.3-70b-versatile' });
 
     // edit without touching the key
     const edited = await agent.put(`/api/dashboard/ai-routing/providers/${id}`).send({ name: 'Groq (free)', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', models: 'llama-3.1-8b-instant', priority: 15, freeTier: true, supportsTools: true });
@@ -121,7 +126,12 @@ describe('AI routing dashboard API', () => {
     const shared = await agent.post('/api/dashboard/ai-routing/providers').send({ name: 'Shared Google', kind: 'openai_compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKey: GROQ_KEY, models: 'gemini-2.5-flash-lite', shared: true });
     expect(shared.status).toBe(201); // the first administrator is the super administrator
     expect(shared.body.provider.shared).toBe(true);
-    expect((await agent.get('/api/dashboard/ai-routing').set('X-Whatsapp-Account', String(OTHER))).body.providers.map((p: { name: string }) => p.name)).toEqual(['Shared Google']);
+    // a shared provider is part of EVERY business's Default entry: they see a summary, never its name, address or key
+    const otherView = (await agent.get('/api/dashboard/ai-routing').set('X-Whatsapp-Account', String(OTHER))).body;
+    expect(otherView.providers).toEqual([]);
+    expect(otherView.entries.map((e: { name: string }) => e.name)).toEqual(['Default']);
+    expect(otherView.defaultPool.usable).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify({ providers: otherView.providers, entries: otherView.entries, defaultPool: otherView.defaultPool })).not.toMatch(/Shared Google|generativelanguage|gsk_/);
     // switches: strict mode off for the OTHER business only
     expect((await agent.put('/api/dashboard/ai-routing/settings').set('X-Whatsapp-Account', String(OTHER)).send({ freeOnly: false })).body.settings).toEqual({ freeOnly: false, failover: true });
     expect((await agent.get('/api/dashboard/ai-routing')).body.settings.freeOnly).toBe(true);

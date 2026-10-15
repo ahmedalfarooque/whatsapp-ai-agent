@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
+import { ensureAccountRouting } from '../llm/routingOrder';
 import { getDb } from '../memory/db';
 import { env } from '../config/env';
 import { LEGACY_ACCOUNT_ID } from './accountContext';
@@ -181,6 +182,7 @@ export function createAccount(raw: unknown, db: Database.Database = getDb()): Wh
     const id = Number(result.lastInsertRowid);
     db.prepare('UPDATE whatsapp_accounts SET auth_dir = ? WHERE id = ?').run(`accounts/${id}/baileys-auth`, id);
     ensureAccountRows(id, { name: v.name!, nameAr: v.nameAr ?? null, businessCategory: v.businessCategory ?? null }, db);
+    ensureAccountRouting(id, db); // a new business inherits the shared Default AI entry (and the safe free-only / failover defaults) automatically
     return id;
   });
   return getAccount(run(), db)!;
