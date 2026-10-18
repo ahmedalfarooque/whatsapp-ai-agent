@@ -1269,16 +1269,14 @@ function aiProviderFormHtml(meta, entry) {
     <form class="ai-entry-form" autocomplete="off">
       ${autofillDecoy()}
       <input type="hidden" name="id" value="${entry && entry.id ? entry.id : ''}" />
-      <form-meta hidden data-rules="${esc(JSON.stringify(meta.rules || {}))}" data-presets="${esc(JSON.stringify(presets.map((x) => ({ id: x.id, baseUrl: x.baseUrl, models: x.models, hint: x.hint }))))}"></form-meta>
+      <form-meta hidden data-rules="${esc(JSON.stringify(meta.rules || {}))}" data-presets="${esc(JSON.stringify(presets.map((x) => ({ id: x.id, baseUrl: x.baseUrl, autoSelect: Boolean(x.autoSelect), hint: x.hint }))))}"></form-meta>
       ${textField('name', 'API / Agent name', 'A name you will recognise, for example "Groq free".', entry ? entry.name : '')}
       <p class="field-help ai-err" data-err="name" style="color:#c0453f" hidden></p>
       ${pwField('config', 'API configuration', isNew ? 'Paste the API key (stored encrypted, shown masked afterwards).' : 'Leave empty to keep the saved configuration, or enter a new one to replace it.', !isNew)}
       <p class="field-help ai-err" data-err="config" style="color:#c0453f" hidden></p>
       ${isNew ? `<div class="field"><label for="wa-field-provider">Provider</label><select id="wa-field-provider" name="provider"><option value="auto">Detect from the key</option>${presetOptions}</select><p class="field-help ai-provider-hint"></p><p class="field-help ai-err" data-err="provider" style="color:#c0453f" hidden></p></div>` : ''}
       <details class="ai-more"><summary>More options</summary>
-        ${textField('models', 'Models (comma-separated, best first)', 'Filled in for known providers (free-tier models only; a provider is never used until its free tier is confirmed). Required for a custom endpoint.', entry && entry.models ? entry.models.join(', ') : '')}
-        <div class="toolbar" style="margin:4px 0"><button type="button" class="btn small ai-fetch-models">Fetch available models</button></div>
-        <div class="ai-models-result muted" style="font-size:12px" role="status" aria-live="polite"></div>
+        ${textField('models', 'Models (optional, comma-separated, best first)', isNew ? 'Leave empty: when you save, the key is tested with a real request and a model that answered is chosen automatically. Type model ids only to test those instead. Required for a custom endpoint, xAI and Cerebras. A provider is never used until its free tier is confirmed.' : 'The models this provider may use, best first. A provider is never used until its free tier is confirmed.', entry && entry.models ? entry.models.join(', ') : '')}
         <p class="field-help ai-err" data-err="models" style="color:#c0453f" hidden></p>
         ${isNew ? textField('baseUrl', 'Endpoint address', 'Filled in for known providers. Required for a custom endpoint: a full https:// address.', '') : ''}
         <p class="field-help ai-err" data-err="baseUrl" style="color:#c0453f" hidden></p>
@@ -1328,7 +1326,7 @@ function aiFormMeta(form) {
 }
 
 // Recognises a pasted key by its provider's prefix, only to pre-fill the form (the server detects the same way and stays authoritative).
-const AI_KEY_PREFIXES = { openrouter: /^sk-or-/, groq: /^gsk_/, google: /^AIza/, cerebras: /^csk-/ };
+const AI_KEY_PREFIXES = { openrouter: /^sk-or-/, groq: /^gsk_/, google: /^AIza/, xai: /^xai-/, cerebras: /^csk-/ };
 
 /** The preset chosen in the form, or recognised from the key's prefix. */
 function aiFormPreset(form, meta) {
@@ -1344,10 +1342,12 @@ function aiFormApplyPreset(form, meta) {
   const base = form.elements.baseUrl;
   if (!base) return; // editing: the endpoint is not changed here
   const preset = aiFormPreset(form, meta);
-  for (const [input, value] of [[form.elements.models, preset ? preset.models : ''], [base, preset ? preset.baseUrl : '']]) {
+  // Only the endpoint is pre-filled. The model is never guessed here: the server picks it by a real test request when the key is saved.
+  for (const [input, value] of [[base, preset ? preset.baseUrl : '']]) {
     if (!input.value || input.dataset.auto === '1') { input.value = value; input.dataset.auto = '1'; }
     input.oninput = () => { input.dataset.auto = '0'; };
   }
+  form.elements.models.placeholder = !preset ? 'Chosen automatically for known providers' : preset.autoSelect ? 'Chosen automatically when you save' : 'Required for this provider';
   const custom = Boolean(preset && preset.id === 'custom');
   const hint = form.querySelector('.ai-provider-hint');
   if (hint) hint.textContent = preset ? (custom ? 'Custom endpoint: Endpoint address and Models are required.' : preset.hint) : '';
@@ -1368,8 +1368,9 @@ function aiFormValidate(form, isNew) {
     const baseUrl = val('baseUrl') || (preset ? preset.baseUrl : '');
     if (!meta.baseUrl.test(baseUrl)) errors.baseUrl = baseUrl ? 'Endpoint address must be a full https:// address, for example https://api.example.com/v1.' : 'Endpoint address is required for a custom provider.';
   }
-  const models = (val('models') || (isNew && preset ? preset.models : '')).split(',').map((s) => s.trim()).filter(Boolean);
-  if (isNew && models.length === 0) errors.models = 'Choose at least one model: press Fetch available models, or type a model id.';
+  const models = val('models').split(',').map((s) => s.trim()).filter(Boolean);
+  // A provider whose vendor documents a stable model is configured automatically (a real test request picks the model when the key is saved).
+  if (isNew && models.length === 0 && !(preset && preset.autoSelect)) errors.models = 'Type the model id to use: this provider has no model that can be chosen automatically.';
   else if (models.some((m) => !meta.model.test(m))) errors.models = 'A model id may only contain letters, digits and . _ : / @ - (separate several with commas).';
   form.querySelectorAll('.ai-err').forEach((p) => { const m = errors[p.dataset.err]; p.textContent = m || ''; p.hidden = !m; });
   if (errors.baseUrl || errors.models) form.querySelector('.ai-more').open = true;
@@ -1395,38 +1396,9 @@ function showAiStatus(host, text, ok) {
 }
 
 /** Wires the form shown by either page. `endpoint` is the create URL; `itemUrl(id)` the URL of one provider. */
-function bindAiForm(host, { endpoint, itemUrl, discoverUrl, extraPayload, onDone }) {
+function bindAiForm(host, { endpoint, itemUrl, extraPayload, onDone }) {
   const form = host.querySelector('.ai-entry-form');
   if (!form) return;
-  const fetchBtn = form.querySelector('.ai-fetch-models');
-  if (fetchBtn && discoverUrl) fetchBtn.addEventListener('click', async () => {
-    const out = form.querySelector('.ai-models-result');
-    const idField = form.elements.id && form.elements.id.value;
-    const body = idField
-      ? { providerId: Number(idField) }
-      : { provider: form.elements.provider ? form.elements.provider.value : 'auto', config: form.elements.config.value, baseUrl: form.elements.baseUrl ? form.elements.baseUrl.value : '' };
-    fetchBtn.disabled = true;
-    out.textContent = 'Asking the provider…';
-    try {
-      const r = await api(discoverUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) { out.textContent = r.detail; out.style.color = '#c0453f'; return; }
-      out.style.color = '';
-      out.innerHTML = `<div>${esc(`${r.count} models reported by the provider.`)} ${esc(r.freeNote || '')}</div>`
-        + `<div class="ai-model-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${r.models.slice(0, 80).map((m) => `<button type="button" class="btn small" data-model="${esc(m.id)}" title="${esc(`${m.modalities || ''} ${m.contextLength ? `· ${m.contextLength} tokens` : ''} · ${m.evidence}`)}">${esc(m.id)}${m.free === true ? ' · free (catalog)' : m.free === false ? ' · paid' : ''}</button>`).join('')}</div>`;
-      out.querySelectorAll('[data-model]').forEach((b) => b.addEventListener('click', () => {
-        const input = form.elements.models;
-        const have = input.dataset.auto === '1' ? [] : input.value.split(',').map((s) => s.trim()).filter(Boolean);
-        if (!have.includes(b.dataset.model)) have.push(b.dataset.model);
-        input.value = have.join(', ');
-        input.dataset.auto = '0';
-      }));
-    } catch (error) {
-      out.textContent = error.message;
-      out.style.color = '#c0453f';
-    } finally {
-      fetchBtn.disabled = false;
-    }
-  });
   host.querySelectorAll('.pw-toggle').forEach((btn) => btn.addEventListener('click', () => {
     const input = host.querySelector(`#${btn.dataset.for}`);
     const showing = input.type === 'text';
@@ -1445,15 +1417,25 @@ function bindAiForm(host, { endpoint, itemUrl, discoverUrl, extraPayload, onDone
     const { id, payload } = readAiForm(form);
     if (!aiFormValidate(form, !id)) return;
     const result = form.querySelector('.ai-form-result');
+    const submit = form.querySelector('button[type="submit"]');
+    result.style.color = '';
+    // A new key is configured automatically: the server tests it with real minimal requests (no model list) before anything is saved.
+    result.textContent = id ? '' : 'Testing the key with a real request…';
+    if (submit) submit.disabled = true;
     try {
+      let saved = null;
       if (id) await api(itemUrl(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      else await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, ...(extraPayload || {}) }) });
-      toast('Saved', 'success');
+      else saved = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, ...(extraPayload || {}) }) });
+      const setup = saved && saved.setup;
+      const hit = setup && setup.attempts.find((a) => a.ok);
+      toast(hit ? `Saved. ${hit.model} answered a real test request in ${(hit.latencyMs / 1000).toFixed(1)} s.${setup.freeConfirmationRequired ? ' Confirm the free tier before it is used.' : ''}` : 'Saved', 'success');
       onDone(true);
     } catch (error) {
-      result.textContent = error.fields ? `${error.message}: check ${error.fields.join(', ')}` : error.message;
+      result.textContent = error.fields && error.fields.length && error.message === 'validation_failed' ? `Check ${error.fields.join(', ')}.` : error.message;
       if (error.fields) error.fields.forEach((n) => { const p = form.querySelector(`.ai-err[data-err="${n}"]`); if (p) { p.textContent = `Check ${n === 'baseUrl' ? 'the endpoint address' : n}.`; p.hidden = false; } });
       result.style.color = '#c0453f';
+    } finally {
+      if (submit) submit.disabled = false;
     }
   });
 }
@@ -1536,7 +1518,6 @@ async function renderAiRouting(host) {
     bindAiForm(host, {
       endpoint: '/api/dashboard/ai-routing/providers',
       itemUrl: (id) => `/api/dashboard/ai-routing/providers/${id}`,
-      discoverUrl: '/api/dashboard/ai-routing/discover-models',
       onDone: (saved) => { editing = null; if (saved) draw(); else draw(); },
     });
 
@@ -1658,7 +1639,6 @@ route('#/super-admin-settings', 'Super Admin Settings', 'Shared AI defaults for 
     bindAiForm(view, {
       endpoint: '/api/dashboard/super-admin/ai/providers',
       itemUrl: (id) => `/api/dashboard/super-admin/ai/providers/${id}`,
-      discoverUrl: '/api/dashboard/super-admin/ai/discover-models',
       onDone: () => { editing = null; draw(); },
     });
     view.querySelectorAll('.ai-entry [data-act]').forEach((btn) => {

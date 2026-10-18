@@ -3,7 +3,7 @@ import { AiCredentialError } from '../aiCredentialError';
 import { AiResponseError } from '../aiResponseError';
 import { providerMessageOf } from '../openAiCompatible';
 import type { ChatCompletionResponse, ChatMessage, ContentPart, ToolCall } from '../types';
-import { ModelDiscoveryError, type AdapterCompleteRequest, type DiscoveredModel, type DiscoveryContext, type ProviderAdapter } from './types';
+import type { AdapterCompleteRequest, ProviderAdapter } from './types';
 
 /**
  * Google AI Studio / Gemini API, its own native contract (https://ai.google.dev/api):
@@ -106,6 +106,33 @@ export function fromGeminiResponse(parsed: unknown, model: string): ChatCompleti
 }
 
 /** Gemini's documented error statuses → the normalised error the router understands. */
+/** Quota ids and the retry delay from a Google error body (`error.details`); empty when the body does not carry them. */
+export function quotaInfo(bodyText: string | undefined): { quotaIds: string[]; retryDelayMs: number | null } {
+  const out: { quotaIds: string[]; retryDelayMs: number | null } = { quotaIds: [], retryDelayMs: null };
+  let details: unknown;
+  try { details = (JSON.parse(bodyText ?? '{}') as { error?: { details?: unknown } }).error?.details; } catch { return out; }
+  if (!Array.isArray(details)) return out;
+  for (const d of details as Array<Record<string, unknown>>) {
+    const type = String(d?.['@type'] ?? '');
+    if (/QuotaFailure$/.test(type) && Array.isArray(d.violations)) {
+      for (const v of d.violations as Array<Record<string, unknown>>) if (typeof v?.quotaId === 'string') out.quotaIds.push(v.quotaId);
+    }
+    if (/RetryInfo$/.test(type) && typeof d.retryDelay === 'string') {
+      const seconds = Number.parseFloat(d.retryDelay); // "34s" or "34.5s"
+      if (Number.isFinite(seconds) && seconds >= 0) out.retryDelayMs = Math.round(seconds * 1000);
+    }
+  }
+  return out;
+}
+
+/** Milliseconds until the next midnight in Pacific time, when Google resets the daily free-tier quotas (at least one minute, so a reset edge never spins). */
+export function pacificMidnightDelayMs(now: number = Date.now()): number {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(now));
+  const num = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const elapsed = (((num('hour') % 24) * 60 + num('minute')) * 60 + num('second')) * 1000; // some engines print midnight as "24"
+  return Math.max(60_000, 24 * 3600_000 - elapsed);
+}
+
 function failureFor(status: number, bodyText: string | undefined, model: string, retryAfter: number): AiResponseError | AiCredentialError {
   let google = '';
   try { google = String((JSON.parse(bodyText ?? '{}') as { error?: { status?: unknown } }).error?.status ?? ''); } catch { /* not JSON */ }
@@ -116,6 +143,20 @@ function failureFor(status: number, bodyText: string | undefined, model: string,
     return new AiCredentialError(`The provider refused the API key or the key lacks permission (HTTP ${status}).`, 'rejected', status);
   }
   if (status === 429 || google === 'RESOURCE_EXHAUSTED') {
+    // Google says WHICH quota ran out and when it can be used again (error.details: QuotaFailure.violations[].quotaId, RetryInfo.retryDelay). Use that
+    // instead of guessing from the wording: a per-minute limit is back after the stated delay, a per-day limit at the daily reset.
+    const info = quotaInfo(bodyText);
+    if (info.quotaIds.some((q) => /perday/i.test(q)) || /per day|daily/.test(lower)) {
+      const failure = new AiResponseError('rate_limited', status, model, `${message ?? 'quota exhausted'} (daily quota, resets at midnight Pacific time)`);
+      failure.retryAfterMs = pacificMidnightDelayMs();
+      return failure;
+    }
+    if (info.quotaIds.some((q) => /perminute/i.test(q))) {
+      const failure = new AiResponseError('rate_limited', status, model, message);
+      const waitMs = info.retryDelayMs ?? (retryAfter > 0 ? retryAfter * 1000 : 60_000);
+      failure.retryAfterMs = Math.min(Math.max(waitMs, 1000), 15 * 60_000);
+      return failure;
+    }
     // Quota exhausted (daily / free-tier allowance) rests longer than a momentary rate limit.
     const quota = /quota|billing|exceeded your current|free tier|per day|daily/.test(lower);
     const failure = new AiResponseError(quota ? 'payment_required' : 'rate_limited', status, model, message);
@@ -152,30 +193,5 @@ export const geminiAdapter: ProviderAdapter = {
     let parsed: unknown;
     try { parsed = await response.json(); } catch { throw new AiResponseError('malformed_response', response.status, request.model); }
     return fromGeminiResponse(parsed, request.model);
-  },
-  async listModels(context: DiscoveryContext): Promise<DiscoveredModel[]> {
-    const base = (context.baseUrl || BASE_DEFAULT).replace(/\/+$/, '');
-    let response: Response;
-    try {
-      response = await fetchWithTimeout(`${base}/models?pageSize=200`, { method: 'GET', headers: context.apiKey ? { 'x-goog-api-key': context.apiKey } : {} }, Math.max(1000, context.timeoutMs));
-    } catch (error) {
-      throw new ModelDiscoveryError('network', null, (error as Error)?.name === 'AbortError' ? 'The provider did not answer in time.' : 'The provider could not be reached.');
-    }
-    if (response.status === 400 || response.status === 401 || response.status === 403) throw new ModelDiscoveryError('credential', response.status, 'Google refused the API key or the key lacks permission to list models.');
-    if (response.status === 404) throw new ModelDiscoveryError('endpoint_not_found', 404, 'This address has no Gemini model list. Use https://generativelanguage.googleapis.com/v1beta.');
-    if (response.status === 429) throw new ModelDiscoveryError('rate_limited', 429, 'Google is rate limiting requests right now.');
-    if (!response.ok) throw new ModelDiscoveryError('provider_error', response.status, `Google answered HTTP ${response.status}.`);
-    let body: { models?: unknown };
-    try { body = (await response.json()) as { models?: unknown }; } catch { throw new ModelDiscoveryError('malformed', response.status, 'Google answered something that is not a model list.'); }
-    if (!Array.isArray(body.models)) throw new ModelDiscoveryError('malformed', response.status, 'Google answered something that is not a model list.');
-    const out: DiscoveredModel[] = [];
-    for (const raw of body.models as Array<Record<string, unknown>>) {
-      const name = typeof raw?.name === 'string' ? raw.name.replace(/^models\//, '') : null;
-      const methods = Array.isArray(raw?.supportedGenerationMethods) ? (raw.supportedGenerationMethods as unknown[]).map(String) : [];
-      if (!name || !methods.includes('generateContent')) continue; // embedding / other models cannot answer a chat
-      const limit = Number(raw.inputTokenLimit);
-      out.push({ id: name, label: typeof raw.displayName === 'string' ? raw.displayName : undefined, contextLength: Number.isFinite(limit) && limit > 0 ? limit : undefined, modalities: 'generateContent', free: null, evidence: 'Google\'s model list does not say which models are in the free tier: check the rate-limit page for your key, then confirm the free tier yourself.' });
-    }
-    return out;
   },
 };

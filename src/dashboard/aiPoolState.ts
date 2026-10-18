@@ -80,7 +80,7 @@ export function providerHealth(row: AiProviderRow, now: number = Date.now(), fre
   const make = (state: ProviderHealthState, label: string, summary: string, detail = summary): ProviderHealth => ({ state, label, summary: clip(summary), detail });
   if (row.enabled === 0) return make('off', 'Off', 'Turned off — never used for replies.');
   if (providerApiKey(row) === null) return make('no_key', 'No usable key', 'No usable API key is saved. Edit the provider and enter the key again.');
-  if (models.length === 0) return make('config_error', 'Configuration error', 'No chat model is set. Use Fetch available models and choose one.');
+  if (models.length === 0) return make('config_error', 'Configuration error', 'No chat model is set. Edit the provider and type a model id, or add the key again so a working model is chosen automatically.');
   if (freeOnly && row.kind !== 'openrouter' && (row.free_tier === 0 || row.free_confirmed === 0)) {
     return make('ineligible', 'Not eligible', row.free_tier === 0 ? 'Declared as paid — never used while free-only mode is on.' : 'Free tier not confirmed — not used until you confirm it.');
   }

@@ -7,7 +7,7 @@ import { createProvider, deleteProvider, getSharedProvider, listSharedProviders,
 import { providerActivity } from '../llm/routeLog';
 import { providerHealth } from './aiPoolState';
 import { presetsPayload } from '../llm/providerPresets';
-import { createInputFromSimple, defaultPoolSummary, discoverModelsFor, fail, forCreate, idParam, inputFrom, isSimpleBody, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
+import { defaultPoolSummary, fail, idParam, inputFrom, isSimpleBody, prepareCreateInput, recordSetupTest, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
 import { buildCandidates } from '../llm/aiRouter';
 import { adoptBuiltinOpenRouter } from '../llm/adoptOpenRouter';
 import { describeCredential, getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
@@ -89,21 +89,20 @@ export function registerSuperAdminAiRoutes(router: Router): void {
     }
   });
 
-  router.post('/api/dashboard/super-admin/ai/discover-models', (req, res) => {
-    if (!requireSuper(req, res)) return;
-    void discoverModelsFor(req.body, currentAccountId(), true).then((r) => res.status(r.status).json(r.json)).catch((error) => fail(res, error));
-  });
-
   router.post('/api/dashboard/super-admin/ai/providers', (req, res) => {
     if (!requireSuper(req, res)) return;
-    try {
-      const input = forCreate(isSimpleBody(req.body) ? createInputFromSimple(req.body) : inputFrom(req.body), req.body);
-      const row = createProvider(input, { accountId: null, updatedBy: req.adminUserId as number });
-      logger.info({ providerId: row.id, provider: row.name, kind: row.kind, adminUserId: req.adminUserId, accounts: accountCount() }, 'shared AI provider created');
-      res.status(201).json({ provider: toView(row), pool: defaultPoolSummary() });
-    } catch (error) {
-      fail(res, error);
-    }
+    void (async () => {
+      try {
+        const prepared = await prepareCreateInput(req.body);
+        if (!prepared.ok) { res.status(prepared.status).json(prepared.json); return; }
+        const row = createProvider(prepared.input, { accountId: null, updatedBy: req.adminUserId as number });
+        recordSetupTest(row, prepared.setup);
+        logger.info({ providerId: row.id, provider: row.name, kind: row.kind, adminUserId: req.adminUserId, accounts: accountCount(), model: prepared.setup?.models[0] }, 'shared AI provider created');
+        res.status(201).json({ provider: toView(getSharedProvider(row.id) ?? row), setup: prepared.setup ?? undefined, pool: defaultPoolSummary() });
+      } catch (error) {
+        fail(res, error);
+      }
+    })();
   });
 
   // Registered before the :id routes so "order" is never read as an id.

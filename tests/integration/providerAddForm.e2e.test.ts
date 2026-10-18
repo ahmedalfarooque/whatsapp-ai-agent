@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/app';
 import { getDb } from '../../src/memory/db';
 import { createSession } from '../../src/dashboard/auth';
@@ -17,6 +17,9 @@ import { runWithAccount } from '../../src/accounts/accountContext';
 const PASSWORD = 'a-very-long-test-password-123';
 const KEY = 'sk-deepseekdeepseekdeepseekdeepseek0000000000';
 const GROQ = 'gsk_groqgroqgroqgroqgroqgroqgroqgroq000000000';
+// Setup network (MOCKED): saving a key now tests it with a real request, so these tests answer that request like a healthy provider would.
+const okBody = JSON.stringify({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }] });
+const healthyNetwork = () => vi.stubGlobal('fetch', vi.fn(async () => new Response(okBody, { status: 200 })));
 
 describe('Add provider (Super Admin Settings)', () => {
   const app = createApp();
@@ -31,6 +34,10 @@ describe('Add provider (Super Admin Settings)', () => {
     acc = createAccount({ name: 'Provider Form Co' }).id;
     allowUnknownPriceForTests(false); // the real production rule (the shared test setup relaxes it)
   });
+
+  const originalFetch = globalThis.fetch;
+  beforeEach(() => { healthyNetwork(); });
+  afterEach(() => { vi.stubGlobal('fetch', originalFetch); });
 
   it('serves the presets and the exact validation rules the form uses (no key prefixes, no secrets)', async () => {
     const res = await owner.get('/api/dashboard/super-admin/ai');

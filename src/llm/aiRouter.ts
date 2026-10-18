@@ -345,7 +345,10 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
         recordRouteAttempt({ accountId, task: request.task, providerId: candidate.providerId, providerName: candidate.providerName, model: candidate.model, outcome: 'failed', category, httpStatus: record.httpStatus, latencyMs, detail: record.detail });
         logger.warn({ account: accountId, task: request.task, provider: candidate.providerName, model: candidate.model, category, reason: responseError?.reason ?? (error instanceof AiCredentialError ? 'credential' : 'unknown'), httpStatus: record.httpStatus, latencyMs }, 'AI route failed');
         // One bounded retry against the SAME route only when it is the only eligible route and the failure is transient.
-        const transient = category === 'rate_limited' || category === 'provider_error' || category === 'empty' || category === 'network' || category === 'timeout';
+        // A quota the provider says will not be back for a while (a daily allowance, or a reset/retry time of a second or more) is NEVER retried
+        // within the same message: a second call would only hit the exhausted quota again.
+        const quotaRests = category === 'rate_limited' && ((responseError?.retryAfterMs ?? 0) >= 1000 || /per[- ]day|daily/i.test(responseError?.providerMessage ?? ''));
+        const transient = !quotaRests && (category === 'rate_limited' || category === 'provider_error' || category === 'empty' || category === 'network' || category === 'timeout');
         if (onlyRoute && attempt === 0 && transient && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) { await new Promise((r) => setTimeout(r, 300)); continue; }
         markFailure(request.task, candidate, category, responseError);
         break;

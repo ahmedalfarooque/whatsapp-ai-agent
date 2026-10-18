@@ -11,12 +11,11 @@ import { createAccount } from '../../../src/accounts/accountRepo';
 import { runWithAccount } from '../../../src/accounts/accountContext';
 import { AiCredentialError } from '../../../src/llm/aiCredentialError';
 import { AiResponseError } from '../../../src/llm/aiResponseError';
-import { adapterFor, discoverModels, endpointMatchesVendor, ModelDiscoveryError, vendorById, vendorForUrl, VENDORS } from '../../../src/llm/adapters';
-import { fromGeminiResponse, toGeminiRequest } from '../../../src/llm/adapters/geminiAdapter';
+import { adapterFor, endpointMatchesVendor, vendorById, vendorForUrl, VENDORS } from '../../../src/llm/adapters';
+import { fromGeminiResponse, pacificMidnightDelayMs, quotaInfo, toGeminiRequest } from '../../../src/llm/adapters/geminiAdapter';
 import { allowUnknownPriceForTests, resetAiRouterForTests, routeCompletion } from '../../../src/llm/aiRouter';
 import { createProvider, PROVIDER_RULES } from '../../../src/llm/providerRepo';
 import { setModelCatalogForTests } from '../../../src/llm/modelCatalog';
-import { discoverModelsFor } from '../../../src/dashboard/aiRoutingRoutes';
 
 const mutableEnv = env as unknown as Record<string, unknown>;
 const GKEY = 'AIzaSyGeminiGeminiGeminiGeminiGemini000000';
@@ -64,35 +63,26 @@ describe('vendor identity', () => {
 });
 
 describe('OpenAI-protocol adapter (Groq, Mistral, xAI, custom)', () => {
-  it('lists models with Bearer authentication and reports modalities, never inventing a price', async () => {
-    const fetchSpy = vi.fn(async () => json(200, { data: [{ id: 'openai/gpt-oss-20b', context_window: 131072, input_modalities: ['text'], output_modalities: ['text'] }, { id: 'whisper-large-v3' }] }));
+  it('sends a chat completion to {base}/chat/completions with Bearer authentication and returns the answer (no model list is ever requested)', async () => {
+    const fetchSpy = vi.fn(async () => json(200, { choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }] }));
     vi.stubGlobal('fetch', fetchSpy);
-    const models = await discoverModels('openai', { baseUrl: 'https://api.groq.com/openai/v1', apiKey: GROQ });
-    expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://api.groq.com/openai/v1/models');
+    const res = await adapterFor('openai').complete({ baseUrl: 'https://api.groq.com/openai/v1', apiKey: GROQ, model: 'openai/gpt-oss-20b', messages: [{ role: 'user', content: 'hi' }], timeoutMs: 3000 });
+    expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://api.groq.com/openai/v1/chat/completions');
     expect(header(fetchSpy.mock.calls[0]!, 'Authorization')).toBe(`Bearer ${GROQ}`);
-    expect(models.map((m) => m.id)).toEqual(['openai/gpt-oss-20b', 'whisper-large-v3']);
-    expect(models[0]).toMatchObject({ contextLength: 131072, modalities: 'text → text', free: null });
-    expect(models[0]!.evidence).toMatch(/does not publish prices/);
+    expect(body(fetchSpy.mock.calls[0]!)).toMatchObject({ model: 'openai/gpt-oss-20b' });
+    expect(res.choices[0]!.message.content).toBe('ok');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('OpenRouter: free only when the catalog lists price 0 for both prompt and completion', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json(200, { data: [{ id: 'a:free', pricing: { prompt: '0', completion: '0' } }, { id: 'b', pricing: { prompt: '0.000001', completion: '0.000002' } }, { id: 'c' }] })));
-    const models = await discoverModels('openrouter', { baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk-or-v1-' + 'x'.repeat(40) });
-    expect(Object.fromEntries(models.map((m) => [m.id, m.free]))).toEqual({ 'a:free': true, b: false, c: null });
+  it('adapters expose no model-list call: a model is trusted only after a real inference answered', () => {
+    for (const id of ['openai', 'openrouter', 'gemini']) expect(Object.keys(adapterFor(id)).sort()).toEqual(['authentication', 'complete', 'id']);
   });
 
-  it.each([
-    [401, 'credential'], [403, 'credential'], [404, 'endpoint_not_found'], [429, 'rate_limited'], [503, 'provider_error'],
-  ])('model-list HTTP %i is reported as %s', async (status, category) => {
+  it.each([[401, 'credential'], [403, 'credential'], [429, 'rate_limited'], [503, 'provider_error']])('chat HTTP %i is normalised as %s', async (status, expected) => {
     vi.stubGlobal('fetch', vi.fn(async () => json(status, { error: { message: 'x' } })));
-    await expect(discoverModels('openai', { baseUrl: 'https://api.example.com/v1', apiKey: GROQ })).rejects.toMatchObject({ name: 'ModelDiscoveryError', category });
-  });
-
-  it('a network failure and a non-list answer are reported, not thrown raw', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
-    await expect(discoverModels('openai', { baseUrl: 'https://api.example.com/v1', apiKey: GROQ })).rejects.toMatchObject({ category: 'network' });
-    vi.stubGlobal('fetch', vi.fn(async () => json(200, { nothing: true })));
-    await expect(discoverModels('openai', { baseUrl: 'https://api.example.com/v1', apiKey: GROQ })).rejects.toMatchObject({ category: 'malformed' });
+    let caught: unknown;
+    try { await adapterFor('openai').complete({ baseUrl: 'https://api.example.com/v1', apiKey: GROQ, model: 'm', messages: [{ role: 'user', content: 'hi' }], timeoutMs: 2000 }); } catch (e) { caught = e; }
+    if (expected === 'credential') expect(caught).toBeInstanceOf(AiCredentialError); else expect((caught as AiResponseError).reason).toBe(expected);
   });
 });
 
@@ -151,16 +141,32 @@ describe('Gemini native adapter', () => {
     expect(JSON.stringify(String((caught as Error).message))).not.toContain(GKEY);
   });
 
-  it('lists only models that can generate content, with the models/ prefix removed, and says it cannot tell which are free', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json(200, { models: [{ name: 'models/gemini-a', displayName: 'A', inputTokenLimit: 1000, supportedGenerationMethods: ['generateContent'] }, { name: 'models/embed-b', supportedGenerationMethods: ['embedContent'] }] })));
-    const models = await discoverModels('gemini', { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiKey: GKEY });
-    expect(models.map((m) => m.id)).toEqual(['gemini-a']);
-    expect(models[0]).toMatchObject({ free: null, contextLength: 1000 });
+  it('quota 429s use what Google says: a per-minute limit waits the stated RetryInfo delay, a per-day limit rests until the daily reset (never retried in between)', async () => {
+    const perMinute = { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded for metric', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier' }] }, { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '34s' }] } };
+    vi.stubGlobal('fetch', vi.fn(async () => json(429, perMinute)));
+    const ask = () => adapterFor('gemini').complete({ baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiKey: GKEY, model: 'x', timeoutMs: 2000, messages: [{ role: 'user', content: 'hi' }] });
+    const minute = await ask().catch((e) => e as AiResponseError);
+    expect(minute).toMatchObject({ reason: 'rate_limited', retryAfterMs: 34_000 });
+    const perDay = { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded for metric', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }, { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '20s' }] } };
+    vi.stubGlobal('fetch', vi.fn(async () => json(429, perDay)));
+    const day = await ask().catch((e) => e as AiResponseError);
+    expect(day.reason).toBe('rate_limited');
+    expect(day.providerMessage).toMatch(/daily quota/);
+    expect(day.retryAfterMs!).toBeGreaterThan(20_000); // the daily reset, not the 20 s hint: retrying in 20 s would call an exhausted quota again
+    expect(day.retryAfterMs!).toBeLessThanOrEqual(24 * 3600_000);
   });
 
-  it('a rejected key on the model list is a credential failure', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json(400, { error: { status: 'INVALID_ARGUMENT', message: 'API key not valid' } })));
-    await expect(discoverModels('gemini', { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiKey: GKEY })).rejects.toBeInstanceOf(ModelDiscoveryError);
+  it('quotaInfo reads quota ids and the retry delay and tolerates bodies without them; the daily reset delay is between one minute and a day', () => {
+    expect(quotaInfo('not json')).toEqual({ quotaIds: [], retryDelayMs: null });
+    expect(quotaInfo(JSON.stringify({ error: { details: [{ '@type': 'x.RetryInfo', retryDelay: '1.5s' }] } }))).toEqual({ quotaIds: [], retryDelayMs: 1500 });
+    for (const t of [Date.UTC(2026, 9, 18, 7, 0, 0), Date.UTC(2026, 9, 18, 6, 59, 59), Date.UTC(2026, 0, 5, 8, 0, 0), Date.UTC(2026, 6, 1, 12, 34, 56)]) {
+      const d = pacificMidnightDelayMs(t);
+      expect(d).toBeGreaterThanOrEqual(60_000);
+      expect(d).toBeLessThanOrEqual(24 * 3600_000);
+    }
+    // 07:00 UTC in October is 00:00 Pacific (PDT): the next reset is a full day away; one second before it, the delay is clamped to one minute.
+    expect(pacificMidnightDelayMs(Date.UTC(2026, 9, 18, 7, 0, 0))).toBe(24 * 3600_000);
+    expect(pacificMidnightDelayMs(Date.UTC(2026, 9, 18, 6, 59, 59))).toBe(60_000);
   });
 });
 
@@ -190,45 +196,5 @@ describe('the router speaks each provider through its own adapter', () => {
     expect(res.choices[0]!.message.content).toBe('from groq');
     expect(calls[0]).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent');
     expect(calls[1]).toBe('https://api.groq.com/openai/v1/chat/completions');
-  });
-});
-
-describe('Fetch available models (server side)', () => {
-  const acc = () => createAccount({ name: `Discover Co ${Math.random()}` }).id;
-
-  it('a new provider: lists the real models, never echoes the key, and refuses an address that is not the vendor\'s API', async () => {
-    const spy = vi.fn(async () => json(200, { data: [{ id: 'openai/gpt-oss-20b' }] }));
-    vi.stubGlobal('fetch', spy);
-    const ok = await discoverModelsFor({ provider: 'groq', config: GROQ }, acc(), false);
-    expect(ok.status).toBe(200);
-    expect(ok.json).toMatchObject({ ok: true, count: 1, freeEvidence: 'none' });
-    expect(JSON.stringify(ok.json)).not.toContain(GROQ);
-    const wrong = await discoverModelsFor({ provider: 'groq', config: GROQ, baseUrl: 'https://console.groq.com/keys' }, acc(), false);
-    expect(wrong.status).toBe(400);
-    expect((wrong.json.fields as string[])).toEqual(['baseUrl']);
-    const http = await discoverModelsFor({ provider: 'custom', config: GROQ, baseUrl: 'http://insecure.example.com/v1' }, acc(), false);
-    expect(http.status).toBe(400);
-    expect(spy).toHaveBeenCalledTimes(1); // the refused addresses were never contacted
-  });
-
-  it('the diagnostics distinguish a rejected key from a wrong address', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json(401, { error: { message: 'bad key' } })));
-    expect((await discoverModelsFor({ provider: 'groq', config: GROQ }, acc(), false)).json).toMatchObject({ ok: false, category: 'credential' });
-    vi.stubGlobal('fetch', vi.fn(async () => json(404, {})));
-    expect((await discoverModelsFor({ provider: 'custom', config: GROQ, baseUrl: 'https://console.example.com/keys' }, acc(), false)).json).toMatchObject({ ok: false, category: 'endpoint_not_found' });
-  });
-
-  it('a saved provider is listed with its stored key; a shared one only for a super administrator; another business\'s provider is not found', async () => {
-    getDb().prepare('DELETE FROM ai_providers').run();
-    const a = acc(); const b = acc();
-    const own = createProvider({ name: 'Own', kind: 'openai_compatible', adapter: 'openai', vendor: 'groq', baseUrl: 'https://api.groq.com/openai/v1', apiKey: GROQ, models: ['openai/gpt-oss-20b'] }, { accountId: a, updatedBy: 1 });
-    const shared = createProvider({ name: 'Shared', kind: 'openai_compatible', adapter: 'openai', vendor: 'groq', baseUrl: 'https://api.groq.com/openai/v1', apiKey: GROQ, models: ['openai/gpt-oss-20b'] }, { accountId: null, updatedBy: 1 });
-    const spy = vi.fn(async () => json(200, { data: [{ id: 'm1' }] }));
-    vi.stubGlobal('fetch', spy);
-    expect((await discoverModelsFor({ providerId: own.id }, a, false)).json).toMatchObject({ ok: true });
-    expect(header(spy.mock.calls[0]!, 'Authorization')).toBe(`Bearer ${GROQ}`);
-    expect((await discoverModelsFor({ providerId: shared.id }, a, false)).status).toBe(403);
-    expect((await discoverModelsFor({ providerId: shared.id }, a, true)).status).toBe(200);
-    expect((await discoverModelsFor({ providerId: own.id }, b, false)).status).toBe(404);
   });
 });

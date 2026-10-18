@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/app';
 import { getDb } from '../../src/memory/db';
 import { env } from '../../src/config/env';
@@ -26,6 +26,10 @@ const mutableEnv = env as unknown as Record<string, unknown>;
 
 const ok = (text: string) => new Response(JSON.stringify({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: text } }] }), { status: 200 });
 const err = (status: number, message: string) => new Response(JSON.stringify({ error: { message } }), { status });
+// Setup network (MOCKED): saving a key now tests it with a real request, so these tests answer that request like a healthy provider would.
+const healthyNetwork = () => vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => (String(url).includes('generativelanguage')
+  ? new Response(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] }), { status: 200 })
+  : ok('ok'))));
 
 describe('Super Admin Settings and the account AI list', () => {
   const app = createApp();
@@ -60,6 +64,7 @@ describe('Super Admin Settings and the account AI list', () => {
     admin = await make('sa-admin', 'admin');
     manager = await make('sa-manager', 'manager');
   });
+  beforeEach(() => { healthyNetwork(); });
   afterEach(() => {
     vi.stubGlobal('fetch', originalFetch);
     mutableEnv.shouldUseMockProviders = originalMock;
