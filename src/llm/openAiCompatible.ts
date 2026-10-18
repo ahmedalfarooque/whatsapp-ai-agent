@@ -53,14 +53,31 @@ export function providerMessageOf(body: string | undefined): string | null {
  * normalised to a plain string.
  */
 export function validateCompletion(parsed: unknown, model: string): ChatCompletionResponse {
-  const choices = (parsed as { choices?: unknown } | null)?.choices;
-  const choice = Array.isArray(choices) ? (choices[0] as { message?: Record<string, unknown> } | undefined) : undefined;
+  const body = parsed as { choices?: unknown; error?: unknown } | null;
+  const choices = body?.choices;
+  const choice = Array.isArray(choices) ? (choices[0] as { message?: Record<string, unknown>; finish_reason?: unknown } | undefined) : undefined;
   if (!choice || typeof choice.message !== 'object' || choice.message === null) {
-    throw new AiResponseError('malformed_response', 200, model);
+    // Some providers answer HTTP 200 with the failure INSIDE the body (`{ "error": { "code": 429, "message": … } }`): that is the provider's real error,
+    // not an unreadable answer, and the router must classify it as such (rate limit, quota, outage…) instead of hiding it as "malformed".
+    const inner = body && typeof body.error === 'object' && body.error ? (body.error as { code?: unknown; message?: unknown }) : null;
+    if (inner) {
+      const code = Number(inner.code);
+      const status = Number.isInteger(code) && code >= 400 && code < 600 ? code : null;
+      const message = typeof inner.message === 'string' ? inner.message.replace(/\s+/g, ' ').slice(0, 160) : 'the provider reported an error inside a successful response';
+      throw new AiResponseError(status ? reasonForHttpStatus(status) : 'provider_error', status ?? 200, model, message);
+    }
+    // Names only, never values: which top-level fields did arrive.
+    throw new AiResponseError('malformed_response', 200, model, `no choices in the answer (fields: ${Object.keys(body && typeof body === 'object' ? body : {}).slice(0, 6).join(', ') || 'none'})`);
   }
   const toolCalls = Array.isArray(choice.message.tool_calls) ? choice.message.tool_calls : [];
   const text = messageText(choice.message.content);
-  if (toolCalls.length === 0 && !text) throw new AiResponseError('empty_response', 200, model);
+  if (toolCalls.length === 0 && !text) {
+    // WHY the answer is empty is recorded (finish reason; whether the model spent its tokens on hidden reasoning), so a token limit, a filter and a
+    // provider fault are told apart in the routing history. The answer is still a failure: nothing is invented.
+    const finish = typeof choice.finish_reason === 'string' ? choice.finish_reason.slice(0, 30) : 'none';
+    const reasoning = typeof choice.message.reasoning === 'string' ? choice.message.reasoning.trim().length > 0 : Array.isArray(choice.message.reasoning_details) && choice.message.reasoning_details.length > 0;
+    throw new AiResponseError('empty_response', 200, model, `empty answer; finish_reason=${finish}${reasoning ? '; reasoning text present but no answer (token limit spent on reasoning)' : ''}`);
+  }
   choice.message = { ...choice.message, content: text || null };
   return parsed as ChatCompletionResponse;
 }

@@ -123,7 +123,12 @@ function cooldownFor(category: FailureCategory, error: AiResponseError | null): 
     case 'credit': return { ms: 30 * 60_000, scope: 'provider' };
     case 'policy': return { ms: 30 * 60_000, scope: 'route' };
     case 'capability': return { ms: 60 * 60_000, scope: 'route' };
-    case 'rate_limited': return { ms: error?.retryAfterMs ?? 60_000, scope: 'route' };
+    case 'rate_limited': {
+      // A DAILY allowance ("free-models-per-day") does not recover in a minute: retrying every minute would keep calling an exhausted provider all day
+      // (production did, ~28 calls in 6 h). It rests for 30 minutes (longer if the provider says so) and, being account-wide, for the whole provider.
+      const daily = /per[- ]day|daily/i.test(error?.providerMessage ?? '');
+      return { ms: Math.max(error?.retryAfterMs ?? 0, daily ? 30 * 60_000 : 60_000), scope: daily ? 'provider' : 'route' };
+    }
     case 'model_unavailable': return { ms: 5 * 60_000, scope: 'route' };
     case 'timeout': return { ms: 60_000, scope: 'route' };
     case 'network': return { ms: 60_000, scope: 'provider' };

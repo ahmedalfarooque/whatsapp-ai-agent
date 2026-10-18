@@ -97,7 +97,7 @@ export function fromGeminiResponse(parsed: unknown, model: string): ChatCompleti
     const fc = p.functionCall as { name?: unknown; args?: unknown } | undefined;
     if (fc && typeof fc.name === 'string') toolCalls.push({ id: `call_${i}_${fc.name}`.slice(0, 64), type: 'function', function: { name: fc.name, arguments: JSON.stringify(fc.args ?? {}) } });
   });
-  if (!text && toolCalls.length === 0) throw new AiResponseError('empty_response', 200, model);
+  if (!text && toolCalls.length === 0) throw new AiResponseError('empty_response', 200, model, `empty answer; finishReason=${String(candidate.finishReason ?? 'none').slice(0, 30)}`);
   return { choices: [{ index: 0, finish_reason: toolCalls.length ? 'tool_calls' : candidate.finishReason === 'MAX_TOKENS' ? 'length' : 'stop', message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) } }] };
 }
 
