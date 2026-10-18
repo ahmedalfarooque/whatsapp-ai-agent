@@ -108,6 +108,15 @@ export function coolingUntil(key: string, now = Date.now()): { until: number; wh
   return entry;
 }
 
+/** A route that just ANSWERED is available, whatever an earlier failure said (a test, a probe or a replay can reach it while it rests): its cooldowns end. */
+function clearCooldowns(keys: string[]): void {
+  for (const key of keys) {
+    routeCooling.delete(key);
+    providerCooling.delete(key);
+    try { getDb().prepare('DELETE FROM ai_route_cooldowns WHERE key = ?').run(key); } catch { /* not persisted */ }
+  }
+}
+
 function persistCooldown(key: string, scope: 'route' | 'provider', entry: { until: number; why: string }): void {
   try {
     getDb().prepare(`INSERT INTO ai_route_cooldowns (key, scope, until_ms, why) VALUES (?, ?, ?, ?)
@@ -255,8 +264,14 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
 /** Route cooldowns are per task: a model that failed on a picture is not silenced for plain chat (and vice versa). Provider cooldowns are not. */
 const routeCoolKey = (task: AiTask, candidate: RouteCandidate): string => `${task}:${candidate.key}`;
 
+const META_ROUTER_MODEL = /^openrouter\/(free|auto)$/;
+
 function markFailure(task: AiTask, candidate: RouteCandidate, category: FailureCategory, error: AiResponseError | null, now = Date.now()): void {
-  const { ms, scope } = cooldownFor(category, error);
+  const base = cooldownFor(category, error);
+  // `openrouter/free` is a ROUTER over many free endpoints: a data-policy refusal there is about the endpoint it happened to pick for THIS request, not about the
+  // model (the routing history shows a policy 404 followed by an answer seconds later), so it rests one minute, not half an hour.
+  const ms = category === 'policy' && META_ROUTER_MODEL.test(candidate.model) ? Math.min(base.ms, 60_000) : base.ms;
+  const scope = base.scope;
   if (ms <= 0) return;
   const entry = { until: now + ms, why: category.replace(/_/g, ' ') };
   const key = scope === 'provider' ? candidate.providerKey : routeCoolKey(task, candidate);
@@ -311,6 +326,7 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
           timeoutMs: Math.min(timeoutMs, Math.max(MIN_ATTEMPT_MS, budgetEnd - Date.now())),
         });
         const latencyMs = Date.now() - t0;
+        clearCooldowns([routeCoolKey(request.task, candidate), candidate.providerKey]);
         const record: RouteAttempt = { candidate, outcome: 'ok', category: null, httpStatus: 200, latencyMs, detail: null };
         attempts.push(record);
         recordRouteAttempt({ accountId, task: request.task, providerId: candidate.providerId, providerName: candidate.providerName, model: candidate.model, outcome: 'ok', latencyMs });

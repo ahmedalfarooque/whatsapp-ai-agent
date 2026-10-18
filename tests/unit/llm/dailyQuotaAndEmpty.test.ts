@@ -96,3 +96,33 @@ describe('empty and malformed answers say WHY (and are still failures)', () => {
     }
   });
 });
+
+describe('cooldown evidence', () => {
+  const ZDR = '0 endpoints out of 9 requested are available matching your guardrail restrictions and data policy.';
+  it('a route that ANSWERS ends its own cooldown (a test, probe or replay can reach it while it rests)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(429, { error: { message: 'Rate limit exceeded: free-models-per-day' } })));
+    await expect(runWithAccount(acc, ask)).rejects.toBeInstanceOf(AiResponseError);
+    expect((await runWithAccount(acc, () => buildCandidates(acc, 'chat', { wantsTools: false }))).eligible).toHaveLength(0);
+    const pinned = (await runWithAccount(acc, () => buildCandidates(acc, 'chat', { wantsTools: false, now: Date.now() + 31 * 60_000 }))).eligible;
+    resetAiRouterForTests();
+    // (the future look above evicted the entry; set the cooldown again, then let a pinned call answer)
+    vi.stubGlobal('fetch', vi.fn(async () => json(429, { error: { message: 'Rate limit exceeded: free-models-per-day' } })));
+    await expect(runWithAccount(acc, ask)).rejects.toBeInstanceOf(AiResponseError);
+    expect((await runWithAccount(acc, () => buildCandidates(acc, 'chat', { wantsTools: false }))).eligible).toHaveLength(0);
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, { choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }] })));
+    await runWithAccount(acc, () => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'hi' }], maxTokens: 8, deadline: Date.now() + 5000, candidatesOverride: pinned.slice(0, 1) }));
+    expect((await runWithAccount(acc, () => buildCandidates(acc, 'chat', { wantsTools: false }))).eligible.length).toBeGreaterThan(0);
+  });
+
+  it('a data-policy refusal on the router model openrouter/free rests it a minute (the endpoint it picked, not the model); on any other model it still rests 30 minutes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(404, { error: { message: ZDR } })));
+    await expect(runWithAccount(acc, ask)).rejects.toBeInstanceOf(AiResponseError);
+    const soon = await runWithAccount(acc, () => buildCandidates(acc, 'chat', { wantsTools: false, now: Date.now() + 70_000 }));
+    expect(soon.eligible.map((c) => c.model)).toContain('openrouter/free');
+    resetAiRouterForTests();
+    getDb().prepare("UPDATE ai_providers SET models = 'other/free-model'").run();
+    await expect(runWithAccount(acc, ask)).rejects.toBeInstanceOf(AiResponseError);
+    const later = await runWithAccount(acc, () => buildCandidates(acc, 'chat', { wantsTools: false, now: Date.now() + 10 * 60_000 }));
+    expect(later.eligible).toHaveLength(0);
+  });
+});
