@@ -131,14 +131,19 @@ export async function runProviderTest(row: AiProviderRow): Promise<{ ok: boolean
     let detail = describeFailure(error);
     const category = error instanceof AiResponseError && error.attempts[0] ? error.attempts[0].reason : error instanceof AiCredentialError ? 'credential' : 'unknown';
     // An unavailable model is explained from the provider's own list (never replaced by another model): is it listed at all?
-    if (category === 'model_unavailable') detail = `${detail}${await explainUnavailableModel(row, apiKey, model)}`;
+    if (category === 'model_unavailable') detail = `${detail}${await explainUnavailableModel(row, apiKey, model, error instanceof AiResponseError ? error.attempts[0]?.providerMessage ?? error.providerMessage : null)}`;
     recordProviderTest(row.id, false, detail);
     return { ok: false, detail, category, latencyMs: Date.now() - started };
   }
 }
 
 /** Why a model was refused, from the provider's model list when it has one: "not in the list" (with a few that are) or "listed but refused this request". */
-async function explainUnavailableModel(row: AiProviderRow, apiKey: string, model: string): Promise<string> {
+async function explainUnavailableModel(row: AiProviderRow, apiKey: string, model: string, providerReason: string | null = null): Promise<string> {
+  // A provider's model LIST is not proof that a model can be called (Google lists models it has retired for new users): when the provider says the
+  // model is retired, say so in its words and point at Fetch available models instead of blaming permissions.
+  if (providerReason && /no longer available|deprecated|retired|discontinued/i.test(providerReason)) {
+    return ` The provider says this model is retired: "${providerReason.replace(/\s+/g, ' ').slice(0, 170)}". A provider's model list can still show it; choose a current model.`;
+  }
   try {
     const list = await discoverModels(row.adapter, { baseUrl: row.base_url, apiKey, timeoutMs: 8000 });
     if (list.some((m) => m.id === model)) return ' The model is in the provider\'s list but refused this request (permissions, region or data policy).';

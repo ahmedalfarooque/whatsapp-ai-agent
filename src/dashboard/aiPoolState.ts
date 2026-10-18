@@ -188,7 +188,10 @@ export function getPoolAiState(accountId: number, now: number, base: { model: st
   }
   if (bad.length) {
     const { label, detail } = describeRouteFailure(bad[0]!);
-    return { ...known, model: bad[0]!.model, state: 'error', label, detail: `${detail}.${legacyNote}` };
+    // Several routes, none answering: say so, and name every route's own reason (not just the newest one).
+    const others = bad.slice(1).map((b) => `${b.provider_name} · ${b.model}: ${describeRouteFailure(b).label}`);
+    const all = others.length ? ` No route is answering — also: ${others.join('; ')}.` : '';
+    return { ...known, model: bad[0]!.model, state: 'error', label: others.length ? `No provider is answering — ${label}` : label, detail: `${detail}.${all}${legacyNote}` };
   }
   // No attempt on any usable route in the last 24 h: configured, nothing confirmed. A rejected built-in key counts only when that route is in use.
   if (inv.builtinInUse && inv.eligible.length === 0 && legacyHealth?.status === 'rejected') {

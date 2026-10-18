@@ -214,3 +214,16 @@ describe('no secret leakage', () => {
     expect(json).not.toContain('env-key-0123456789abcdef');
   });
 });
+
+describe('every route failing', () => {
+  it('names the situation and every route\'s own reason instead of one generic line', () => {
+    const a = sharedOpenRouter();
+    const b = createProvider({ name: 'Gemini', kind: 'openai_compatible', adapter: 'gemini', vendor: 'google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiKey: 'AIzaSyGeminiGeminiGeminiGeminiGemini000000', models: ['gemini-2.5-flash'], priority: 100 }, { accountId: null, updatedBy: 1 }).id;
+    logRow(a, 'OpenRouter', 'openrouter/free', 'failed', 'rate_limited', 429, 'Rate limit exceeded: free-models-per-day', NOW - 60_000);
+    logRow(b, 'Gemini', 'gemini-2.5-flash', 'failed', 'model_unavailable', 404, 'This model is no longer available to new users', NOW - 120_000, A1);
+    const s = getAiState(A1, NOW);
+    expect(s.state).toBe('error');
+    expect(s.label).toBe('No provider is answering — AI free quota reached');
+    expect(s.detail).toContain('Gemini · gemini-2.5-flash: AI model unavailable');
+  });
+});

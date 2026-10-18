@@ -139,7 +139,8 @@ function cooldownFor(category: FailureCategory, error: AiResponseError | null): 
       // `retryAfterMs` is the provider's own Retry-After or published quota-reset time: it is honoured when it is longer (up to the reset itself).
       return { ms: Math.max(error?.retryAfterMs ?? 0, daily ? 30 * 60_000 : 60_000), scope: daily ? 'provider' : 'route' };
     }
-    case 'model_unavailable': return { ms: 5 * 60_000, scope: 'route' };
+    // A model the provider itself says is retired / no longer offered will not come back in five minutes: rest it an hour (an unknown or misspelt model keeps five).
+    case 'model_unavailable': return { ms: /no longer available|deprecated|retired|discontinued/i.test(error?.providerMessage ?? '') ? 60 * 60_000 : 5 * 60_000, scope: 'route' };
     case 'timeout': return { ms: 60_000, scope: 'route' };
     case 'network': return { ms: 60_000, scope: 'provider' };
     case 'provider_error': return { ms: 60_000, scope: 'route' };

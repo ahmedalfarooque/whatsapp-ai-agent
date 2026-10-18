@@ -16,6 +16,7 @@ import { ModelDiscoveryError, type AdapterCompleteRequest, type DiscoveredModel,
  * The agent loop speaks the OpenAI message shape, so this adapter translates both ways; the router never sees a Gemini structure.
  */
 const BASE_DEFAULT = 'https://generativelanguage.googleapis.com/v1beta';
+export const THINKING_HEADROOM_TOKENS = 1024;
 
 // Gemini accepts only a subset of JSON Schema for tool parameters: unknown keywords make the request fail, so they are dropped.
 const UNSUPPORTED_SCHEMA_KEYS = new Set(['additionalProperties', '$schema', 'default', 'examples', 'title', '$id', 'definitions', '$defs']);
@@ -76,7 +77,10 @@ export function toGeminiRequest(request: AdapterCompleteRequest): Record<string,
   return {
     contents,
     ...(system.length ? { systemInstruction: { parts: [{ text: system.join('\n\n') }] } } : {}),
-    generationConfig: { temperature: request.temperature ?? 0.4, maxOutputTokens: request.maxTokens ?? 600 },
+    // Gemini's "thinking" models count their hidden thoughts against maxOutputTokens: with the requested limit alone they can spend it all on thinking and return an
+    // empty or cut-off answer (verified live: gemini-3.8-flash with 16 tokens → finishReason MAX_TOKENS, 11 thought tokens, answer ":"). The limit therefore has
+    // headroom for the thoughts; the reply itself stays short because the prompt asks for short replies.
+    generationConfig: { temperature: request.temperature ?? 0.4, maxOutputTokens: Math.min((request.maxTokens ?? 600) + THINKING_HEADROOM_TOKENS, 8192) },
     ...(request.tools && request.tools.length ? { tools: [{ functionDeclarations: request.tools.map((t) => ({ name: t.function.name, description: t.function.description, parameters: cleanSchema(t.function.parameters) })) }] } : {}),
   };
 }

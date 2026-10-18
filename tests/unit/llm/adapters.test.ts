@@ -112,7 +112,7 @@ describe('Gemini native adapter', () => {
     const sent = body(call);
     expect(sent.systemInstruction).toEqual({ parts: [{ text: 'You are helpful.' }] });
     expect(sent.contents.map((c: { role: string }) => c.role)).toEqual(['user', 'model', 'user']);
-    expect(sent.generationConfig).toEqual({ temperature: 0.2, maxOutputTokens: 50 });
+    expect(sent.generationConfig).toEqual({ temperature: 0.2, maxOutputTokens: 50 + 1024 }); // headroom for the model's hidden thinking
     expect(JSON.stringify(sent.tools)).not.toMatch(/additionalProperties|default/);
     expect(sent.tools[0].functionDeclarations[0]).toMatchObject({ name: 'lookup', parameters: { type: 'object', required: ['q'] } });
     expect(res.choices[0]!.message).toMatchObject({ role: 'assistant', content: 'hello' });
