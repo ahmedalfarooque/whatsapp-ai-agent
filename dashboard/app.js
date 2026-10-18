@@ -1397,12 +1397,23 @@ async function renderAiRouting(host) {
       <h3>AI providers</h3>
       <p class="muted">Providers are tried from the top. If one fails, times out or runs out of its free usage, the next one is used at once. Only free usage is ever allowed.</p>
       <ul class="ai-list">${entries.map((e, i) => aiEntryRowHtml(e, i, entries.length, { reorder: true })).join('')}</ul>
+      ${entries.filter((e) => e.needsFreeConfirm).map((e) => `<p class="muted" style="font-size:12px"><b>${esc(e.name)}</b> — <span>Not confirmed as free: this provider is never used until you confirm its free tier.</span> <button type="button" class="btn small" data-confirm-free="${e.id}">Confirm free tier</button></p>`).join('')}
       <div class="toolbar" style="margin-top:8px"><button type="button" class="btn primary" id="ai-add">Add provider</button></div>
       <div class="ai-status-line muted" style="font-size:12px;margin-top:6px" role="status" aria-live="polite"></div>
       <div id="ai-form-host" style="margin-top:10px">${editing === 'new' ? aiProviderFormHtml(data.presets, null) : editingEntry ? aiProviderFormHtml(data.presets, editingEntry) : ''}</div>
       ${routingDiagnosticsHtml(data)}`;
 
     host.querySelector('#ai-add').addEventListener('click', () => { editing = 'new'; draw(); });
+    host.querySelectorAll('[data-confirm-free]').forEach((btn) => btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api(`/api/dashboard/ai-routing/providers/${btn.dataset.confirmFree}/confirm-free`, { method: 'POST' });
+        toast('Free tier confirmed', 'success');
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+      await draw();
+    }));
     bindAiForm(host, {
       endpoint: '/api/dashboard/ai-routing/providers',
       itemUrl: (id) => `/api/dashboard/ai-routing/providers/${id}`,
@@ -1487,7 +1498,9 @@ route('#/super-admin-settings', 'Super Admin Settings', 'Shared AI defaults for 
         <p class="muted">The providers below form the shared Default entry that every business, present and future, inherits. Keys stay here, encrypted and masked; a business only sees one line saying how many shared providers can answer, and decides where Default sits in its own order.</p>
         <p class="muted" style="font-size:12px"><span>Businesses inheriting Default:</span> <b>${data.accounts}</b></p>
         <p class="muted" style="font-size:12px">${esc(data.enforced.note)}</p>
+        <p class="muted" style="font-size:12px"><span>The next message would use:</span> <b>${data.nextRoute ? esc(`${data.nextRoute.provider} · ${data.nextRoute.model}`) : '—'}</b></p>
         <ul class="ai-list">${providers.length ? providers.map((e, i) => aiEntryRowHtml(e, i, providers.length, { reorder: true })).join('') : '<li class="muted">No shared provider yet. Add one below; until then each business uses only the providers it added itself.</li>'}</ul>
+        ${data.providers.filter((p) => p.kind !== 'openrouter' && !p.freeConfirmed).map((p) => `<p class="muted" style="font-size:12px"><b>${esc(p.name)}</b> — <span>Not confirmed as free: this provider is never used until you confirm its free tier.</span> <button type="button" class="btn small" data-confirm-free="${p.id}">Confirm free tier</button></p>`).join('')}
         <div class="toolbar" style="margin-top:8px"><button type="button" class="btn primary" id="ai-add">Add provider</button></div>
         <div class="ai-status-line muted" style="font-size:12px;margin-top:6px" role="status" aria-live="polite"></div>
         <div id="ai-form-host" style="margin-top:10px">${editing === 'new' ? aiProviderFormHtml(data.presets, null) : editingEntry ? aiProviderFormHtml(data.presets, editingEntry) : ''}</div>
@@ -1500,6 +1513,16 @@ route('#/super-admin-settings', 'Super Admin Settings', 'Shared AI defaults for 
       </section>`;
 
     view.querySelector('#ai-add').addEventListener('click', () => { editing = 'new'; draw(); });
+    view.querySelectorAll('[data-confirm-free]').forEach((btn) => btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api(`/api/dashboard/super-admin/ai/providers/${btn.dataset.confirmFree}/confirm-free`, { method: 'POST' });
+        toast('Free tier confirmed', 'success');
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+      await draw();
+    }));
     const adopt = view.querySelector('#ai-adopt');
     if (adopt) adopt.addEventListener('click', async () => {
       adopt.disabled = true;

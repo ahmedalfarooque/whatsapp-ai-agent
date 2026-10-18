@@ -53,6 +53,13 @@ export function recordRouteAttempt(input: RouteLogInput, db: Database.Database =
   }
 }
 
+/** What the router has actually observed for one provider (all businesses): the last answered request and the last failure with its category. Observed facts only — never a quota estimate. */
+export function providerActivity(providerId: number, db: Database.Database = getDb()): { lastOkAt: string | null; lastFailureAt: string | null; lastFailureCategory: string | null } {
+  const ok = db.prepare("SELECT created_at FROM ai_route_log WHERE provider_id = ? AND outcome = 'ok' ORDER BY id DESC LIMIT 1").get(providerId) as { created_at: string } | undefined;
+  const bad = db.prepare("SELECT created_at, category FROM ai_route_log WHERE provider_id = ? AND outcome = 'failed' ORDER BY id DESC LIMIT 1").get(providerId) as { created_at: string; category: string | null } | undefined;
+  return { lastOkAt: ok?.created_at ?? null, lastFailureAt: bad?.created_at ?? null, lastFailureCategory: bad?.category ?? null };
+}
+
 export function listRouteLog(accountId: number, limit = 50, db: Database.Database = getDb()): RouteLogRow[] {
   return db.prepare('SELECT * FROM ai_route_log WHERE whatsapp_account_id = ? ORDER BY id DESC LIMIT ?').all(accountId, Math.min(Math.max(1, limit), 500)) as RouteLogRow[];
 }

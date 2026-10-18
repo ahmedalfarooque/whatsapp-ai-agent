@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-18 — free-tier confirmation, cooldowns that survive a restart, router visibility (migration 031)
+* **Cooldowns persist** (`ai_route_cooldowns`): a provider that just reported exhausted quota, rate limiting or an outage is not called again by a restarted process until its cooldown ends. Retries stay bounded (`AI_ROUTE_MAX_ATTEMPTS`, `AI_ROUTING_BUDGET_MS`); when every route is cooling the message goes to the existing fallback + recovery path with no further provider calls.
+* **Free tier must be confirmed** for any non-OpenRouter provider (`ai_providers.free_confirmed`): under strict free-only mode an unconfirmed endpoint is never routed (its price cannot be verified from a public catalog). The Super Admin (shared providers) or the business (its own) confirms it with one button; changing a provider's endpoint resets the confirmation. OpenRouter prices still come from its public catalog. Existing providers are grandfathered as confirmed.
+* Super Admin Settings shows the route the next message would use (name only) and the router's observed last answer / last failure category per provider (never a guessed balance).
+* Rollback: `git checkout -B master 7131cbd`, `npm run build`, restart `whatsapp-ai-agent` (the new table and column are harmless if left).
+
 ## 2026-10-15 — Ollama removed; OpenRouter as the shared Default; customer record in the prompt
 * **Ollama removed** from the application (provider kind, preset, built-in local route, lean local prompt, compact-prompt path, `OLLAMA_*` settings, dashboard strings) and from the production host (service, binaries, models, `.env` lines, evaluation files); migration 030. Evidence and rollback: `docs/LOCAL_INFERENCE_EVALUATION.md`. Every provider endpoint must now be HTTPS.
 * **OpenRouter as the shared Default**: Super Admin Settings can add the OpenRouter key already saved on the server to the Default list as an ordinary provider (the key never leaves the server); it replaces the built-in OpenRouter route for chat. A status line says whether an eligible model is configured and tested.

@@ -3,9 +3,10 @@ import { logger } from '../logger';
 import { getDb } from '../memory/db';
 import { currentAccountId } from '../accounts/accountContext';
 import { isSuperAdmin, type AuthUser } from './permissions';
-import { createProvider, deleteProvider, getSharedProvider, listSharedProviders, ProviderValidationError, reorderSharedProviders, setProviderEnabled, toView, updateProvider } from '../llm/providerRepo';
+import { createProvider, deleteProvider, getSharedProvider, listSharedProviders, ProviderValidationError, reorderSharedProviders, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider } from '../llm/providerRepo';
+import { providerActivity } from '../llm/routeLog';
 import { PROVIDER_PRESETS } from '../llm/providerPresets';
-import { createInputFromSimple, defaultPoolSummary, fail, idParam, inputFrom, isSimpleBody, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
+import { createInputFromSimple, defaultPoolSummary, fail, forCreate, idParam, inputFrom, isSimpleBody, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
 import { buildCandidates } from '../llm/aiRouter';
 import { adoptBuiltinOpenRouter } from '../llm/adoptOpenRouter';
 import { describeCredential, getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
@@ -54,9 +55,12 @@ export function registerSuperAdminAiRoutes(router: Router): void {
     void (async () => { try {
       const key = getEffectiveCredential('OPENROUTER_API_KEY');
       const diag = describeCredential('OPENROUTER_API_KEY');
+      const next = (await buildCandidates(currentAccountId(), 'chat', { wantsTools: true })).eligible[0];
       res.json({
         status: await defaultStatus(currentAccountId()),
-        providers: listSharedProviders().map(toView),
+        // The route the next message would use first, by name only (never a key). Quota may change at any time: this is the plan, not a promise.
+        nextRoute: next ? { provider: next.providerName, model: next.model } : null,
+        providers: listSharedProviders().map((r) => ({ ...toView(r), activity: providerActivity(r.id) })),
         presets: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, kind: p.kind, baseUrl: p.baseUrl, hint: p.hint, models: p.models })),
         pool: defaultPoolSummary(),
         accounts: accountCount(),
@@ -87,7 +91,7 @@ export function registerSuperAdminAiRoutes(router: Router): void {
   router.post('/api/dashboard/super-admin/ai/providers', (req, res) => {
     if (!requireSuper(req, res)) return;
     try {
-      const input = isSimpleBody(req.body) ? createInputFromSimple(req.body) : inputFrom(req.body);
+      const input = forCreate(isSimpleBody(req.body) ? createInputFromSimple(req.body) : inputFrom(req.body), req.body);
       const row = createProvider(input, { accountId: null, updatedBy: req.adminUserId as number });
       logger.info({ providerId: row.id, provider: row.name, kind: row.kind, adminUserId: req.adminUserId, accounts: accountCount() }, 'shared AI provider created');
       res.status(201).json({ provider: toView(row), pool: defaultPoolSummary() });
@@ -132,6 +136,21 @@ export function registerSuperAdminAiRoutes(router: Router): void {
       if (!getSharedProvider(id)) { res.status(404).json({ error: 'not_found' }); return; }
       const row = setProviderEnabled(id, currentAccountId(), req.params.action === 'enable', req.adminUserId as number);
       logger.info({ providerId: id, adminUserId: req.adminUserId, enabled: req.params.action === 'enable' }, 'shared AI provider switched');
+      res.json({ provider: row ? toView(row) : null, pool: defaultPoolSummary() });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /** The Super Admin states that this endpoint is on a free tier. Without it a non-OpenRouter provider is never routed under strict free-only mode. */
+  router.post('/api/dashboard/super-admin/ai/providers/:id/:action(confirm-free|unconfirm-free)', (req, res) => {
+    if (!requireSuper(req, res)) return;
+    try {
+      const id = idParam(req);
+      if (!getSharedProvider(id)) { res.status(404).json({ error: 'not_found' }); return; }
+      const confirmed = req.params.action === 'confirm-free';
+      const row = setProviderFreeConfirmed(id, currentAccountId(), confirmed, req.adminUserId as number);
+      logger.info({ providerId: id, confirmed, adminUserId: req.adminUserId }, 'shared AI provider free tier confirmation changed');
       res.json({ provider: row ? toView(row) : null, pool: defaultPoolSummary() });
     } catch (error) {
       fail(res, error);

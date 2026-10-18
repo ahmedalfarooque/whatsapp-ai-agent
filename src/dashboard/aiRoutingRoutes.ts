@@ -9,7 +9,7 @@ import { activeCooldowns, BUILTIN_OPENROUTER_PRIORITY, buildCandidates, explainR
 import { AiCredentialError } from '../llm/aiCredentialError';
 import { AiResponseError } from '../llm/aiResponseError';
 import { getModelInfo } from '../llm/modelCatalog';
-import { createProvider, csv, deleteProvider, getProvider, listProvidersForAccount, listSharedProviders, PROVIDER_KINDS, providerApiKey, ProviderValidationError, recordProviderTest, setProviderEnabled, toView, updateProvider, type AiProviderInput, type AiProviderRow, type ProviderKind } from '../llm/providerRepo';
+import { createProvider, csv, deleteProvider, getProvider, listProvidersForAccount, listSharedProviders, PROVIDER_KINDS, providerApiKey, ProviderValidationError, recordProviderTest, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider, type AiProviderInput, type AiProviderRow, type ProviderKind } from '../llm/providerRepo';
 import { PROVIDER_PRESETS, resolveSimpleProvider, SimpleProviderError } from '../llm/providerPresets';
 import { getAccountRouting, RoutingOrderError, saveAccountRouting } from '../llm/routingOrder';
 import { listRouteLog, routeStats } from '../llm/routeLog';
@@ -64,6 +64,16 @@ export function inputFrom(body: unknown): AiProviderInput {
     models: csv(str(b.models)), visionModels: csv(str(b.visionModels)), audioModels: csv(str(b.audioModels)),
     freeTier: bool(b.freeTier, true), supportsTools: bool(b.supportsTools, true), enabled: bool(b.enabled, true), priority: num(b.priority), timeoutMs: num(b.timeoutMs), notes: str(b.notes) || null,
   };
+}
+
+/**
+ * A new provider is routed under strict free-only mode only if its free tier can be trusted: OpenRouter prices come from its public catalog;
+ * any other endpoint stays unconfirmed (never routed) until an administrator confirms it, here with `freeConfirmed: true` or later with the
+ * confirm action.
+ */
+export function forCreate(input: AiProviderInput, body: unknown): AiProviderInput {
+  const asked = (body as { freeConfirmed?: unknown } | null)?.freeConfirmed === true;
+  return { ...input, freeConfirmed: input.kind === 'openrouter' ? true : asked };
 }
 
 /** True for the two-field form ({ name, config }); anything else is the detailed payload. */
@@ -163,7 +173,7 @@ export function buildEntries(accountId: number): Array<Record<string, unknown>> 
     const view = row ? toView(row) : null;
     const state: EntryState = !view ? 'empty' : !view.enabled ? 'off' : view.keyStatus !== 'ok' ? 'no_key' : view.lastTestAt ? (view.lastTestOk ? 'ok' : 'failed') : 'untested';
     const detail = !view ? '' : state === 'no_key' ? (view.keyStatus === 'undecryptable' ? 'The saved key cannot be read: enter it again.' : 'No API key saved.') : view.lastTestDetail ?? '';
-    return { key: entry.key, type: 'provider', id: entry.providerId, name: view?.name ?? '', provider: view?.kind, config: view ? view.keyMasked : null, models: view?.models ?? [], position: entry.position, enabled: Boolean(view?.enabled), state, detail, lastTestAt: view?.lastTestAt ?? null };
+    return { key: entry.key, type: 'provider', id: entry.providerId, name: view?.name ?? '', provider: view?.kind, config: view ? view.keyMasked : null, models: view?.models ?? [], position: entry.position, enabled: Boolean(view?.enabled), state, detail, lastTestAt: view?.lastTestAt ?? null, needsFreeConfirm: Boolean(view && view.kind !== 'openrouter' && !view.freeConfirmed) };
   });
 }
 
@@ -254,7 +264,7 @@ export function registerAiRoutingRoutes(router: Router): void {
     try {
       const shared = Boolean((req.body as { shared?: unknown })?.shared);
       if (shared && !mayManageShared(req)) { res.status(403).json({ error: 'Only a super administrator can add a provider shared by every business' }); return; }
-      const input = isSimpleBody(req.body) ? createInputFromSimple(req.body) : inputFrom(req.body);
+      const input = forCreate(isSimpleBody(req.body) ? createInputFromSimple(req.body) : inputFrom(req.body), req.body);
       const row = createProvider(input, { accountId: shared ? null : currentAccountId(), updatedBy: req.adminUserId as number });
       logger.info({ providerId: row.id, provider: row.name, kind: row.kind, shared, account: currentAccountId(), adminUserId: req.adminUserId }, 'AI provider created');
       res.status(201).json({ provider: toView(row), entries: shared ? undefined : buildEntries(currentAccountId()) });
@@ -285,6 +295,20 @@ export function registerAiRoutingRoutes(router: Router): void {
       if (!existing) { res.status(404).json({ error: 'not_found' }); return; }
       if (existing.whatsapp_account_id === null && !mayManageShared(req)) { res.status(403).json({ error: 'Only a super administrator can change a provider shared by every business' }); return; }
       const row = setProviderEnabled(id, currentAccountId(), req.params.action === 'enable', req.adminUserId as number);
+      res.json({ provider: row ? toView(row) : null });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post('/api/dashboard/ai-routing/providers/:id/:action(confirm-free|unconfirm-free)', (req, res) => {
+    try {
+      const id = idParam(req);
+      const existing = getProvider(id, currentAccountId());
+      if (!existing) { res.status(404).json({ error: 'not_found' }); return; }
+      if (existing.whatsapp_account_id === null && !mayManageShared(req)) { res.status(403).json({ error: 'Only a super administrator can change a provider shared by every business' }); return; }
+      const row = setProviderFreeConfirmed(id, currentAccountId(), req.params.action === 'confirm-free', req.adminUserId as number);
+      logger.info({ providerId: id, confirmed: req.params.action === 'confirm-free', adminUserId: req.adminUserId }, 'AI provider free tier confirmation changed');
       res.json({ provider: row ? toView(row) : null });
     } catch (error) {
       fail(res, error);

@@ -3,6 +3,7 @@ import { getBusinessSettings } from '../config/businessSettings';
 import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { currentAccountId } from '../accounts/accountContext';
 import { logger } from '../logger';
+import { getDb } from '../memory/db';
 import { AiCredentialError } from './aiCredentialError';
 import { AiResponseError, type AiResponseReason, type ModelAttemptRecord } from './aiResponseError';
 import { completeOnce, openRouterHeaders } from './openAiCompatible';
@@ -88,10 +89,28 @@ const routeCooling = new Map<string, { until: number; why: string }>();
 const providerCooling = new Map<string, { until: number; why: string }>();
 
 export function coolingUntil(key: string, now = Date.now()): { until: number; why: string } | null {
-  const entry = routeCooling.get(key) ?? providerCooling.get(key);
+  let entry = routeCooling.get(key) ?? providerCooling.get(key);
+  if (!entry) {
+    // A cooldown set before a restart: read it back once and keep it in memory (a missing table or database means "none").
+    try {
+      const row = getDb().prepare('SELECT scope, until_ms, why FROM ai_route_cooldowns WHERE key = ?').get(key) as { scope: 'route' | 'provider'; until_ms: number; why: string } | undefined;
+      if (row) { entry = { until: row.until_ms, why: row.why }; (row.scope === 'provider' ? providerCooling : routeCooling).set(key, entry); }
+    } catch { /* not persisted */ }
+  }
   if (!entry) return null;
-  if (entry.until <= now) { routeCooling.delete(key); providerCooling.delete(key); return null; }
+  if (entry.until <= now) {
+    routeCooling.delete(key); providerCooling.delete(key);
+    try { getDb().prepare('DELETE FROM ai_route_cooldowns WHERE key = ?').run(key); } catch { /* not persisted */ }
+    return null;
+  }
   return entry;
+}
+
+function persistCooldown(key: string, scope: 'route' | 'provider', entry: { until: number; why: string }): void {
+  try {
+    getDb().prepare(`INSERT INTO ai_route_cooldowns (key, scope, until_ms, why) VALUES (?, ?, ?, ?)
+                     ON CONFLICT(key) DO UPDATE SET scope = excluded.scope, until_ms = excluded.until_ms, why = excluded.why, updated_at = datetime('now')`).run(key, scope, entry.until, entry.why);
+  } catch { /* the in-memory cooldown still protects this process */ }
 }
 
 function cooldownFor(category: FailureCategory, error: AiResponseError | null): { ms: number; scope: 'route' | 'provider' } {
@@ -149,7 +168,10 @@ async function describeModel(kind: ProviderKind, model: string, row: AiProviderR
     return { free: info ? info.free : null, image: info ? info.image : null, audio: info ? info.audio : null, tools: info ? info.tools : null };
   }
   // A provider the administrator configured: its declarations are the facts (a model listed for pictures takes pictures; free tier as declared).
-  return { free: row ? row.free_tier !== 0 : true, image: task === 'vision' ? true : null, audio: task === 'audio' ? true : null, tools: row ? row.supports_tools !== 0 : true };
+  // The declaration is not enough on its own: the price of a non-OpenRouter endpoint cannot be verified here, so the Super Admin must confirm
+  // the free tier (free_confirmed); until then the route's price is "unknown" and strict free-only mode skips it.
+  const free = row ? (row.free_tier === 0 ? false : row.free_confirmed === 0 ? null : true) : true;
+  return { free, image: task === 'vision' ? true : null, audio: task === 'audio' ? true : null, tools: row ? row.supports_tools !== 0 : true };
 }
 
 export async function buildCandidates(accountId: number, task: AiTask, opts: { needs?: RouteRequest['needs']; wantsTools: boolean; now?: number } = { wantsTools: false }): Promise<{ eligible: RouteCandidate[]; skipped: SkippedRoute[]; freeOnly: boolean; failover: boolean }> {
@@ -212,7 +234,7 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
     if (entry.disabled) { skipped.push({ candidate: c, category: entry.disabled.includes('key') ? 'no_key' : 'disabled', reason: entry.disabled }); continue; }
     const cooling = coolingUntil(routeCoolKey(task, c), now) ?? coolingUntil(c.providerKey, now);
     if (cooling) { skipped.push({ candidate: c, category: 'cooldown', reason: `cooling down until ${new Date(cooling.until).toISOString().slice(11, 19)} UTC (${cooling.why})` }); continue; }
-    if (freeOnly && c.free !== true && !(c.free === null && unknownPriceAllowedInTests)) { skipped.push({ candidate: c, category: 'free_only', reason: c.free === false ? 'this route costs money (strict free-only mode)' : 'price unknown — treated as paid (strict free-only mode)' }); continue; }
+    if (freeOnly && c.free !== true && !(c.free === null && unknownPriceAllowedInTests)) { skipped.push({ candidate: c, category: 'free_only', reason: c.free === false ? 'this route costs money (strict free-only mode)' : c.builtin || c.kind === 'openrouter' ? 'price unknown — treated as paid (strict free-only mode)' : 'free tier not confirmed yet — the Super Admin or business must confirm it (strict free-only mode)' }); continue; }
     if (opts.needs?.image && c.image !== true) { skipped.push({ candidate: c, category: 'capability', reason: c.image === false ? 'no image input' : 'image support unknown' }); continue; }
     if (opts.needs?.audio && c.audio !== true) { skipped.push({ candidate: c, category: 'capability', reason: c.audio === false ? 'no audio input' : 'audio support unknown' }); continue; }
     if (opts.wantsTools && c.tools === false) { skipped.push({ candidate: c, category: 'capability', reason: 'no tool calling' }); continue; }
@@ -229,7 +251,9 @@ function markFailure(task: AiTask, candidate: RouteCandidate, category: FailureC
   const { ms, scope } = cooldownFor(category, error);
   if (ms <= 0) return;
   const entry = { until: now + ms, why: category.replace(/_/g, ' ') };
-  if (scope === 'provider') providerCooling.set(candidate.providerKey, entry); else routeCooling.set(routeCoolKey(task, candidate), entry);
+  const key = scope === 'provider' ? candidate.providerKey : routeCoolKey(task, candidate);
+  (scope === 'provider' ? providerCooling : routeCooling).set(key, entry);
+  persistCooldown(key, scope, entry);
 }
 
 /** The route as it may be returned or logged: everything except the key. */
@@ -337,6 +361,7 @@ export async function explainRoutes(accountId: number, task: AiTask): Promise<{ 
 export function resetAiRouterForTests(): void {
   routeCooling.clear();
   providerCooling.clear();
+  try { getDb().prepare('DELETE FROM ai_route_cooldowns').run(); } catch { /* no database in this test */ }
 }
 
 /** Every cooldown currently active (for the dashboard health view). */

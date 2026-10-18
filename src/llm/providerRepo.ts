@@ -26,6 +26,8 @@ export interface AiProviderRow {
   vision_models: string;
   audio_models: string;
   free_tier: number;
+  /** 0 = the free tier was declared but not confirmed by an administrator (a non-OpenRouter price cannot be verified here): never routed under free-only mode. */
+  free_confirmed: number;
   supports_tools: number;
   enabled: number;
   priority: number;
@@ -54,6 +56,7 @@ export interface AiProviderView {
   visionModels: string[];
   audioModels: string[];
   freeTier: boolean;
+  freeConfirmed: boolean;
   supportsTools: boolean;
   enabled: boolean;
   priority: number;
@@ -75,6 +78,8 @@ export interface AiProviderInput {
   visionModels?: string[];
   audioModels?: string[];
   freeTier?: boolean;
+  /** undefined on create = confirmed (internal callers); the dashboard sets it false for endpoints whose price it cannot verify. undefined on update = keep. */
+  freeConfirmed?: boolean;
   supportsTools?: boolean;
   enabled?: boolean;
   priority?: number;
@@ -123,7 +128,7 @@ export function toView(row: AiProviderRow): AiProviderView {
   return {
     id: row.id, accountId: row.whatsapp_account_id, shared: row.whatsapp_account_id === null, name: row.name, kind: row.kind, baseUrl: row.base_url,
     hasKey: Boolean(row.key_ciphertext), keyMasked, keyStatus, models: csv(row.models), visionModels: csv(row.vision_models), audioModels: csv(row.audio_models),
-    freeTier: row.free_tier !== 0, supportsTools: row.supports_tools !== 0, enabled: row.enabled !== 0, priority: row.priority, timeoutMs: row.timeout_ms,
+    freeTier: row.free_tier !== 0, freeConfirmed: row.free_confirmed !== 0, supportsTools: row.supports_tools !== 0, enabled: row.enabled !== 0, priority: row.priority, timeoutMs: row.timeout_ms,
     notes: row.notes, lastTestAt: row.last_test_at, lastTestOk: row.last_test_ok === null ? null : row.last_test_ok === 1, lastTestDetail: row.last_test_detail, updatedAt: row.updated_at,
   };
 }
@@ -175,10 +180,10 @@ export function createProvider(input: AiProviderInput, scope: { accountId: numbe
   validate(input);
   const ciphertext = input.apiKey ? encryptWithKey(input.apiKey, getSecretEncryptionKey()) : null;
   const result = db
-    .prepare(`INSERT INTO ai_providers (whatsapp_account_id, name, kind, base_url, key_ciphertext, models, vision_models, audio_models, free_tier, supports_tools, enabled, priority, timeout_ms, notes, updated_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .prepare(`INSERT INTO ai_providers (whatsapp_account_id, name, kind, base_url, key_ciphertext, models, vision_models, audio_models, free_tier, free_confirmed, supports_tools, enabled, priority, timeout_ms, notes, updated_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(scope.accountId, input.name.trim(), input.kind, input.baseUrl.replace(/\/+$/, ''), ciphertext, input.models.join(','), (input.visionModels ?? []).join(','), (input.audioModels ?? []).join(','),
-      input.freeTier === false ? 0 : 1, input.supportsTools === false ? 0 : 1, input.enabled === false ? 0 : 1, input.priority ?? 100, input.timeoutMs ?? 20000, input.notes?.trim() || null, scope.updatedBy);
+      input.freeTier === false ? 0 : 1, input.freeConfirmed === false ? 0 : 1, input.supportsTools === false ? 0 : 1, input.enabled === false ? 0 : 1, input.priority ?? 100, input.timeoutMs ?? 20000, input.notes?.trim() || null, scope.updatedBy);
   // A business's own provider joins ITS routing order (at the end); a shared one lives inside the Default entry of every business.
   if (scope.accountId !== null) ensureAccountRouting(scope.accountId, db);
   return db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(result.lastInsertRowid) as AiProviderRow;
@@ -192,10 +197,13 @@ export function updateProvider(id: number, accountId: number, input: AiProviderI
   const keyClause = input.apiKey === undefined ? '' : ', key_ciphertext = @key';
   const params: Record<string, unknown> = {
     id, name: input.name.trim(), kind: input.kind, base_url: input.baseUrl.replace(/\/+$/, ''), models: input.models.join(','), vision_models: (input.visionModels ?? []).join(','), audio_models: (input.audioModels ?? []).join(','),
-    free_tier: input.freeTier === false ? 0 : 1, supports_tools: input.supportsTools === false ? 0 : 1, enabled: input.enabled === false ? 0 : 1, priority: input.priority ?? existing.priority, timeout_ms: input.timeoutMs ?? existing.timeout_ms, notes: input.notes?.trim() || null, updated_by: updatedBy,
+    free_tier: input.freeTier === false ? 0 : 1,
+    // A different endpoint or kind is a different price list: the confirmation does not carry over unless it is given again.
+    free_confirmed: input.freeConfirmed !== undefined ? (input.freeConfirmed ? 1 : 0) : (input.baseUrl.replace(/\/+$/, '') !== existing.base_url || input.kind !== existing.kind) ? 0 : existing.free_confirmed,
+    supports_tools: input.supportsTools === false ? 0 : 1, enabled: input.enabled === false ? 0 : 1, priority: input.priority ?? existing.priority, timeout_ms: input.timeoutMs ?? existing.timeout_ms, notes: input.notes?.trim() || null, updated_by: updatedBy,
   };
   if (input.apiKey !== undefined) params.key = input.apiKey ? encryptWithKey(input.apiKey, getSecretEncryptionKey()) : null;
-  db.prepare(`UPDATE ai_providers SET name = @name, kind = @kind, base_url = @base_url, models = @models, vision_models = @vision_models, audio_models = @audio_models, free_tier = @free_tier,
+  db.prepare(`UPDATE ai_providers SET name = @name, kind = @kind, base_url = @base_url, models = @models, vision_models = @vision_models, audio_models = @audio_models, free_tier = @free_tier, free_confirmed = @free_confirmed,
               supports_tools = @supports_tools, enabled = @enabled, priority = @priority, timeout_ms = @timeout_ms, notes = @notes, updated_by = @updated_by, updated_at = datetime('now')${keyClause} WHERE id = @id`).run(params);
   return db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(id) as AiProviderRow;
 }
@@ -203,6 +211,13 @@ export function updateProvider(id: number, accountId: number, input: AiProviderI
 export function setProviderEnabled(id: number, accountId: number, enabled: boolean, updatedBy: number, db: Database.Database = getDb()): AiProviderRow | undefined {
   if (!getProvider(id, accountId, db)) return undefined;
   db.prepare("UPDATE ai_providers SET enabled = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(enabled ? 1 : 0, updatedBy, id);
+  return db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(id) as AiProviderRow;
+}
+
+/** The administrator states that this endpoint/model is on a free tier (the only way a non-OpenRouter route becomes eligible under free-only mode). */
+export function setProviderFreeConfirmed(id: number, accountId: number, confirmed: boolean, updatedBy: number, db: Database.Database = getDb()): AiProviderRow | undefined {
+  if (!getProvider(id, accountId, db)) return undefined;
+  db.prepare("UPDATE ai_providers SET free_confirmed = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(confirmed ? 1 : 0, updatedBy, id);
   return db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(id) as AiProviderRow;
 }
 

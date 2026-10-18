@@ -404,6 +404,10 @@ window.I18N_AR_PATTERNS.push(
 // OpenRouter as the shared Default: status badges and the "add the saved key" action.
 Object.assign(window.I18N_AR, {
   'Added to the Default list': 'تمت الإضافة إلى قائمة الافتراضي',
+  'Confirm free tier': 'تأكيد أنه مجاني',
+  'Free tier confirmed': 'تم تأكيد المجانية',
+  'Not confirmed as free: this provider is never used until you confirm its free tier.': 'لم يُؤكَّد أنه مجاني: لن يُستخدم هذا المزوّد حتى تؤكد أنه مجاني.',
+  'The next message would use:': 'الرسالة التالية ستستخدم:',
   'Add it to the Default list': 'أضفه إلى قائمة الافتراضي',
   'The key stays on the server; it is not shown.': 'يبقى المفتاح على الخادم ولا يُعرض.',
   'Already in the Default list above.': 'موجود بالفعل في قائمة الافتراضي أعلاه.',
