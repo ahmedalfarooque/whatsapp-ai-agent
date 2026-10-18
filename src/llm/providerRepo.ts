@@ -5,6 +5,7 @@ import { getSecretEncryptionKey } from '../config/masterKey';
 import { isUsableApiKey } from '../config/effectiveConfig';
 import { logger } from '../logger';
 import { ensureAccountRouting, forgetProviderEntry } from './routingOrder';
+import { endpointMatchesVendor, isAdapterId, vendorForUrl } from './adapters';
 
 /**
  * AI providers configured in the dashboard (table ai_providers, migration 027). A provider is a chat-completions endpoint with its own
@@ -28,6 +29,9 @@ export interface AiProviderRow {
   free_tier: number;
   /** 0 = the free tier was declared but not confirmed by an administrator (a non-OpenRouter price cannot be verified here): never routed under free-only mode. */
   free_confirmed: number;
+  /** Which adapter speaks this provider's API (openrouter | openai | gemini) and which vendor it is (groq, google, xai, mistral, cerebras, openrouter, custom). */
+  adapter: string;
+  vendor: string;
   supports_tools: number;
   enabled: number;
   priority: number;
@@ -57,6 +61,8 @@ export interface AiProviderView {
   audioModels: string[];
   freeTier: boolean;
   freeConfirmed: boolean;
+  adapter: string;
+  vendor: string;
   supportsTools: boolean;
   enabled: boolean;
   priority: number;
@@ -80,6 +86,9 @@ export interface AiProviderInput {
   freeTier?: boolean;
   /** undefined on create = confirmed (internal callers); the dashboard sets it false for endpoints whose price it cannot verify. undefined on update = keep. */
   freeConfirmed?: boolean;
+  /** Protocol adapter and vendor identity; derived from the kind and the address when not given. */
+  adapter?: string;
+  vendor?: string;
   supportsTools?: boolean;
   enabled?: boolean;
   priority?: number;
@@ -88,7 +97,8 @@ export interface AiProviderInput {
 }
 
 export const PROVIDER_KINDS: readonly ProviderKind[] = ['openrouter', 'openai_compatible'];
-const MODEL_ID = /^[A-Za-z0-9._:/@-]{1,120}$/;
+// A model id is never an address: :// is refused (a pasted console / key-page URL is not a model).
+const MODEL_ID = /^(?!.*:\/\/)[A-Za-z0-9._:/@-]{1,120}$/;
 // Every provider is reached over HTTPS: an API key is never sent in clear text.
 const URL_RE = /^https:\/\/[^\s"'<>]{3,200}$/;
 
@@ -109,6 +119,8 @@ function validate(input: AiProviderInput): void {
   if (!input.name || input.name.trim().length < 1 || input.name.length > 80) fields.push('name');
   if (!PROVIDER_KINDS.includes(input.kind)) fields.push('kind');
   if (!URL_RE.test(input.baseUrl ?? '')) fields.push('baseUrl');
+  else if (input.vendor && !endpointMatchesVendor(input.vendor, input.baseUrl)) fields.push('baseUrl'); // a known vendor must use its official API host
+  if (input.adapter !== undefined && !isAdapterId(input.adapter)) fields.push('adapter');
   for (const list of [input.models, input.visionModels ?? [], input.audioModels ?? []]) for (const m of list) if (!MODEL_ID.test(m)) fields.push('models');
   if (input.models.length === 0 && (input.visionModels ?? []).length === 0 && (input.audioModels ?? []).length === 0) fields.push('models');
   if (input.apiKey !== undefined && input.apiKey !== '' && !isUsableApiKey(input.apiKey)) fields.push('apiKey');
@@ -131,7 +143,7 @@ export function toView(row: AiProviderRow): AiProviderView {
   return {
     id: row.id, accountId: row.whatsapp_account_id, shared: row.whatsapp_account_id === null, name: row.name, kind: row.kind, baseUrl: row.base_url,
     hasKey: Boolean(row.key_ciphertext), keyMasked, keyStatus, models: csv(row.models), visionModels: csv(row.vision_models), audioModels: csv(row.audio_models),
-    freeTier: row.free_tier !== 0, freeConfirmed: row.free_confirmed !== 0, supportsTools: row.supports_tools !== 0, enabled: row.enabled !== 0, priority: row.priority, timeoutMs: row.timeout_ms,
+    freeTier: row.free_tier !== 0, freeConfirmed: row.free_confirmed !== 0, adapter: row.adapter, vendor: row.vendor, supportsTools: row.supports_tools !== 0, enabled: row.enabled !== 0, priority: row.priority, timeoutMs: row.timeout_ms,
     notes: row.notes, lastTestAt: row.last_test_at, lastTestOk: row.last_test_ok === null ? null : row.last_test_ok === 1, lastTestDetail: row.last_test_detail, updatedAt: row.updated_at,
   };
 }
@@ -183,10 +195,10 @@ export function createProvider(input: AiProviderInput, scope: { accountId: numbe
   validate(input);
   const ciphertext = input.apiKey ? encryptWithKey(input.apiKey, getSecretEncryptionKey()) : null;
   const result = db
-    .prepare(`INSERT INTO ai_providers (whatsapp_account_id, name, kind, base_url, key_ciphertext, models, vision_models, audio_models, free_tier, free_confirmed, supports_tools, enabled, priority, timeout_ms, notes, updated_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .prepare(`INSERT INTO ai_providers (whatsapp_account_id, name, kind, base_url, key_ciphertext, models, vision_models, audio_models, free_tier, free_confirmed, supports_tools, enabled, priority, timeout_ms, notes, updated_by, adapter, vendor)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(scope.accountId, input.name.trim(), input.kind, input.baseUrl.replace(/\/+$/, ''), ciphertext, input.models.join(','), (input.visionModels ?? []).join(','), (input.audioModels ?? []).join(','),
-      input.freeTier === false ? 0 : 1, input.freeConfirmed === false ? 0 : 1, input.supportsTools === false ? 0 : 1, input.enabled === false ? 0 : 1, input.priority ?? 100, input.timeoutMs ?? 20000, input.notes?.trim() || null, scope.updatedBy);
+      input.freeTier === false ? 0 : 1, input.freeConfirmed === false ? 0 : 1, input.supportsTools === false ? 0 : 1, input.enabled === false ? 0 : 1, input.priority ?? 100, input.timeoutMs ?? 20000, input.notes?.trim() || null, scope.updatedBy, input.adapter ?? (input.kind === 'openrouter' ? 'openrouter' : 'openai'), input.vendor ?? (input.kind === 'openrouter' ? 'openrouter' : vendorForUrl(input.baseUrl).id));
   // A business's own provider joins ITS routing order (at the end); a shared one lives inside the Default entry of every business.
   if (scope.accountId !== null) ensureAccountRouting(scope.accountId, db);
   return db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(result.lastInsertRowid) as AiProviderRow;
@@ -203,10 +215,11 @@ export function updateProvider(id: number, accountId: number, input: AiProviderI
     free_tier: input.freeTier === false ? 0 : 1,
     // A different endpoint or kind is a different price list: the confirmation does not carry over unless it is given again.
     free_confirmed: input.freeConfirmed !== undefined ? (input.freeConfirmed ? 1 : 0) : (input.baseUrl.replace(/\/+$/, '') !== existing.base_url || input.kind !== existing.kind) ? 0 : existing.free_confirmed,
+    adapter: input.adapter ?? existing.adapter, vendor: input.vendor ?? (input.kind === 'openrouter' ? 'openrouter' : vendorForUrl(input.baseUrl).id),
     supports_tools: input.supportsTools === false ? 0 : 1, enabled: input.enabled === false ? 0 : 1, priority: input.priority ?? existing.priority, timeout_ms: input.timeoutMs ?? existing.timeout_ms, notes: input.notes?.trim() || null, updated_by: updatedBy,
   };
   if (input.apiKey !== undefined) params.key = input.apiKey ? encryptWithKey(input.apiKey, getSecretEncryptionKey()) : null;
-  db.prepare(`UPDATE ai_providers SET name = @name, kind = @kind, base_url = @base_url, models = @models, vision_models = @vision_models, audio_models = @audio_models, free_tier = @free_tier, free_confirmed = @free_confirmed,
+  db.prepare(`UPDATE ai_providers SET name = @name, kind = @kind, base_url = @base_url, models = @models, vision_models = @vision_models, audio_models = @audio_models, free_tier = @free_tier, free_confirmed = @free_confirmed, adapter = @adapter, vendor = @vendor,
               supports_tools = @supports_tools, enabled = @enabled, priority = @priority, timeout_ms = @timeout_ms, notes = @notes, updated_by = @updated_by, updated_at = datetime('now')${keyClause} WHERE id = @id`).run(params);
   return db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(id) as AiProviderRow;
 }

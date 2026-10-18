@@ -38,7 +38,8 @@ describe('migration 015 — multi-account (existing production schema)', () => {
     const db = legacyDatabase();
     runMigrations(db); // applies 015 (and the additive 016 setup tables) on top
     const applied = (db.prepare('SELECT id FROM schema_migrations ORDER BY id').all() as { id: string }[]).map((r) => r.id);
-    expect(applied.slice(-17)).toEqual([expect.stringMatching(/^015_/), expect.stringMatching(/^016_/), expect.stringMatching(/^017_/), expect.stringMatching(/^018_/), expect.stringMatching(/^019_/), expect.stringMatching(/^020_/), expect.stringMatching(/^021_/), expect.stringMatching(/^022_/), expect.stringMatching(/^023_/), expect.stringMatching(/^024_/), expect.stringMatching(/^025_/), expect.stringMatching(/^026_/), expect.stringMatching(/^027_/), expect.stringMatching(/^028_/), expect.stringMatching(/^029_/), expect.stringMatching(/^030_/), expect.stringMatching(/^031_/)]);
+    // the migrations from 015 to the latest, in order (the window grows by one entry with every new migration)
+    expect(applied.slice(-18).map((name) => name.slice(0, 3))).toEqual(Array.from({ length: 18 }, (_, k) => String(15 + k).padStart(3, '0')));
 
     const account = db.prepare('SELECT * FROM whatsapp_accounts').all() as Record<string, unknown>[];
     expect(account).toHaveLength(1);

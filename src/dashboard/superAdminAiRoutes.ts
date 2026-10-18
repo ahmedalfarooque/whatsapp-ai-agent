@@ -6,7 +6,7 @@ import { isSuperAdmin, type AuthUser } from './permissions';
 import { createProvider, deleteProvider, getSharedProvider, listSharedProviders, ProviderValidationError, reorderSharedProviders, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider } from '../llm/providerRepo';
 import { providerActivity } from '../llm/routeLog';
 import { presetsPayload } from '../llm/providerPresets';
-import { createInputFromSimple, defaultPoolSummary, fail, forCreate, idParam, inputFrom, isSimpleBody, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
+import { createInputFromSimple, defaultPoolSummary, discoverModelsFor, fail, forCreate, idParam, inputFrom, isSimpleBody, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
 import { buildCandidates } from '../llm/aiRouter';
 import { adoptBuiltinOpenRouter } from '../llm/adoptOpenRouter';
 import { describeCredential, getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
@@ -86,6 +86,11 @@ export function registerSuperAdminAiRoutes(router: Router): void {
     } catch (error) {
       fail(res, error);
     }
+  });
+
+  router.post('/api/dashboard/super-admin/ai/discover-models', (req, res) => {
+    if (!requireSuper(req, res)) return;
+    void discoverModelsFor(req.body, currentAccountId(), true).then((r) => res.status(r.status).json(r.json)).catch((error) => fail(res, error));
   });
 
   router.post('/api/dashboard/super-admin/ai/providers', (req, res) => {

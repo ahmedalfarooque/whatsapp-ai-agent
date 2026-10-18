@@ -74,7 +74,10 @@ describe('the two-field provider form', () => {
     expect(groq).toMatchObject({ kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', freeTier: true, apiKey: 'gsk_abcdefghijklmnopqrstuvwxyz0123456789' });
     expect(groq.models.length).toBeGreaterThan(0);
     expect(() => resolveSimpleProvider({ name: 'M', config: 'whatever-key-value-123456789012345678901' })).toThrow(SimpleProviderError);
-    expect(resolveSimpleProvider({ name: 'M', config: 'whatever-key-value-123456789012345678901', provider: 'mistral' })).toMatchObject({ baseUrl: 'https://api.mistral.ai/v1' });
+    expect(resolveSimpleProvider({ name: 'M', config: 'whatever-key-value-123456789012345678901', provider: 'mistral', models: 'mistral-test-model' })).toMatchObject({ baseUrl: 'https://api.mistral.ai/v1', adapter: 'openai', vendor: 'mistral' });
+    // a vendor with no verified default model never gets one invented: the models must be chosen
+    expect(() => resolveSimpleProvider({ name: 'M', config: 'whatever-key-value-123456789012345678901', provider: 'mistral' })).toThrow(SimpleProviderError);
+    expect(resolveSimpleProvider({ name: 'Gem', config: 'AIzaSyabcdefghijklmnopqrstuvwxyz0123456', models: 'gemini-test-model' })).toMatchObject({ adapter: 'gemini', vendor: 'google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' });
   });
 
   it('a URL is never accepted as the configuration (the endpoint comes from the preset or "More options"), and no local runtime preset exists', () => {

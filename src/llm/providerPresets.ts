@@ -1,5 +1,6 @@
 import type { AiProviderInput, ProviderKind } from './providerRepo';
 import { csv, PROVIDER_RULES } from './providerRepo';
+import { adapterFor, VENDORS } from './adapters';
 
 /**
  * Presets for the endpoints a business or the Super Admin can add with just a NAME and an API CONFIGURATION (an API key, or the address of a
@@ -7,21 +8,18 @@ import { csv, PROVIDER_RULES } from './providerRepo';
  * still chooses the models in "More options"; every provider added this way is declared as a FREE tier (the router uses it only in strict
  * free-only mode when declared so, and never calls anything it cannot show to be free).
  */
-export interface ProviderPreset { id: string; name: string; kind: ProviderKind; baseUrl: string; hint: string; models: string; keyPrefix?: RegExp }
+export interface ProviderPreset { id: string; name: string; kind: ProviderKind; baseUrl: string; hint: string; models: string; keyPrefix?: RegExp; adapter: string; free: { mode: string; note: string }; discovery: boolean; docs: string; authentication: string }
 
-export const PROVIDER_PRESETS: ProviderPreset[] = [
-  { id: 'openrouter', name: 'OpenRouter', kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', hint: 'Free models end in :free and need the account privacy setting to allow non-ZDR endpoints.', models: 'openrouter/free', keyPrefix: /^sk-or-/ },
-  { id: 'groq', name: 'Groq', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', hint: 'Free developer tier (daily request limits, no card).', models: 'llama-3.3-70b-versatile,llama-3.1-8b-instant', keyPrefix: /^gsk_/ },
-  { id: 'google', name: 'Google AI Studio (Gemini)', kind: 'openai_compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', hint: 'Free tier of the Gemini API (daily limits, no card). Free-tier prompts may be used by Google to improve its products.', models: 'gemini-2.5-flash-lite,gemini-2.5-flash', keyPrefix: /^AIza/ },
-  { id: 'cerebras', name: 'Cerebras', kind: 'openai_compatible', baseUrl: 'https://api.cerebras.ai/v1', hint: 'Free tier (daily token limits).', models: 'llama-3.3-70b,llama3.1-8b', keyPrefix: /^csk-/ },
-  { id: 'mistral', name: 'Mistral', kind: 'openai_compatible', baseUrl: 'https://api.mistral.ai/v1', hint: 'Free experiment tier (rate limited; data may be used for training).', models: 'mistral-small-latest' },
-  { id: 'custom', name: 'Custom OpenAI-compatible', kind: 'openai_compatible', baseUrl: '', hint: 'Any /v1/chat/completions endpoint.', models: '' },
-];
-
+// The presets ARE the vendor registry (src/llm/adapters/vendors.ts): official address, adapter, free-tier evidence. `models` holds only a model id
+// that was seen in the vendor's live model list; for every other vendor it is empty and the administrator fetches the real list.
+export const PROVIDER_PRESETS: ProviderPreset[] = VENDORS.map((v) => ({
+  id: v.id, name: v.name, kind: v.kind, baseUrl: v.baseUrl, hint: v.hint, models: v.verifiedDefault, keyPrefix: v.keyPrefix, adapter: v.adapter, free: v.free, discovery: v.discovery, docs: v.docs,
+  authentication: adapterFor(v.adapter).authentication,
+}));
 /** What the dashboard form needs: presets (with the key prefix as a regex source) and the exact validation rules the server applies. */
-export function presetsPayload(): { presets: Array<{ id: string; name: string; kind: ProviderKind; baseUrl: string; hint: string; models: string }>; rules: { baseUrl: string; model: string } } {
+export function presetsPayload(): { presets: Array<{ id: string; name: string; kind: ProviderKind; baseUrl: string; hint: string; models: string; adapter: string; free: { mode: string; note: string }; discovery: boolean; docs: string; authentication: string }>; rules: { baseUrl: string; model: string } } {
   return {
-    presets: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, kind: p.kind, baseUrl: p.baseUrl, hint: p.hint, models: p.models })),
+    presets: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, kind: p.kind, baseUrl: p.baseUrl, hint: p.hint, models: p.models, adapter: p.adapter, free: p.free, discovery: p.discovery, docs: p.docs, authentication: p.authentication })),
     rules: { baseUrl: PROVIDER_RULES.baseUrl.source, model: PROVIDER_RULES.model.source },
   };
 }
@@ -64,6 +62,8 @@ export function resolveSimpleProvider(input: { name: string; config: string; pro
   return {
     name: input.name,
     kind: preset.kind,
+    adapter: preset.adapter,
+    vendor: preset.id,
     baseUrl,
     apiKey: config,
     models,

@@ -405,6 +405,9 @@ window.I18N_AR_PATTERNS.push(
 Object.assign(window.I18N_AR, {
   'Added to the Default list': 'تمت الإضافة إلى قائمة الافتراضي',
   'Confirm free tier': 'تأكيد أنه مجاني',
+  'Fetch available models': 'جلب النماذج المتاحة',
+  'Asking the provider…': 'جارٍ سؤال المزوّد…',
+  'Choose at least one model: press Fetch available models, or type a model id.': 'اختر نموذجاً واحداً على الأقل: اضغط «جلب النماذج المتاحة» أو اكتب معرّف النموذج.',
   'Free tier confirmed': 'تم تأكيد المجانية',
   'Not confirmed as free: this provider is never used until you confirm its free tier.': 'لم يُؤكَّد أنه مجاني: لن يُستخدم هذا المزوّد حتى تؤكد أنه مجاني.',
   'The next message would use:': 'الرسالة التالية ستستخدم:',

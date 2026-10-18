@@ -225,7 +225,7 @@ describe('Super Admin Settings and the account AI list', () => {
 
   it('the shared pool can be reordered; test calls use one tiny request and never expose the key', async () => {
     const one = await owner.post('/api/dashboard/super-admin/ai/providers').send({ name: 'Pool one', config: SHARED_KEY });
-    const two = await owner.post('/api/dashboard/super-admin/ai/providers').send({ name: 'Pool two', config: 'AIzaSyPoolPoolPoolPoolPoolPoolPool0000000' });
+    const two = await owner.post('/api/dashboard/super-admin/ai/providers').send({ name: 'Pool two', config: 'AIzaSyPoolPoolPoolPoolPoolPoolPool0000000', models: 'gemini-test-model' }); // a vendor without a verified default needs a model chosen from its list
     expect(two.body.provider.baseUrl).toContain('generativelanguage.googleapis.com'); // recognised as Google AI Studio
     const order = await owner.put('/api/dashboard/super-admin/ai/providers/order').send({ ids: [two.body.provider.id, one.body.provider.id] });
     expect(order.body.providers.map((p: { name: string }) => p.name)).toEqual(['Pool two', 'Pool one']);

@@ -9,9 +9,10 @@ import { activeCooldowns, BUILTIN_OPENROUTER_PRIORITY, buildCandidates, explainR
 import { AiCredentialError } from '../llm/aiCredentialError';
 import { AiResponseError } from '../llm/aiResponseError';
 import { getModelInfo } from '../llm/modelCatalog';
-import { createProvider, csv, deleteProvider, getProvider, listProvidersForAccount, listSharedProviders, PROVIDER_KINDS, providerApiKey, ProviderValidationError, recordProviderTest, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider, type AiProviderInput, type AiProviderRow, type ProviderKind } from '../llm/providerRepo';
+import { createProvider, csv, deleteProvider, getProvider, listProvidersForAccount, listSharedProviders, PROVIDER_KINDS, PROVIDER_RULES, providerApiKey, ProviderValidationError, recordProviderTest, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider, type AiProviderInput, type AiProviderRow, type ProviderKind } from '../llm/providerRepo';
 import { PROVIDER_PRESETS, presetsPayload, resolveSimpleProvider, SimpleProviderError } from '../llm/providerPresets';
 import { getAccountRouting, RoutingOrderError, saveAccountRouting } from '../llm/routingOrder';
+import { discoverModels, endpointMatchesVendor, ModelDiscoveryError, vendorById, type DiscoveredModel } from '../llm/adapters';
 import { listRouteLog, routeStats } from '../llm/routeLog';
 import { pendingReplyCounts } from '../replay/pendingReplyRepo';
 import { listEscalations } from '../escalation/escalationService';
@@ -118,7 +119,7 @@ export async function runProviderTest(row: AiProviderRow): Promise<{ ok: boolean
   if (!model) return { ok: false, detail: 'No model is configured for this provider.', latencyMs: 0 };
   const apiKey = providerApiKey(row);
   if (!apiKey) { recordProviderTest(row.id, false, 'no usable API key saved'); return { ok: false, detail: 'No usable API key is saved for this provider.', latencyMs: 0 }; }
-  const candidate: RouteCandidate = { key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, baseUrl: row.base_url, apiKey, model, free: row.free_tier !== 0, image: null, audio: null, tools: row.supports_tools !== 0, timeoutMs: Math.min(row.timeout_ms, 30_000), builtin: false };
+  const candidate: RouteCandidate = { key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, adapter: row.adapter, baseUrl: row.base_url, apiKey, model, free: row.free_tier !== 0, image: null, audio: null, tools: row.supports_tools !== 0, timeoutMs: Math.min(row.timeout_ms, 30_000), builtin: false };
   const started = Date.now();
   try {
     await routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: 8, temperature: 0, deadline: Date.now() + 30_000, candidatesOverride: [candidate] });
@@ -126,10 +127,59 @@ export async function runProviderTest(row: AiProviderRow): Promise<{ ok: boolean
     recordProviderTest(row.id, true, detail);
     return { ok: true, detail, latencyMs: Date.now() - started };
   } catch (error) {
-    const detail = describeFailure(error);
+    let detail = describeFailure(error);
     const category = error instanceof AiResponseError && error.attempts[0] ? error.attempts[0].reason : error instanceof AiCredentialError ? 'credential' : 'unknown';
+    // An unavailable model is explained from the provider's own list (never replaced by another model): is it listed at all?
+    if (category === 'model_unavailable') detail = `${detail}${await explainUnavailableModel(row, apiKey, model)}`;
     recordProviderTest(row.id, false, detail);
     return { ok: false, detail, category, latencyMs: Date.now() - started };
+  }
+}
+
+/** Why a model was refused, from the provider's model list when it has one: "not in the list" (with a few that are) or "listed but refused this request". */
+async function explainUnavailableModel(row: AiProviderRow, apiKey: string, model: string): Promise<string> {
+  try {
+    const list = await discoverModels(row.adapter, { baseUrl: row.base_url, apiKey, timeoutMs: 8000 });
+    if (list.some((m) => m.id === model)) return ' The model is in the provider\'s list but refused this request (permissions, region or data policy).';
+    const sample = list.length ? `, for example ${list.slice(0, 3).map((m) => m.id).join(', ')}` : '';
+    return ` The model "${model}" is not in this provider's model list (${list.length} models). Use Fetch available models and choose one${sample}.`;
+  } catch (error) {
+    return error instanceof ModelDiscoveryError && error.category === 'endpoint_not_found' ? ' The endpoint address has no model list: check it is the provider\'s API address.' : '';
+  }
+}
+
+/**
+ * "Fetch available models": the provider's own model list through its adapter, for a saved provider (`providerId`, its stored key is used server-side)
+ * or for a new one (vendor, key and address typed in the form: used for this one request and never stored or logged). Prices and free-tier status are
+ * shown only when the list itself carries reliable evidence; everything else is reported as unverified.
+ */
+export async function discoverModelsFor(body: unknown, accountId: number, mayShared: boolean): Promise<{ status: number; json: Record<string, unknown> }> {
+  const b = (body ?? {}) as Record<string, unknown>;
+  let adapter: string; let baseUrl: string; let apiKey: string | null; let vendorId: string;
+  if (b.providerId !== undefined && b.providerId !== null && b.providerId !== '') {
+    const row = getProvider(Number(b.providerId), accountId);
+    if (!row) return { status: 404, json: { error: 'not_found' } };
+    if (row.whatsapp_account_id === null && !mayShared) return { status: 403, json: { error: 'Only a super administrator can use a provider shared by every business' } };
+    adapter = row.adapter; baseUrl = row.base_url; apiKey = providerApiKey(row); vendorId = row.vendor;
+  } else {
+    const config = str(b.config);
+    const detected = PROVIDER_PRESETS.find((p) => p.keyPrefix?.test(config))?.id;
+    vendorId = str(b.provider) && str(b.provider) !== 'auto' ? str(b.provider) : detected ?? '';
+    const vendor = vendorById(vendorId);
+    if (!vendor) return { status: 400, json: { error: 'validation_failed', fields: ['provider'], message: 'Choose a provider first.' } };
+    baseUrl = str(b.baseUrl) || vendor.baseUrl;
+    if (!PROVIDER_RULES.baseUrl.test(baseUrl) || !endpointMatchesVendor(vendor.id, baseUrl)) return { status: 400, json: { error: 'validation_failed', fields: ['baseUrl'], message: 'The endpoint address must be a full https:// API address' + (vendor.id === 'custom' ? '.' : ` on ${vendor.hosts.join(', ')}.`) } };
+    if (!config || !isUsableApiKey(config)) return { status: 400, json: { error: 'validation_failed', fields: ['config'], message: 'Paste the API key first: the model list needs it.' } };
+    adapter = vendor.adapter; apiKey = config;
+  }
+  if (!apiKey) return { status: 200, json: { ok: false, category: 'credential', detail: 'No usable API key is saved for this provider.' } };
+  try {
+    const models: DiscoveredModel[] = (await discoverModels(adapter, { baseUrl, apiKey, timeoutMs: 15_000 })).slice(0, 300);
+    const vendor = vendorById(vendorId);
+    return { status: 200, json: { ok: true, vendor: vendorId, count: models.length, models, freeEvidence: models.some((m) => m.free !== null) ? 'catalog' : 'none', freeNote: vendor?.free.note ?? '' } };
+  } catch (error) {
+    if (error instanceof ModelDiscoveryError) return { status: 200, json: { ok: false, category: error.category, httpStatus: error.httpStatus, detail: error.message } };
+    return { status: 200, json: { ok: false, category: 'provider_error', detail: 'The provider could not be reached.' } };
   }
 }
 
@@ -267,6 +317,10 @@ export function registerAiRoutingRoutes(router: Router): void {
     } catch (error) {
       fail(res, error);
     }
+  });
+
+  router.post('/api/dashboard/ai-routing/discover-models', (req, res) => {
+    void discoverModelsFor(req.body, currentAccountId(), mayManageShared(req)).then((r) => res.status(r.status).json(r.json)).catch((error) => fail(res, error));
   });
 
   router.post('/api/dashboard/ai-routing/providers', (req, res) => {

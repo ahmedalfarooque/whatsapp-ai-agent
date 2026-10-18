@@ -6,7 +6,7 @@ import { logger } from '../logger';
 import { getDb } from '../memory/db';
 import { AiCredentialError } from './aiCredentialError';
 import { AiResponseError, type AiResponseReason, type ModelAttemptRecord } from './aiResponseError';
-import { completeOnce, openRouterHeaders } from './openAiCompatible';
+import { adapterFor } from './adapters';
 import { getModelInfo } from './modelCatalog';
 import { csv, listProvidersForAccount, listSharedProviders, providerApiKey, type AiProviderRow, type ProviderKind } from './providerRepo';
 import { recordRouteAttempt } from './routeLog';
@@ -41,6 +41,8 @@ export interface RouteCandidate {
   providerId: number | null;
   providerName: string;
   kind: ProviderKind;
+  /** Which adapter speaks this route's API (openrouter | openai | gemini). */
+  adapter: string;
   baseUrl: string;
   apiKey: string | null;
   model: string;
@@ -191,7 +193,7 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
     for (const model of models) {
       const facts = await describeModel(row.kind, model, row, task);
       all.push({ priority: row.priority, order: order++, disabled, entryKey, candidate: {
-        key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, baseUrl: row.base_url, apiKey, model, ...facts,
+        key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, adapter: row.adapter, baseUrl: row.base_url, apiKey, model, ...facts,
         timeoutMs: row.timeout_ms, builtin: false,
       } });
     }
@@ -216,7 +218,7 @@ export async function buildCandidates(accountId: number, task: AiTask, opts: { n
     // tried (that is exactly what worked on production); a generic fallback with unknown capability is not.
     const explicit = task === 'vision' && (model === settings.openRouterVisionModel || model === settings.openRouterModel);
     all.push({ priority: BUILTIN_OPENROUTER_PRIORITY, order: order++, entryKey: DEFAULT_ENTRY, disabled: isUsableApiKey(builtinKey) ? undefined : builtinKey.trim() ? 'the saved OpenRouter key is not a usable key (wrong format or length)' : 'no OpenRouter key saved', candidate: {
-      key: `builtin:${model}`, providerKey: 'provider:builtin', providerId: null, providerName: 'OpenRouter (built-in key)', kind: 'openrouter', baseUrl: OPENROUTER_BASE_URL, apiKey: isUsableApiKey(builtinKey) ? builtinKey : null, model,
+      key: `builtin:${model}`, providerKey: 'provider:builtin', providerId: null, providerName: 'OpenRouter (built-in key)', kind: 'openrouter', adapter: 'openrouter', baseUrl: OPENROUTER_BASE_URL, apiKey: isUsableApiKey(builtinKey) ? builtinKey : null, model,
       free: facts.free, image: facts.image ?? (explicit ? true : null), audio: facts.audio, tools: facts.tools, timeoutMs: env.OPENROUTER_TIMEOUT_MS, builtin: true,
     } });
   }
@@ -297,9 +299,10 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
     for (let attempt = 0; attempt < (onlyRoute ? 2 : 1); attempt += 1) {
       const t0 = Date.now();
       try {
-        const response = await completeOnce({
+        // The adapter owns this vendor's request/response contract and error mapping; the router sees only a normalised answer or error.
+        const response = await adapterFor(candidate.adapter).complete({
           baseUrl: candidate.baseUrl, apiKey: candidate.apiKey, model: candidate.model, messages, tools: request.tools, temperature: request.temperature, maxTokens: request.maxTokens,
-          timeoutMs: Math.min(timeoutMs, Math.max(MIN_ATTEMPT_MS, budgetEnd - Date.now())), headers: candidate.kind === 'openrouter' ? openRouterHeaders() : undefined,
+          timeoutMs: Math.min(timeoutMs, Math.max(MIN_ATTEMPT_MS, budgetEnd - Date.now())),
         });
         const latencyMs = Date.now() - t0;
         const record: RouteAttempt = { candidate, outcome: 'ok', category: null, httpStatus: 200, latencyMs, detail: null };

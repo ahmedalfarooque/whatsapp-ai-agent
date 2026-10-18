@@ -70,7 +70,7 @@ async function pinnedCandidate(model: string, timeoutMs: number): Promise<RouteC
   const apiKey = usableApiKey();
   const info = await getModelInfo(model);
   return {
-    key: `builtin:${model}`, providerKey: 'provider:builtin', providerId: null, providerName: 'OpenRouter (built-in key)', kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey, model,
+    key: `builtin:${model}`, providerKey: 'provider:builtin', providerId: null, providerName: 'OpenRouter (built-in key)', kind: 'openrouter', adapter: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey, model,
     free: info ? info.free : null, image: info ? info.image : true, audio: info ? info.audio : true, tools: info ? info.tools : null, timeoutMs, builtin: true,
   };
 }

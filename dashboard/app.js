@@ -1271,6 +1271,8 @@ function aiProviderFormHtml(meta, entry) {
       ${isNew ? `<div class="field"><label for="wa-field-provider">Provider</label><select id="wa-field-provider" name="provider"><option value="auto">Detect from the key</option>${presetOptions}</select><p class="field-help ai-provider-hint"></p><p class="field-help ai-err" data-err="provider" style="color:#c0453f" hidden></p></div>` : ''}
       <details class="ai-more"><summary>More options</summary>
         ${textField('models', 'Models (comma-separated, best first)', 'Filled in for known providers (free-tier models only; a provider is never used until its free tier is confirmed). Required for a custom endpoint.', entry && entry.models ? entry.models.join(', ') : '')}
+        <div class="toolbar" style="margin:4px 0"><button type="button" class="btn small ai-fetch-models">Fetch available models</button></div>
+        <div class="ai-models-result muted" style="font-size:12px" role="status" aria-live="polite"></div>
         <p class="field-help ai-err" data-err="models" style="color:#c0453f" hidden></p>
         ${isNew ? textField('baseUrl', 'Endpoint address', 'Filled in for known providers. Required for a custom endpoint: a full https:// address.', '') : ''}
         <p class="field-help ai-err" data-err="baseUrl" style="color:#c0453f" hidden></p>
@@ -1356,7 +1358,7 @@ function aiFormValidate(form, isNew) {
     if (!meta.baseUrl.test(baseUrl)) errors.baseUrl = baseUrl ? 'Endpoint address must be a full https:// address, for example https://api.example.com/v1.' : 'Endpoint address is required for a custom provider.';
   }
   const models = (val('models') || (isNew && preset ? preset.models : '')).split(',').map((s) => s.trim()).filter(Boolean);
-  if (isNew && models.length === 0) errors.models = 'Models are required for a custom provider: enter at least one model id.';
+  if (isNew && models.length === 0) errors.models = 'Choose at least one model: press Fetch available models, or type a model id.';
   else if (models.some((m) => !meta.model.test(m))) errors.models = 'A model id may only contain letters, digits and . _ : / @ - (separate several with commas).';
   form.querySelectorAll('.ai-err').forEach((p) => { const m = errors[p.dataset.err]; p.textContent = m || ''; p.hidden = !m; });
   if (errors.baseUrl || errors.models) form.querySelector('.ai-more').open = true;
@@ -1382,9 +1384,38 @@ function showAiStatus(host, text, ok) {
 }
 
 /** Wires the form shown by either page. `endpoint` is the create URL; `itemUrl(id)` the URL of one provider. */
-function bindAiForm(host, { endpoint, itemUrl, extraPayload, onDone }) {
+function bindAiForm(host, { endpoint, itemUrl, discoverUrl, extraPayload, onDone }) {
   const form = host.querySelector('.ai-entry-form');
   if (!form) return;
+  const fetchBtn = form.querySelector('.ai-fetch-models');
+  if (fetchBtn && discoverUrl) fetchBtn.addEventListener('click', async () => {
+    const out = form.querySelector('.ai-models-result');
+    const idField = form.elements.id && form.elements.id.value;
+    const body = idField
+      ? { providerId: Number(idField) }
+      : { provider: form.elements.provider ? form.elements.provider.value : 'auto', config: form.elements.config.value, baseUrl: form.elements.baseUrl ? form.elements.baseUrl.value : '' };
+    fetchBtn.disabled = true;
+    out.textContent = 'Asking the provider…';
+    try {
+      const r = await api(discoverUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) { out.textContent = r.detail; out.style.color = '#c0453f'; return; }
+      out.style.color = '';
+      out.innerHTML = `<div>${esc(`${r.count} models reported by the provider.`)} ${esc(r.freeNote || '')}</div>`
+        + `<div class="ai-model-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${r.models.slice(0, 80).map((m) => `<button type="button" class="btn small" data-model="${esc(m.id)}" title="${esc(`${m.modalities || ''} ${m.contextLength ? `· ${m.contextLength} tokens` : ''} · ${m.evidence}`)}">${esc(m.id)}${m.free === true ? ' · free (catalog)' : m.free === false ? ' · paid' : ''}</button>`).join('')}</div>`;
+      out.querySelectorAll('[data-model]').forEach((b) => b.addEventListener('click', () => {
+        const input = form.elements.models;
+        const have = input.dataset.auto === '1' ? [] : input.value.split(',').map((s) => s.trim()).filter(Boolean);
+        if (!have.includes(b.dataset.model)) have.push(b.dataset.model);
+        input.value = have.join(', ');
+        input.dataset.auto = '0';
+      }));
+    } catch (error) {
+      out.textContent = error.message;
+      out.style.color = '#c0453f';
+    } finally {
+      fetchBtn.disabled = false;
+    }
+  });
   host.querySelectorAll('.pw-toggle').forEach((btn) => btn.addEventListener('click', () => {
     const input = host.querySelector(`#${btn.dataset.for}`);
     const showing = input.type === 'text';
@@ -1494,6 +1525,7 @@ async function renderAiRouting(host) {
     bindAiForm(host, {
       endpoint: '/api/dashboard/ai-routing/providers',
       itemUrl: (id) => `/api/dashboard/ai-routing/providers/${id}`,
+      discoverUrl: '/api/dashboard/ai-routing/discover-models',
       onDone: (saved) => { editing = null; if (saved) draw(); else draw(); },
     });
 
@@ -1614,6 +1646,7 @@ route('#/super-admin-settings', 'Super Admin Settings', 'Shared AI defaults for 
     bindAiForm(view, {
       endpoint: '/api/dashboard/super-admin/ai/providers',
       itemUrl: (id) => `/api/dashboard/super-admin/ai/providers/${id}`,
+      discoverUrl: '/api/dashboard/super-admin/ai/discover-models',
       onDone: () => { editing = null; draw(); },
     });
     view.querySelectorAll('.ai-entry [data-act]').forEach((btn) => {
