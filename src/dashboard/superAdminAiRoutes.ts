@@ -5,6 +5,7 @@ import { currentAccountId } from '../accounts/accountContext';
 import { isSuperAdmin, type AuthUser } from './permissions';
 import { createProvider, deleteProvider, getSharedProvider, listSharedProviders, ProviderValidationError, reorderSharedProviders, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider } from '../llm/providerRepo';
 import { providerActivity } from '../llm/routeLog';
+import { providerHealth } from './aiPoolState';
 import { presetsPayload } from '../llm/providerPresets';
 import { createInputFromSimple, defaultPoolSummary, discoverModelsFor, fail, forCreate, idParam, inputFrom, isSimpleBody, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
 import { buildCandidates } from '../llm/aiRouter';
@@ -60,7 +61,7 @@ export function registerSuperAdminAiRoutes(router: Router): void {
         status: await defaultStatus(currentAccountId()),
         // The route the next message would use first, by name only (never a key). Quota may change at any time: this is the plan, not a promise.
         nextRoute: next ? { provider: next.providerName, model: next.model } : null,
-        providers: listSharedProviders().map((r) => ({ ...toView(r), activity: providerActivity(r.id) })),
+        providers: listSharedProviders().map((r) => ({ ...toView(r), activity: providerActivity(r.id), health: providerHealth(r) })),
         ...presetsPayload(),
         pool: defaultPoolSummary(),
         accounts: accountCount(),

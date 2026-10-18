@@ -5,6 +5,7 @@ import { env } from '../config/env';
 import { getBusinessSettings, updateBusinessSettings } from '../config/businessSettings';
 import { describeCredential, getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { isSuperAdmin, type AuthUser } from './permissions';
+import { providerHealth } from './aiPoolState';
 import { activeCooldowns, BUILTIN_OPENROUTER_PRIORITY, buildCandidates, explainRoutes, routeCompletion, type RouteCandidate } from '../llm/aiRouter';
 import { AiCredentialError } from '../llm/aiCredentialError';
 import { AiResponseError } from '../llm/aiResponseError';
@@ -232,7 +233,7 @@ export function buildEntries(accountId: number): Array<Record<string, unknown>> 
     const view = row ? toView(row) : null;
     const state: EntryState = !view ? 'empty' : !view.enabled ? 'off' : view.keyStatus !== 'ok' ? 'no_key' : view.lastTestAt ? (view.lastTestOk ? 'ok' : 'failed') : 'untested';
     const detail = !view ? '' : state === 'no_key' ? (view.keyStatus === 'undecryptable' ? 'The saved key cannot be read: enter it again.' : 'No API key saved.') : view.lastTestDetail ?? '';
-    return { key: entry.key, type: 'provider', id: entry.providerId, name: view?.name ?? '', provider: view?.kind, config: view ? view.keyMasked : null, models: view?.models ?? [], position: entry.position, enabled: Boolean(view?.enabled), state, detail, lastTestAt: view?.lastTestAt ?? null, needsFreeConfirm: Boolean(view && view.kind !== 'openrouter' && !view.freeConfirmed) };
+    return { key: entry.key, type: 'provider', id: entry.providerId, name: view?.name ?? '', provider: view?.kind, config: view ? view.keyMasked : null, models: view?.models ?? [], position: entry.position, enabled: Boolean(view?.enabled), state, detail, lastTestAt: view?.lastTestAt ?? null, needsFreeConfirm: Boolean(view && view.kind !== 'openrouter' && !view.freeConfirmed), health: row ? providerHealth(row) : undefined };
   });
 }
 

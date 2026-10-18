@@ -5,6 +5,7 @@ import { runWithAccount } from '../accounts/accountContext';
 import { csv, listProvidersForAccount, listSharedProviders, providerApiKey, type AiProviderRow } from '../llm/providerRepo';
 import { DEFAULT_ENTRY, getAccountRouting, providerEntryKey } from '../llm/routingOrder';
 import { getCachedProviderHealth } from '../llm/aiProviderHealth';
+import { coolingUntil } from '../llm/aiRouter';
 import type { AiState } from './overview';
 
 /**
@@ -52,6 +53,59 @@ function inventory(accountId: number): Inventory {
   const sharedOpenRouter = listSharedProviders().some((r) => r.kind === 'openrouter' && csv(r.models).length > 0);
   const builtinKeyPresent = isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY'));
   return { eligible, builtinInUse: defaultOn && !sharedOpenRouter && builtinKeyPresent, builtinKeyPresent, reasons, hasProviders: rows.length > 0 };
+}
+
+export type ProviderHealthState = 'off' | 'no_key' | 'config_error' | 'ineligible' | 'cooling' | 'rate_limited' | 'invalid_credentials' | 'request_failed' | 'ok' | 'available' | 'untested';
+
+export interface ProviderHealth {
+  state: ProviderHealthState;
+  /** Short badge text. */
+  label: string;
+  /** One line for the card (never longer than 100 characters). */
+  summary: string;
+  /** The full sanitized explanation, for the expandable details. */
+  detail: string;
+}
+
+const utc = (ms: number): string => `${new Date(ms).toISOString().slice(11, 16)} UTC`;
+const clip = (s: string, n = 100): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * What ONE provider is doing right now, from facts only (never from "a key is saved"): turned off, no usable key, no model, not eligible under
+ * strict free-only mode, cooling down (with the time it becomes eligible again), the category of its latest failure, a successful inference
+ * from the routing history, or a passed test that no customer request has confirmed yet.
+ */
+export function providerHealth(row: AiProviderRow, now: number = Date.now(), freeOnly = true): ProviderHealth {
+  const models = csv(row.models);
+  const make = (state: ProviderHealthState, label: string, summary: string, detail = summary): ProviderHealth => ({ state, label, summary: clip(summary), detail });
+  if (row.enabled === 0) return make('off', 'Off', 'Turned off — never used for replies.');
+  if (providerApiKey(row) === null) return make('no_key', 'No usable key', 'No usable API key is saved. Edit the provider and enter the key again.');
+  if (models.length === 0) return make('config_error', 'Configuration error', 'No chat model is set. Use Fetch available models and choose one.');
+  if (freeOnly && row.kind !== 'openrouter' && (row.free_tier === 0 || row.free_confirmed === 0)) {
+    return make('ineligible', 'Not eligible', row.free_tier === 0 ? 'Declared as paid — never used while free-only mode is on.' : 'Free tier not confirmed — not used until you confirm it.');
+  }
+  // The newest logged chat attempt on any of this provider's models (last 24 h).
+  const marks = models.map(() => '?').join(',');
+  const last = getDb().prepare(
+    `SELECT model, outcome, category, http_status, detail, created_at FROM ai_route_log WHERE provider_id = ? AND task = 'chat' AND outcome IN ('ok','failed') AND created_at >= ? AND model IN (${marks}) ORDER BY id DESC LIMIT 1`,
+  ).get(row.id, sqlTime(now - DAY_MS), ...models) as { model: string; outcome: 'ok' | 'failed'; category: string | null; http_status: number | null; detail: string | null; created_at: string } | undefined;
+  const failure = last?.outcome === 'failed' && last.category !== 'context' ? describeRouteFailure({ category: last.category, http_status: last.http_status, detail: last.detail, provider_name: row.name, model: last.model }) : null;
+
+  const cooling = coolingUntil(`provider:${row.id}`, now) ?? models.map((m) => coolingUntil(`chat:${row.id}:${m}`, now)).find(Boolean) ?? null;
+  if (cooling) {
+    const quota = /rate limited|credit/.test(cooling.why);
+    return make(quota ? 'rate_limited' : 'cooling', quota ? 'Rate limited / quota exhausted' : 'Cooling down', `${quota ? 'Rate limit or free quota reached' : `Resting (${cooling.why})`} — eligible again at ${utc(cooling.until)}.`, `${failure ? `${failure.detail}. ` : ''}No request is sent to this provider until ${utc(cooling.until)}.`);
+  }
+  if (last?.outcome === 'ok') return make('ok', 'Successful inference', `Answered at ${utc(dbTimeMs(last.created_at))} · ${last.model}`);
+  if (failure && last) {
+    const cat = last.category;
+    const state: ProviderHealthState = cat === 'auth' ? 'invalid_credentials' : cat === 'rate_limited' || cat === 'credit' ? 'rate_limited' : cat === 'model_unavailable' || cat === 'policy' || cat === 'capability' ? 'config_error' : 'request_failed';
+    const label = { invalid_credentials: 'Invalid credentials', rate_limited: 'Rate limited / quota exhausted', config_error: 'Configuration error', request_failed: 'Request failed' }[state as 'invalid_credentials' | 'rate_limited' | 'config_error' | 'request_failed'];
+    return make(state, label, failure.label + (last.http_status ? ` (HTTP ${last.http_status})` : '') + ' — retried automatically.', `${failure.detail}.`);
+  }
+  if (row.last_test_ok === 1) return make('available', 'Available', `Test passed at ${row.last_test_at ?? '?'} — no customer request has used it yet.`, row.last_test_detail ?? 'The provider test passed.');
+  if (row.last_test_ok === 0) return make('request_failed', 'Test failed', row.last_test_detail ?? 'The last provider test failed.', row.last_test_detail ?? 'The last provider test failed.');
+  return make('untested', 'Not tested', 'Configured and eligible. Press Test to check it.');
 }
 
 /** True when the legacy built-in OpenRouter key is what serves this business (no configured provider, or the built-in route participates): only then are its key and model worth checking. */

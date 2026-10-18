@@ -50,7 +50,8 @@ describe('the account AI providers list', () => {
   it('shows one row per entry with a compact status and the actions order / test / on-off / edit / remove — Default has no edit or remove', () => {
     for (const act of ['up', 'down', 'test', 'toggle', 'edit', 'remove']) expect(row).toContain(`data-act="${act}"`);
     expect(row).toMatch(/isDefault \? '' : '<button type="button" class="btn small" data-act="edit">/);
-    expect(row).toContain('ai-detail'); // the one-line status, the full text only in the tooltip
+    expect(row).toContain('ai-summary'); // the one-line status (class renamed from ai-detail)
+    expect(row).toContain('title="${esc(full || summary)}"'); // the full text only in the tooltip / expandable Details
   });
 
   it('carries no per-task provider columns; the diagnostics sit in one collapsed block', () => {

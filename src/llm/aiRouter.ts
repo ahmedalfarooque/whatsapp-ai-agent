@@ -127,6 +127,7 @@ function cooldownFor(category: FailureCategory, error: AiResponseError | null): 
       // A DAILY allowance ("free-models-per-day") does not recover in a minute: retrying every minute would keep calling an exhausted provider all day
       // (production did, ~28 calls in 6 h). It rests for 30 minutes (longer if the provider says so) and, being account-wide, for the whole provider.
       const daily = /per[- ]day|daily/i.test(error?.providerMessage ?? '');
+      // `retryAfterMs` is the provider's own Retry-After or published quota-reset time: it is honoured when it is longer (up to the reset itself).
       return { ms: Math.max(error?.retryAfterMs ?? 0, daily ? 30 * 60_000 : 60_000), scope: daily ? 'provider' : 'route' };
     }
     case 'model_unavailable': return { ms: 5 * 60_000, scope: 'route' };

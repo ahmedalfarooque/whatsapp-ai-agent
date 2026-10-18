@@ -1252,6 +1252,12 @@ const AI_STATE = {
   ok: ['OK', 'green'], failed: ['TEST FAILED', 'red'], untested: ['NOT TESTED', 'muted'], off: ['OFF', 'muted'], no_key: ['NO KEY', 'red'], empty: ['NOT SET UP', 'amber'],
 };
 const aiStateBadge = (state) => { const s = AI_STATE[state] || AI_STATE.untested; return badge(s[0], s[1]); };
+// Per-provider health from the server (facts only: eligibility, cooldown, latest request outcome, a passed test): its badge colour.
+const AI_HEALTH_TONE = {
+  ok: 'green', available: 'green', untested: 'muted', off: 'muted', ineligible: 'amber', cooling: 'amber', rate_limited: 'amber',
+  no_key: 'red', config_error: 'red', invalid_credentials: 'red', request_failed: 'red',
+};
+const aiHealthBadge = (h) => badge(h.label, AI_HEALTH_TONE[h.state] || 'muted');
 const shortText = (text, n) => { const t = String(text || ''); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 
 /** The two-field form: a recognisable name and the API configuration (a key, or the address of a local runtime). Everything else is under "More options". */
@@ -1288,13 +1294,18 @@ function aiProviderFormHtml(meta, entry) {
 /** One row of the list: order, name, configuration, a one-line status and the actions that apply. */
 function aiEntryRowHtml(entry, index, count, opts) {
   const isDefault = entry.type === 'default';
-  const detail = entry.detail ? `<span class="muted ai-detail" title="${esc(entry.detail)}">${esc(shortText(entry.detail, 90))}</span>` : '';
+  // The status region: a badge and one short summary line; the full diagnostic is in an expandable "Details" (and the tooltip), not a squeezed column.
+  const health = entry.health || null;
+  const summary = health ? health.summary : shortText(entry.detail, 100);
+  const full = health ? health.detail : entry.detail || '';
+  const detail = summary ? `<span class="muted ai-summary" title="${esc(full || summary)}">${esc(summary)}</span>` : '';
+  const more = full && full !== summary ? `<details class="ai-more-detail"><summary class="muted">Details</summary><p class="muted">${esc(full)}</p></details>` : '';
   const config = isDefault ? 'Shared providers managed by the Super Admin' : entry.config || '';
   return `
     <li class="ai-entry${entry.enabled ? '' : ' off'}" data-key="${esc(entry.key || '')}" data-id="${entry.id == null ? '' : entry.id}">
       <span class="ai-pos" aria-hidden="true">${index + 1}</span>
       <div class="ai-main"><strong>${esc(entry.name)}</strong> ${isDefault ? badge('SHARED', 'blue') : ''}<div class="muted ai-config">${isDefault ? `<span>${esc(config)}</span>` : `<span class="file">${esc(config)}</span>`}</div></div>
-      <div class="ai-state">${aiStateBadge(entry.state)} ${detail}</div>
+      <div class="ai-state">${health ? aiHealthBadge(health) : aiStateBadge(entry.state)} ${detail}${more}</div>
       <div class="ai-actions">
         ${opts.reorder ? `<button type="button" class="btn small" data-act="up" aria-label="Move up" ${index === 0 ? 'disabled' : ''}>▲</button><button type="button" class="btn small" data-act="down" aria-label="Move down" ${index === count - 1 ? 'disabled' : ''}>▼</button>` : ''}
         <button type="button" class="btn small" data-act="test">Test</button>
@@ -1595,7 +1606,7 @@ route('#/super-admin-settings', 'Super Admin Settings', 'Shared AI defaults for 
   async function draw() {
     const data = await api('/api/dashboard/super-admin/ai');
     const providers = data.providers.map((p) => ({
-      key: `provider:${p.id}`, type: 'provider', id: p.id, name: p.name, provider: p.kind, enabled: p.enabled, config: p.keyMasked || '', models: p.models,
+      key: `provider:${p.id}`, type: 'provider', id: p.id, name: p.name, provider: p.kind, enabled: p.enabled, config: p.keyMasked || '', models: p.models, health: p.health,
       state: !p.enabled ? 'off' : p.keyStatus !== 'ok' ? 'no_key' : p.lastTestAt ? (p.lastTestOk ? 'ok' : 'failed') : 'untested',
       detail: p.keyStatus === 'undecryptable' ? 'The saved key cannot be read: enter it again.' : p.lastTestDetail || (p.freeTier ? '' : 'Declared as a paid endpoint: never used while free-only mode is on.'),
     }));

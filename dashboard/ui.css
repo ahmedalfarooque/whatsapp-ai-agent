@@ -678,17 +678,22 @@ body.palette-open{overflow:hidden}
 
 /* ---- AI providers list (account page and Super Admin Settings): compact rows instead of a wide table ---- */
 .ai-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.ai-entry { display: grid; grid-template-columns: 28px minmax(0, 1.4fr) minmax(0, 1.2fr) auto; align-items: center; gap: 10px 14px; padding: 10px 12px; border: 1px solid var(--line, rgba(127, 127, 127, 0.28)); border-radius: 10px; }
+.ai-entry { display: grid; grid-template-columns: 28px minmax(150px, 1fr) minmax(0, 1.7fr); grid-template-areas: "pos main state" "pos actions actions"; align-items: start; gap: 8px 14px; padding: 10px 12px; border: 1px solid var(--line, rgba(127, 127, 127, 0.28)); border-radius: 10px; min-width: 0; }
 .ai-entry.off { opacity: 0.72; }
-.ai-pos { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; background: rgba(127, 127, 127, 0.18); }
-.ai-main { min-width: 0; }
+.ai-pos { grid-area: pos; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; background: rgba(127, 127, 127, 0.18); }
+.ai-main { grid-area: main; min-width: 0; }
 .ai-config { font-size: 12px; overflow-wrap: anywhere; }
-.ai-state { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* Status region: a badge and ONE line of summary on the same row; the full diagnostic opens below it, never in a squeezed column. */
+.ai-state { grid-area: state; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.ai-summary { flex: 1 1 200px; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-detail { font-size: 12px; overflow-wrap: anywhere; }
-.ai-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.ai-more-detail { flex: 1 0 100%; font-size: 12px; }
+.ai-more-detail > summary { cursor: pointer; width: max-content; }
+.ai-more-detail p { margin: 4px 0 0; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.ai-actions { grid-area: actions; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-start; }
 .ai-more { margin-top: 8px; }
 .ai-more > summary { cursor: pointer; font-size: 13px; }
 @media (max-width: 760px) {
-  .ai-entry { grid-template-columns: 28px minmax(0, 1fr); }
-  .ai-state, .ai-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .ai-entry { grid-template-columns: 28px minmax(0, 1fr); grid-template-areas: "pos main" "state state" "actions actions"; }
+  .ai-summary { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 }

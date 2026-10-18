@@ -82,6 +82,27 @@ export function validateCompletion(parsed: unknown, model: string): ChatCompleti
   return parsed as ChatCompletionResponse;
 }
 
+/**
+ * Milliseconds until the provider says the exhausted allowance resets, from `X-RateLimit-Reset` (epoch milliseconds or seconds) given as a header
+ * or inside `error.metadata.headers`. Only a believable value is used: between one second and 25 hours ahead; anything else is ignored.
+ */
+export function quotaResetDelayMs(headerValue: string | null, errorBody: string | undefined, now: number = Date.now()): number | null {
+  const candidates: unknown[] = [headerValue];
+  try {
+    const meta = (JSON.parse(errorBody ?? '{}') as { error?: { metadata?: { headers?: Record<string, unknown> } } }).error?.metadata?.headers;
+    if (meta) for (const [k, v] of Object.entries(meta)) if (k.toLowerCase() === 'x-ratelimit-reset') candidates.push(v);
+  } catch { /* not JSON */ }
+  for (const raw of candidates) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    const epochMs = n > 1e12 ? n : n > 1e9 ? n * 1000 : null;
+    if (epochMs === null) continue;
+    const delta = epochMs - now;
+    if (delta >= 1000 && delta <= 25 * 3_600_000) return delta;
+  }
+  return null;
+}
+
 export async function completeOnce(request: EndpointRequest): Promise<ChatCompletionResponse> {
   const url = `${request.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   let response: Response;
@@ -120,6 +141,12 @@ export async function completeOnce(request: EndpointRequest): Promise<ChatComple
     const retryAfter = Number(response.headers?.get?.('retry-after') ?? '');
     const failure = new AiResponseError(reasonForHttpStatus(response.status), response.status, request.model, providerMessageOf(errorBody));
     if (Number.isFinite(retryAfter) && retryAfter > 0) failure.retryAfterMs = Math.min(retryAfter * 1000, 15 * 60_000);
+    // A quota-reset time the provider publishes (OpenRouter: X-RateLimit-Reset, as a header or inside the error metadata) lets the route rest
+    // exactly until the allowance returns instead of guessing.
+    if (response.status === 429) {
+      const reset = quotaResetDelayMs(response.headers?.get?.('x-ratelimit-reset') ?? null, errorBody);
+      if (reset) failure.retryAfterMs = Math.max(failure.retryAfterMs ?? 0, reset);
+    }
     throw failure;
   }
   let parsed: unknown;
