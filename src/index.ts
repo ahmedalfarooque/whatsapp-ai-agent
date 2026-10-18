@@ -4,6 +4,7 @@ import { createApp } from './app';
 import { getDb, closeDb } from './memory/db';
 import { resumeQrConnection, closeQrConnection, qrReplayRunner } from './whatsapp/qrConnection';
 import { recoverPendingAtBoot, startRecoveryLoops } from './replay/recoveryLoop';
+import { startRouteProbes } from './llm/routeProbe';
 import { seedBusinessProfileDefaults } from './config/businessSettings';
 import { flushOutbox } from './notifications/outbox';
 import { expireDueQuotations } from './quotations/quotationExpiry';
@@ -70,6 +71,9 @@ startScheduler();
 // Customer messages the assistant could not answer are re-tried (once, safely) when an AI route works again; a request nobody resolved within
 // five minutes while the business is open is escalated to staff (no automatic voice call: see src/escalation/voiceCall.ts).
 startRecoveryLoops(qrReplayRunner);
+
+// Routes that failed and whose cooldown has ended are checked with one tiny bounded completion before a customer message has to find out.
+startRouteProbes();
 
 // Sent quotations whose validity date has passed (in each business's own timezone) are expired quietly: at start-up and then hourly.
 const runQuotationExpiry = (): void => { try { expireDueQuotations(); } catch (error) { logger.warn({ error }, '[QUOTATION] expiry run failed'); } };

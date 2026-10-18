@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-18 — bounded recovery probes
+* A route that failed and whose cooldown has ended is checked with ONE tiny completion (neutral prompt, no customer data, 8 tokens) before a customer message has to find out (`src/llm/routeProbe.ts`, every 2 min). Only routes whose last attempt failed, at most one probe per route per 10 minutes, at most two per pass, only routes strict free-only mode and the business's order already allow (unconfirmed providers are never probed), never in mock mode. A failed probe sets the cooldown again, so an exhausted provider is not called in a loop. Free quotas remain limits: nothing here evades or extends them.
+* Rollback: `git checkout -B master e126092`, `npm run build`, restart `whatsapp-ai-agent` (no schema change).
+
 ## 2026-10-18 — Add provider form: known providers fill themselves in, custom ones are validated before Save
 * **Cause of `validation_failed: check baseUrl, models`:** the "Custom OpenAI-compatible" preset has no endpoint and no models by design, those two fields sat inside a collapsed "More options" block, and the form had no checks of its own, so the server's generic field list was the only feedback.
 * Known providers (OpenRouter, Groq, Google AI Studio, Cerebras, Mistral) fill the endpoint and their documented free-tier models as soon as they are selected or recognised from the key. A custom provider opens the block, marks Endpoint address and Models as required and shows inline messages before Save; the server serves its own validation rules to the form and returns readable messages, so both sides always agree. No DeepSeek preset was added: its official API is pay-per-use and no free endpoint could be verified.
