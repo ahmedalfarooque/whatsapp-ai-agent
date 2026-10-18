@@ -23,6 +23,7 @@ import {
   appendMessage,
   getRecentMessages,
   resetConversation,
+  recordOutboundDelivery,
 } from '../memory/conversationRepo';
 import { clearBookingSession } from '../memory/bookingSessionRepo';
 import { createCustomerRequest } from '../memory/customerRequestRepo';
@@ -517,10 +518,12 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   }
 
   try {
-    await sendTextMessage(msg.waId, finalText);
+    const sent = await sendTextMessage(msg.waId, finalText);
+    recordOutboundDelivery(conversation.id, finalText, { sent: true, id: sent?.messages?.[0]?.id ?? null });
     if (kind === 'ai') settlePendingReply(settleId, 'answered', null, { recovered: Boolean(msg.replayOf) });
     recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind, detail: kind === 'error' ? [failureDetail, visionNote].filter(Boolean).join(' · ') : [msg.replayOf ? 'answered late (recovered after an interruption)' : null, `answered in ${((Date.now() - startedAt) / 1000).toFixed(1)} s`, servedByNote, visionNote].filter(Boolean).join(' · ') });
   } catch (error) {
+    recordOutboundDelivery(conversation.id, finalText, { sent: false }); // the reply stays stored, marked as NOT delivered
     recordReplyActivity({ customerId: customer.id, waId: msg.waId, channel, kind: 'error', detail: 'Reply could not be sent' });
     logger.error({ waId: maskedId, error }, 'failed to send reply to customer after processing');
     return;

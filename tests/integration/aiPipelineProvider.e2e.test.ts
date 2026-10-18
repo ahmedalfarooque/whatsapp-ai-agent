@@ -75,6 +75,24 @@ describe('customer experience when the provider misbehaves', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  const outboundRows = (waId: string) => getDb().prepare(`SELECT m.whatsapp_message_id AS wa, m.metadata FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id JOIN customers u ON u.id = c.customer_id WHERE u.wa_id = ? AND m.direction = 'outbound' AND m.role = 'assistant' ORDER BY m.id`).all(waId) as Array<{ wa: string | null; metadata: string | null }>;
+
+  it('delivery evidence: a sent reply carries the id WhatsApp returned; a reply whose send failed is stored as NOT delivered (a failed send is not a failed generation)', async () => {
+    vi.mocked(sendTextMessage).mockResolvedValue({ messages: [{ id: 'wamid.OUT' }] } as never); // (restoreAllMocks clears the module default)
+    provider(() => answer('We open Saturday to Thursday.'));
+    const ok = await customerSays();
+    expect(outboundRows(ok.waId)).toEqual([{ wa: 'wamid.OUT', metadata: expect.stringContaining('"delivery":"sent"') }]);
+
+    provider(() => answer('Another answer.'));
+    vi.mocked(sendTextMessage).mockRejectedValueOnce(new Error('socket closed'));
+    const bad = await customerSays();
+    const rows = outboundRows(bad.waId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.wa).toBeNull();
+    expect(rows[0]!.metadata).toContain('"delivery":"send_failed"');
+    expect(bad.activity.at(-1)).toMatchObject({ kind: 'error', detail: 'Reply could not be sent' }); // distinguishable from "AI failed; fallback sent"
+  });
+
   it('a rate limit that clears is recovered by the bounded retry: ONE customer message, no duplicates', async () => {
     const fetchMock = provider(() => json(429, { error: { message: 'Provider returned error' } }), () => answer('Here you go.'));
     const { sent, activity } = await customerSays();

@@ -71,6 +71,23 @@ export interface AppendMessageInput {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Delivery evidence for the reply that was just stored: the reply is recorded BEFORE it is sent (so a crash never loses it), which means a stored
+ * assistant row alone proves nothing about delivery. After the send, the row gets the id WhatsApp returned (`whatsapp_message_id`) and
+ * `metadata.delivery = "sent"`, `"sent_unconfirmed"` (no real id came back) or `"send_failed"` when the send threw — so a failed send is distinguishable from a failed generation, and
+ * "delivered" is only ever claimed with an id. Matches the newest outbound assistant row with this text that has no WhatsApp id yet.
+ */
+export function recordOutboundDelivery(conversationId: number, content: string, outcome: { sent: boolean; id?: string | null }, db: Database.Database = getDb()): void {
+  const row = db.prepare(`SELECT id, metadata FROM conversation_messages WHERE conversation_id = ? AND role = 'assistant' AND direction = 'outbound' AND content = ? AND whatsapp_message_id IS NULL ORDER BY id DESC LIMIT 1`).get(conversationId, content) as { id: number; metadata: string | null } | undefined;
+  if (!row) return;
+  let meta: Record<string, unknown> = {};
+  try { meta = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : {}; } catch { meta = {}; }
+  // A real id (the one WhatsApp's session returned) is the only delivery evidence; a locally made placeholder id (qr-<time>) or none at all is sent_unconfirmed.
+  const real = outcome.sent && outcome.id && !/^qr-\d+$/.test(outcome.id) ? outcome.id : null;
+  meta.delivery = !outcome.sent ? 'send_failed' : real ? 'sent' : 'sent_unconfirmed';
+  db.prepare('UPDATE conversation_messages SET whatsapp_message_id = ?, metadata = ? WHERE id = ?').run(real, JSON.stringify(meta), row.id);
+}
+
 export function appendMessage(
   conversationId: number,
   input: AppendMessageInput,
