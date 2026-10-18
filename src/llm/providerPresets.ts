@@ -1,5 +1,5 @@
 import type { AiProviderInput, ProviderKind } from './providerRepo';
-import { csv } from './providerRepo';
+import { csv, PROVIDER_RULES } from './providerRepo';
 
 /**
  * Presets for the endpoints a business or the Super Admin can add with just a NAME and an API CONFIGURATION (an API key, or the address of a
@@ -17,6 +17,14 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'mistral', name: 'Mistral', kind: 'openai_compatible', baseUrl: 'https://api.mistral.ai/v1', hint: 'Free experiment tier (rate limited; data may be used for training).', models: 'mistral-small-latest' },
   { id: 'custom', name: 'Custom OpenAI-compatible', kind: 'openai_compatible', baseUrl: '', hint: 'Any /v1/chat/completions endpoint.', models: '' },
 ];
+
+/** What the dashboard form needs: presets (with the key prefix as a regex source) and the exact validation rules the server applies. */
+export function presetsPayload(): { presets: Array<{ id: string; name: string; kind: ProviderKind; baseUrl: string; hint: string; models: string }>; rules: { baseUrl: string; model: string } } {
+  return {
+    presets: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, kind: p.kind, baseUrl: p.baseUrl, hint: p.hint, models: p.models })),
+    rules: { baseUrl: PROVIDER_RULES.baseUrl.source, model: PROVIDER_RULES.model.source },
+  };
+}
 
 export class SimpleProviderError extends Error {
   constructor(message: string, public readonly fields: string[]) {
@@ -48,6 +56,11 @@ export function resolveSimpleProvider(input: { name: string; config: string; pro
   const models = csv(input.models) .length ? csv(input.models) : csv(preset.models);
   const baseUrl = input.baseUrl?.trim() || preset.baseUrl;
   if (isUrl(config)) throw new SimpleProviderError('validation_failed', ['config']); // an endpoint is selected by its key (and "More options"), not by pasting a URL
+  // Nothing is guessed: a custom endpoint must say where it is and which models to call (a known provider fills both in), and both must be valid.
+  const fields: string[] = [];
+  if (!PROVIDER_RULES.baseUrl.test(baseUrl)) fields.push('baseUrl');
+  if (models.length === 0 || models.some((m) => !PROVIDER_RULES.model.test(m))) fields.push('models');
+  if (fields.length) throw new SimpleProviderError('validation_failed', fields);
   return {
     name: input.name,
     kind: preset.kind,

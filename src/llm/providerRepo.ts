@@ -92,6 +92,9 @@ const MODEL_ID = /^[A-Za-z0-9._:/@-]{1,120}$/;
 // Every provider is reached over HTTPS: an API key is never sent in clear text.
 const URL_RE = /^https:\/\/[^\s"'<>]{3,200}$/;
 
+/** The one definition of a valid endpoint and model id: the server checks with it and the dashboard form receives its source, so both always agree. */
+export const PROVIDER_RULES = { baseUrl: URL_RE, model: MODEL_ID } as const;
+
 export class ProviderValidationError extends Error {
   constructor(message: string, public readonly fields: string[]) {
     super(message);

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-18 — Add provider form: known providers fill themselves in, custom ones are validated before Save
+* **Cause of `validation_failed: check baseUrl, models`:** the "Custom OpenAI-compatible" preset has no endpoint and no models by design, those two fields sat inside a collapsed "More options" block, and the form had no checks of its own, so the server's generic field list was the only feedback.
+* Known providers (OpenRouter, Groq, Google AI Studio, Cerebras, Mistral) fill the endpoint and their documented free-tier models as soon as they are selected or recognised from the key. A custom provider opens the block, marks Endpoint address and Models as required and shows inline messages before Save; the server serves its own validation rules to the form and returns readable messages, so both sides always agree. No DeepSeek preset was added: its official API is pay-per-use and no free endpoint could be verified.
+* Free-only is unchanged and enforced: a provider added here stays out of routing until its free tier is confirmed.
+
 ## 2026-10-18 — free-tier confirmation, cooldowns that survive a restart, router visibility (migration 031)
 * **Cooldowns persist** (`ai_route_cooldowns`): a provider that just reported exhausted quota, rate limiting or an outage is not called again by a restarted process until its cooldown ends. Retries stay bounded (`AI_ROUTE_MAX_ATTEMPTS`, `AI_ROUTING_BUDGET_MS`); when every route is cooling the message goes to the existing fallback + recovery path with no further provider calls.
 * **Free tier must be confirmed** for any non-OpenRouter provider (`ai_providers.free_confirmed`): under strict free-only mode an unconfirmed endpoint is never routed (its price cannot be verified from a public catalog). The Super Admin (shared providers) or the business (its own) confirms it with one button; changing a provider's endpoint resets the confirmation. OpenRouter prices still come from its public catalog. Existing providers are grandfathered as confirmed.

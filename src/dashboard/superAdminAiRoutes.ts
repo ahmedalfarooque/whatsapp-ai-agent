@@ -5,7 +5,7 @@ import { currentAccountId } from '../accounts/accountContext';
 import { isSuperAdmin, type AuthUser } from './permissions';
 import { createProvider, deleteProvider, getSharedProvider, listSharedProviders, ProviderValidationError, reorderSharedProviders, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider } from '../llm/providerRepo';
 import { providerActivity } from '../llm/routeLog';
-import { PROVIDER_PRESETS } from '../llm/providerPresets';
+import { presetsPayload } from '../llm/providerPresets';
 import { createInputFromSimple, defaultPoolSummary, fail, forCreate, idParam, inputFrom, isSimpleBody, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
 import { buildCandidates } from '../llm/aiRouter';
 import { adoptBuiltinOpenRouter } from '../llm/adoptOpenRouter';
@@ -61,7 +61,7 @@ export function registerSuperAdminAiRoutes(router: Router): void {
         // The route the next message would use first, by name only (never a key). Quota may change at any time: this is the plan, not a promise.
         nextRoute: next ? { provider: next.providerName, model: next.model } : null,
         providers: listSharedProviders().map((r) => ({ ...toView(r), activity: providerActivity(r.id) })),
-        presets: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, kind: p.kind, baseUrl: p.baseUrl, hint: p.hint, models: p.models })),
+        ...presetsPayload(),
         pool: defaultPoolSummary(),
         accounts: accountCount(),
         // Server-level routes that are part of Default (configured on the server, shown here read-only; their keys are never returned).

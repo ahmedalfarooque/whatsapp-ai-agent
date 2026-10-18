@@ -10,7 +10,7 @@ import { AiCredentialError } from '../llm/aiCredentialError';
 import { AiResponseError } from '../llm/aiResponseError';
 import { getModelInfo } from '../llm/modelCatalog';
 import { createProvider, csv, deleteProvider, getProvider, listProvidersForAccount, listSharedProviders, PROVIDER_KINDS, providerApiKey, ProviderValidationError, recordProviderTest, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider, type AiProviderInput, type AiProviderRow, type ProviderKind } from '../llm/providerRepo';
-import { PROVIDER_PRESETS, resolveSimpleProvider, SimpleProviderError } from '../llm/providerPresets';
+import { PROVIDER_PRESETS, presetsPayload, resolveSimpleProvider, SimpleProviderError } from '../llm/providerPresets';
 import { getAccountRouting, RoutingOrderError, saveAccountRouting } from '../llm/routingOrder';
 import { listRouteLog, routeStats } from '../llm/routeLog';
 import { pendingReplyCounts } from '../replay/pendingReplyRepo';
@@ -28,13 +28,22 @@ import { voiceCallCapability } from '../escalation/voiceCall';
  */
 export { PROVIDER_PRESETS };
 
+const FIELD_HELP: Record<string, string> = {
+  baseUrl: 'Endpoint address must be a full https:// address (for example https://api.example.com/v1).',
+  models: 'Enter at least one model id (letters, digits and . _ : / @ -), separated by commas.',
+  provider: 'Choose a provider, or enter the endpoint address and models of a custom one.',
+  config: 'Paste the API key (not an address).',
+  name: 'Enter a name.',
+};
+const fieldMessage = (fields: string[]): string => fields.map((f) => FIELD_HELP[f] ?? `Check ${f}.`).join(' ');
+
 export function fail(res: Response, error: unknown): void {
   if (error instanceof ProviderValidationError) {
-    res.status(error.message === 'not_found' ? 404 : 400).json({ error: error.message, fields: error.fields });
+    res.status(error.message === 'not_found' ? 404 : 400).json({ error: error.message, fields: error.fields, message: fieldMessage(error.fields) });
     return;
   }
   if (error instanceof SimpleProviderError) {
-    res.status(400).json({ error: error.message, fields: error.fields });
+    res.status(400).json({ error: error.message, fields: error.fields, message: fieldMessage(error.fields) });
     return;
   }
   if (error instanceof RoutingOrderError) {
@@ -190,7 +199,7 @@ export function registerAiRoutingRoutes(router: Router): void {
         defaultPool: defaultPoolSummary(),
         // this business's own providers only: shared providers (their names, addresses and masked keys) belong to the Super Admin's page
         providers: listProvidersForAccount(accountId).filter((r) => r.whatsapp_account_id === accountId).map(toView),
-        presets: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, kind: p.kind, baseUrl: p.baseUrl, hint: p.hint, models: p.models })),
+        ...presetsPayload(),
         canManageShared: mayManageShared(req),
         builtin,
         plan: { chat, vision, audio },
