@@ -4,6 +4,7 @@ import { env } from '../config/env';
 import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { credentialSavedAtMs, getCachedModelHealth, getCachedProviderHealth } from '../llm/aiProviderHealth';
 import { listProvidersForAccount, providerApiKey } from '../llm/providerRepo';
+import { getPoolAiState } from './aiPoolState';
 import { getBusinessSettings } from '../config/businessSettings';
 import { getAutomationSettings } from '../automation/settingsRepo';
 import { runWithAccount } from '../accounts/accountContext';
@@ -76,6 +77,10 @@ export function getAiState(accountId: number, now: number = Date.now()): AiState
   if (!isUsableApiKey(getEffectiveCredential('OPENROUTER_API_KEY')) && !otherRoutes) return { ...base, state: 'needs_key', label: 'AI needs a key', detail: 'No usable AI provider key is saved' };
 
   const model = runWithAccount(accountId, () => getBusinessSettings(accountId).openRouterModel);
+  // Served by configured providers (the shared Default pool and/or its own): the status comes from the routes and what the router observed,
+  // NOT from the legacy built-in key slot, which is judged only when that route really participates (see aiPoolState.ts).
+  const pooled = getPoolAiState(accountId, now, { model });
+  if (pooled) return pooled;
   const known = { ...base, model };
   const key = getCachedProviderHealth(now);
   if (key?.status === 'rejected') {

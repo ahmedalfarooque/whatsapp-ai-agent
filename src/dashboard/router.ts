@@ -78,6 +78,7 @@ import { registerInboxRoutes } from './inboxRoutes';
 import { HandoffError, returnToAi, getHold, getOpenHandoff, takeOverCustomer, type HandoffActor } from '../handoff/handoffRepo';
 import { buildOverview, getAiState, OVERVIEW_RANGES, type OverviewRange } from './overview';
 import { ensureProviderHealth, refreshModelHealth, refreshVisionHealth } from '../llm/aiProviderHealth';
+import { legacyRouteInUse } from './aiPoolState';
 import { accountUiStatus } from '../accounts/accountStatus';
 import { canManageConfiguration, canManageConnections, featureLevel, levelAtLeast, type AuthUser } from './permissions';
 import { runWithAccount } from '../accounts/accountContext';
@@ -865,14 +866,16 @@ export function createDashboardRouter(): Router {
   // Top-bar indicator: the real state of AI replies for the selected account (no secrets).
   router.get('/api/dashboard/ai-status', async (req, res) => {
     // A live (cached 5 min) check of the provider key, waiting at most 3 s, so the pill reflects the key as it is NOW.
-    await ensureProviderHealth(4000, getBusinessSettings(req.accountId as number).openRouterModel).catch(() => undefined);
+    // Only when the legacy built-in route is actually used: a business served by configured providers renders from its routes and the routing history,
+    // with no key check and no model probe (a probe is a real completion; it must never be spent on a route nobody uses).
+    if (legacyRouteInUse(req.accountId as number)) await ensureProviderHealth(4000, getBusinessSettings(req.accountId as number).openRouterModel).catch(() => undefined);
     res.json(getAiState(req.accountId as number));
   });
 
   // ---- Dashboard home: one real-data overview for the selected account (sections the user cannot read come back null) ----
   router.get('/api/dashboard/overview', (req, res) => {
     const range = OVERVIEW_RANGES.includes(String(req.query.range) as OverviewRange) ? (String(req.query.range) as OverviewRange) : '30';
-    void ensureProviderHealth(0, getBusinessSettings(req.accountId as number).openRouterModel).catch(() => undefined); // refresh the provider verdict in the background; the overview never waits for it
+    if (legacyRouteInUse(req.accountId as number)) void ensureProviderHealth(0, getBusinessSettings(req.accountId as number).openRouterModel).catch(() => undefined); // refresh the provider verdict in the background; the overview never waits for it
     const account = getAccount(req.accountId as number);
     const visible = listAccountsForAdmin(req.adminUserId as number).map((a) => {
       const view = accountView(a);
