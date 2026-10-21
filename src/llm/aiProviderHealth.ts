@@ -4,6 +4,7 @@ import { getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfi
 import { getDb } from '../memory/db';
 import { fetchWithTimeout } from '../utils/retry';
 import { logger } from '../logger';
+import { parseCompletionBody } from './openAiCompatible';
 
 /**
  * A real, cached check of the AI provider credential (OpenRouter's authenticated /auth/key endpoint), so the dashboard never has to
@@ -132,6 +133,22 @@ export function getCachedModelHealth(model: string, now: number = Date.now()): (
   return { status: entry.status, model: entry.model, checkedAt: entry.checkedAt, httpStatus: entry.httpStatus, latencyMs: entry.latencyMs, stale: now - entry.checkedAt > ttl };
 }
 
+type AnswerBody = { choices?: Array<{ finish_reason?: unknown; message?: { content?: unknown } }>; error?: unknown } | null;
+
+/**
+ * Reads an HTTP 200 answer the way the router does (JSON, JSON behind keep-alive comment lines, or an event stream); null when it cannot be read. A body that carries an
+ * error object is a failed probe whatever else it holds — HTTP 200 alone never makes a model "usable".
+ */
+async function readAnswerBody(response: Response): Promise<AnswerBody> {
+  try {
+    const body = parseCompletionBody(await response.text(), '', response.status) as AnswerBody;
+    const failed = Boolean(body?.error) && (body?.choices?.[0]?.finish_reason === 'error' || !body?.choices?.[0]?.message?.content);
+    return failed ? null : body;
+  } catch {
+    return null;
+  }
+}
+
 export function refreshModelHealth(model: string): Promise<ModelHealth | null> {
   if (env.shouldUseMockProviders) return Promise.resolve(null);
   const key = getEffectiveCredential('OPENROUTER_API_KEY');
@@ -154,7 +171,7 @@ export function refreshModelHealth(model: string): Promise<ModelHealth | null> {
       );
       let text: string | null = null;
       if (response.ok) {
-        const body = (await response.json().catch(() => null)) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+        const body = await readAnswerBody(response);
         const content = body?.choices?.[0]?.message?.content;
         text = typeof content === 'string' && content.trim() ? content.trim() : null;
       }
@@ -219,7 +236,7 @@ export function refreshVisionHealth(model: string): Promise<ModelHealth | null> 
       );
       let text: string | null = null;
       if (response.ok) {
-        const body = (await response.json().catch(() => null)) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+        const body = await readAnswerBody(response);
         const content = body?.choices?.[0]?.message?.content;
         text = typeof content === 'string' && content.trim() ? content.trim() : Array.isArray(content) && content.length ? 'ok' : null;
       }

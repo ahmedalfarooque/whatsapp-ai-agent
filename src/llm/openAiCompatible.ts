@@ -67,20 +67,32 @@ export function parseTokenLimit(errorBody: string | undefined, status: number): 
  * call. An HTTP 200 with an empty message is a FAILED answer, not a successful empty reply. Returns the response with the message text
  * normalised to a plain string.
  */
+/** The failure a provider reports INSIDE an HTTP 200 body (`{ "error": { "code": 429, "message": … } }` or `{ "error": "…" }`), or null. */
+function embeddedError(body: { error?: unknown } | null): { code?: unknown; message?: unknown } | null {
+  const e = body?.error;
+  if (e && typeof e === 'object') return e as { code?: unknown; message?: unknown };
+  if (typeof e === 'string' && e.trim()) return { message: e };
+  return null;
+}
+
+/** Throws the provider's real error for a failure that arrived with HTTP 200: a rejected key is a credential error, everything else keeps the provider's own class (rate limit, quota, outage…). */
+function throwEmbedded(inner: { code?: unknown; message?: unknown }, model: string): never {
+  const code = Number(inner.code);
+  const status = Number.isInteger(code) && code >= 400 && code < 600 ? code : null;
+  if (status === 401 || status === 403) throw new AiCredentialError(`The provider refused the API key (HTTP ${status}).`, 'rejected', status);
+  const message = typeof inner.message === 'string' ? inner.message.replace(/\s+/g, ' ').slice(0, 160) : 'the provider reported an error inside a successful response';
+  throw new AiResponseError(status ? reasonForHttpStatus(status) : 'provider_error', status ?? 200, model, message);
+}
+
 export function validateCompletion(parsed: unknown, model: string): ChatCompletionResponse {
   const body = parsed as { choices?: unknown; error?: unknown } | null;
   const choices = body?.choices;
   const choice = Array.isArray(choices) ? (choices[0] as { message?: Record<string, unknown>; finish_reason?: unknown } | undefined) : undefined;
+  const inner = embeddedError(body);
+  // HTTP 200 alone is not an answer. A body that carries an error is a failed inference — also when a (partial or empty) choice came with it: OpenRouter reports a
+  // failure after the first tokens as finish_reason "error" with the error object next to the choice.
+  if (inner && (!choice || typeof choice.message !== 'object' || choice.message === null || choice.finish_reason === 'error' || (!messageText(choice.message.content) && !(Array.isArray(choice.message.tool_calls) && choice.message.tool_calls.length)))) throwEmbedded(inner, model);
   if (!choice || typeof choice.message !== 'object' || choice.message === null) {
-    // Some providers answer HTTP 200 with the failure INSIDE the body (`{ "error": { "code": 429, "message": … } }`): that is the provider's real error,
-    // not an unreadable answer, and the router must classify it as such (rate limit, quota, outage…) instead of hiding it as "malformed".
-    const inner = body && typeof body.error === 'object' && body.error ? (body.error as { code?: unknown; message?: unknown }) : null;
-    if (inner) {
-      const code = Number(inner.code);
-      const status = Number.isInteger(code) && code >= 400 && code < 600 ? code : null;
-      const message = typeof inner.message === 'string' ? inner.message.replace(/\s+/g, ' ').slice(0, 160) : 'the provider reported an error inside a successful response';
-      throw new AiResponseError(status ? reasonForHttpStatus(status) : 'provider_error', status ?? 200, model, message);
-    }
     // Names only, never values: which top-level fields did arrive.
     throw new AiResponseError('malformed_response', 200, model, `no choices in the answer (fields: ${Object.keys(body && typeof body === 'object' ? body : {}).slice(0, 6).join(', ') || 'none'})`);
   }
@@ -155,6 +167,69 @@ export function statedRetryDelayMs(headers: Headers | undefined, errorBody: stri
   return found.length ? Math.max(...found) : null;
 }
 
+/** Whitespace, a byte-order mark and SSE comment lines (": OPENROUTER PROCESSING") that gateways send ahead of the real body are not part of the answer. */
+export function stripKeepAlive(raw: string): string {
+  let text = raw.replace(/^\uFEFF/, '');
+  for (;;) {
+    const next = text.replace(/^\s*:[^\n]*(\n|$)/, '');
+    if (next === text) break;
+    text = next;
+  }
+  return text.trim();
+}
+
+/** A server-sent-event body (`data: {...}` chunks) folded into the one completion it describes — for gateways that stream although a plain answer was asked for. Null when it holds no chunk. */
+export function completionFromEventStream(text: string): unknown | null {
+  let content = '';
+  let reasoning = '';
+  let finish: string | null = null;
+  let error: unknown = null;
+  let sawChunk = false;
+  const calls: Array<{ id?: string; type: string; function: { name: string; arguments: string } }> = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+    let chunk: { error?: unknown; choices?: Array<{ delta?: Record<string, unknown>; message?: Record<string, unknown>; finish_reason?: string | null }> };
+    try { chunk = JSON.parse(data); } catch { continue; }
+    sawChunk = true;
+    if (chunk.error) error = chunk.error;
+    const choice = chunk.choices?.[0];
+    if (!choice) continue;
+    const part = choice.delta ?? choice.message ?? {};
+    if (typeof part.content === 'string') content += part.content;
+    if (typeof part.reasoning === 'string') reasoning += part.reasoning;
+    if (Array.isArray(part.tool_calls)) {
+      for (const raw of part.tool_calls as Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>) {
+        const at = Number.isInteger(raw.index) ? (raw.index as number) : 0;
+        const call = (calls[at] ??= { type: 'function', function: { name: '', arguments: '' } });
+        if (raw.id) call.id = raw.id;
+        if (raw.function?.name) call.function.name += raw.function.name;
+        if (raw.function?.arguments) call.function.arguments += raw.function.arguments;
+      }
+    }
+    if (choice.finish_reason) finish = choice.finish_reason;
+  }
+  if (!sawChunk) return null;
+  const message: Record<string, unknown> = { role: 'assistant', content };
+  if (reasoning) message.reasoning = reasoning;
+  const toolCalls = calls.filter(Boolean);
+  if (toolCalls.length) message.tool_calls = toolCalls;
+  return { ...(error ? { error } : {}), choices: [{ index: 0, finish_reason: finish ?? 'stop', message }] };
+}
+
+/** What a 200 body was, without its content: used only to say WHY it could not be read. */
+const bodyKind = (text: string): string => (text.length === 0 ? 'empty' : /^<(!doctype|html|\?xml)/i.test(text) ? 'html' : 'text');
+
+/** Reads a provider's HTTP 200 body: JSON, JSON behind keep-alive lines, or an event stream; anything else is a malformed answer that says what it was (never its content). */
+export function parseCompletionBody(raw: string, model: string, status: number): unknown {
+  const text = stripKeepAlive(raw);
+  try { return JSON.parse(text); } catch { /* not plain JSON */ }
+  const streamed = completionFromEventStream(text);
+  if (streamed) return streamed;
+  throw new AiResponseError('malformed_response', status, model, `the answer body was not JSON (${bodyKind(text)}, ${raw.length} bytes)`);
+}
+
 export async function completeOnce(request: EndpointRequest): Promise<ChatCompletionResponse> {
   const url = `${request.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   let response: Response;
@@ -197,13 +272,13 @@ export async function completeOnce(request: EndpointRequest): Promise<ChatComple
     failure.tokenLimit = parseTokenLimit(errorBody, response.status);
     throw failure;
   }
-  let parsed: unknown;
+  let rawBody: string;
   try {
-    parsed = await response.json();
+    rawBody = await response.text();
   } catch {
-    throw new AiResponseError('malformed_response', response.status, request.model);
+    throw new AiResponseError('malformed_response', response.status, request.model, 'the answer body could not be read');
   }
-  return validateCompletion(parsed, request.model);
+  return validateCompletion(parseCompletionBody(rawBody, request.model, response.status), request.model);
 }
 
 /** The attribution headers OpenRouter asks apps to send. */

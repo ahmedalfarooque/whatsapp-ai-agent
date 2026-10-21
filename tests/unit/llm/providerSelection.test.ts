@@ -37,11 +37,11 @@ describe('OpenRouter provider selection', () => {
   });
 
   it('production mode calls the real OpenRouter endpoint (network attempted, not mocked)', async () => {
+    const answer = { choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'real reply' } }] };
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'real reply' } }],
-      }),
+      json: async () => answer,
+      text: async () => JSON.stringify(answer),
     });
     vi.stubGlobal('fetch', fetchSpy);
 

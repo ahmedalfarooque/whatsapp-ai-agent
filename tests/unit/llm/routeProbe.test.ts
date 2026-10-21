@@ -16,7 +16,7 @@ import { probeRecoveredRoutes, PROBE_INTERVAL_MS, MAX_PER_PASS, resetRouteProbes
 
 const mutableEnv = env as unknown as Record<string, unknown>;
 const KEY = 'gsk_groqgroqgroqgroqgroqgroqgroqgroq000000000';
-const ok = () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }] }), text: async () => '' });
+const ok = () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }] }), text: async () => JSON.stringify(({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }] })) });
 const quota = () => ({ ok: false, status: 402, headers: new Headers(), json: async () => ({ error: { message: 'You exceeded your current quota' } }), text: async () => '{"error":{"message":"You exceeded your current quota"}}' });
 const ask = () => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'hi' }], maxTokens: 8, temperature: 0, deadline: Date.now() + 5000 });
 const originalKey = mutableEnv.OPENROUTER_API_KEY;

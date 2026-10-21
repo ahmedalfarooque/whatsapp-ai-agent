@@ -10,7 +10,10 @@ import { createAccount } from '../../src/accounts/accountRepo';
 import { presetsPayload } from '../../src/llm/providerPresets';
 import { VENDORS } from '../../src/llm/adapters';
 import { autoSelectModel, MAX_PROBES } from '../../src/llm/autoSetup';
-import { allowUnknownPriceForTests } from '../../src/llm/aiRouter';
+import { allowUnknownPriceForTests, resetAiRouterForTests, routeCompletion } from '../../src/llm/aiRouter';
+import { setModelCatalogForTests } from '../../src/llm/modelCatalog';
+import { runWithAccount } from '../../src/accounts/accountContext';
+import { env } from '../../src/config/env';
 
 /**
  * Saving an API key configures the provider automatically: the model is chosen by a REAL minimal inference, never from a fetched model list.
@@ -115,15 +118,18 @@ describe('automatic model selection when a key is saved (scripted providers)', (
     expect(urls).toHaveLength(2); // one request per attempt: a rejected key is never tried against more models
   });
 
-  it('a free allowance that is used up refuses the save honestly: every candidate is asked at most once, nothing is retried, nothing is stored', async () => {
+  it('a free allowance that is used up still saves the key (the test cannot say the key is bad), says so separately, and never records a pass; every candidate is asked at most once', async () => {
     network(() => quota());
     const res = await shared({ name: 'Groq', config: GROQ_KEY });
-    expect(res.status).toBe(422);
-    expect(res.body.code).toBe('rate_limited');
-    expect(res.body.error).toMatch(/allowance is used up/);
-    expect(count()).toBe(0);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.setup).toMatchObject({ verified: false, models: ['openai/gpt-oss-20b'] });
+    expect(res.body.setup.testFailure).toMatch(/allowance is used up/);
+    expect(res.body.provider).toMatchObject({ lastTestOk: false });
+    expect(res.body.provider.lastTestDetail).toMatch(/Saved without a working test/);
+    expect(count()).toBe(1);
     expect(urls.length).toBeLessThanOrEqual(MAX_PROBES);
     expect(new Set(models).size).toBe(models.length); // never the same model twice
+    expect(JSON.stringify(res.body)).not.toContain(GROQ_KEY);
   });
 
   it('no model answers: refused with each model\'s own reason, nothing stored', async () => {
@@ -136,12 +142,13 @@ describe('automatic model selection when a key is saved (scripted providers)', (
     expect(res.body.attempts.every((a: { ok: boolean }) => a.ok === false)).toBe(true);
   });
 
-  it('an unreachable provider ends the setup at once (no retries) and nothing is stored', async () => {
+  it('an unreachable provider ends the setup at once (no retries); the key is saved, unverified, with the reason', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
     const res = await shared({ name: 'Groq', config: GROQ_KEY });
-    expect(res.status).toBe(422);
-    expect(res.body.code).toBe('network');
-    expect(count()).toBe(0);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.setup).toMatchObject({ verified: false });
+    expect(res.body.setup.testFailure).toMatch(/could not be reached/);
+    expect(count()).toBe(1);
     expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(1);
   });
 
@@ -160,8 +167,103 @@ describe('automatic model selection when a key is saved (scripted providers)', (
 
     network(() => chatModelMissing());
     const none = await shared({ name: 'xAI', config: XAI_KEY, models: 'grok-nope' });
-    expect(none.status).toBe(422);
-    expect(none.body.fields).toEqual(['models']);
+    expect(none.status, JSON.stringify(none.body)).toBe(201); // xAI has no documented default: the typed model is kept, but NOT verified
+    expect(none.body.provider.models).toEqual(['grok-nope']);
+    expect(none.body.setup).toMatchObject({ verified: false });
+    expect(none.body.provider).toMatchObject({ lastTestOk: false });
+  });
+
+  describe('OpenRouter: what the key test accepts and what it never counts as an answer', () => {
+    const html = () => new Response('<!doctype html><html><body>blocked</body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    const errorInside200 = (code: number, message: string) => json(200, { error: { code, message } });
+    const text = (body: string, contentType = 'application/json') => new Response(body, { status: 200, headers: { 'content-type': contentType } });
+    const answer = { choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }] };
+
+    it('a typed model that does not exist (openai/gpt) does not decide the key: openrouter/free is tried once, answers, and is what gets saved', async () => {
+      network((_u, model) => (model === 'openai/gpt' ? json(400, { error: { code: 400, message: 'openai/gpt is not a valid model ID' } }) : chatOk()));
+      const res = await shared({ name: 'OpenRouter', config: OR_KEY, models: 'openai/gpt' });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.provider.models).toEqual(['openrouter/free']);
+      expect(models).toEqual(['openai/gpt', 'openrouter/free']);
+      expect(res.body.setup).toMatchObject({ verified: true, models: ['openrouter/free'] });
+      expect(res.body.setup.testFailure).toMatch(/typed did not answer.*openrouter\/free did/);
+      expect(res.body.provider).toMatchObject({ lastTestOk: true });
+    });
+
+    it('an unreadable HTTP 200 (an HTML page) is a failed test that says what the body was; the key is still saved with openrouter/free, unverified, and never recorded as working', async () => {
+      network(() => html());
+      const res = await shared({ name: 'OpenRouter', config: OR_KEY });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.setup).toMatchObject({ verified: false, models: ['openrouter/free'] });
+      expect(res.body.setup.testFailure).toMatch(/malformed response, HTTP 200: the answer body was not JSON \(html, \d+ bytes\)/);
+      expect(res.body.provider).toMatchObject({ lastTestOk: false, models: ['openrouter/free'] });
+      expect(JSON.stringify(res.body)).not.toContain(OR_KEY);
+    });
+
+    it('an error object inside HTTP 200 is a failed inference, classified by its own code: a rate limit is a rate limit, a rejected key refuses the save', async () => {
+      network(() => errorInside200(429, 'Rate limit exceeded: free-models-per-day'));
+      const limited = await shared({ name: 'OpenRouter', config: OR_KEY });
+      expect(limited.status).toBe(201);
+      expect(limited.body.setup).toMatchObject({ verified: false });
+      expect(limited.body.setup.testFailure).toMatch(/allowance is used up/);
+      expect(limited.body.provider).toMatchObject({ lastTestOk: false });
+
+      getDb().prepare('DELETE FROM ai_providers').run();
+      network(() => errorInside200(401, 'User not found.'));
+      const rejectedKey = await shared({ name: 'OpenRouter', config: OR_KEY });
+      expect(rejectedKey.status).toBe(422);
+      expect(rejectedKey.body).toMatchObject({ code: 'credential' });
+      expect(count()).toBe(0);
+    });
+
+    it('OpenRouter keep-alive lines before the JSON, and an event-stream body, are read as the answer they carry', async () => {
+      network(() => text(`: OPENROUTER PROCESSING\n\n: OPENROUTER PROCESSING\n\n${JSON.stringify(answer)}`));
+      const keepAlive = await shared({ name: 'OpenRouter', config: OR_KEY });
+      expect(keepAlive.status, JSON.stringify(keepAlive.body)).toBe(201);
+      expect(keepAlive.body.setup).toMatchObject({ verified: true });
+
+      getDb().prepare('DELETE FROM ai_providers').run();
+      const chunk = (delta: Record<string, unknown>, finish: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+      network(() => text(`: OPENROUTER PROCESSING\n\n${chunk({ role: 'assistant', content: 'o' })}${chunk({ content: 'k' }, 'stop')}data: [DONE]\n\n`, 'text/event-stream'));
+      const streamed = await shared({ name: 'OpenRouter', config: OR_KEY });
+      expect(streamed.status, JSON.stringify(streamed.body)).toBe(201);
+      expect(streamed.body.setup).toMatchObject({ verified: true });
+    });
+
+    it('a key saved from the dashboard (even with a failed test) is stored ENCRYPTED, shown masked, and is the key the AI router really sends with openrouter/free', async () => {
+      const mutableEnv = env as unknown as Record<string, unknown>;
+      const originalMock = mutableEnv.shouldUseMockProviders;
+      try {
+        network(() => html());
+        const saved = await shared({ name: 'OpenRouter', config: OR_KEY });
+        expect(saved.status, JSON.stringify(saved.body)).toBe(201);
+        expect(saved.body.setup.verified).toBe(false);
+        expect(saved.body.provider.keyMasked).toBeTruthy();
+        expect(saved.body.provider.keyMasked).not.toBe(OR_KEY);
+        const row = getDb().prepare('SELECT key_ciphertext FROM ai_providers WHERE id = ?').get(saved.body.provider.id) as { key_ciphertext: string };
+        expect(row.key_ciphertext).toBeTruthy();
+        expect(row.key_ciphertext).not.toContain(OR_KEY);
+        expect(row.key_ciphertext).not.toContain('sk-or-');
+        const listed = await owner.get('/api/dashboard/super-admin/ai/providers');
+        expect(JSON.stringify(listed.body)).not.toContain(OR_KEY);
+
+        mutableEnv.shouldUseMockProviders = false;
+        setModelCatalogForTests([{ id: 'openrouter/free', free: true, image: false, audio: false, tools: true, contextLength: 100000 }]);
+        resetAiRouterForTests();
+        const seen: Array<{ url: string; auth: string | null; model: string }> = [];
+        vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+          seen.push({ url: String(url), auth: new Headers(init?.headers).get('authorization'), model: String((JSON.parse(String(init?.body)) as { model?: string }).model) });
+          return json(200, { choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'Hello from the saved key.' } }] });
+        }));
+        const result = await runWithAccount(acc, () => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'hi' }], maxTokens: 20, deadline: Date.now() + 8000 })) as { choices: Array<{ message: { content: string } }> };
+        expect(result.choices[0]!.message.content).toBe('Hello from the saved key.');
+        expect(seen[0]).toEqual({ url: 'https://openrouter.ai/api/v1/chat/completions', auth: `Bearer ${OR_KEY}`, model: 'openrouter/free' });
+      } finally {
+        mutableEnv.shouldUseMockProviders = originalMock;
+        setModelCatalogForTests(null);
+        resetAiRouterForTests();
+      }
+    });
   });
 
   it('the preset list tells the form which vendors choose their model automatically, and offers no model-list feature', () => {

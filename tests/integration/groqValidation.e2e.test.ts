@@ -134,10 +134,11 @@ describe('automatic setup when a Groq key is saved', () => {
     expect(result.attempts[0]!.detail).toMatch(/1024 tokens/);
   });
 
-  it('never answering visibly: no model is saved, at most two requests per candidate model', async () => {
+  it('never answering visibly: the key is kept with the documented default but NOT marked verified, at most two requests per candidate model', async () => {
     reasoningModel(100000);
     const result = await autoSelectModel(groq, groq.baseUrl, GROQ_KEY);
-    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ ok: true, verified: false, models: ['openai/gpt-oss-20b'] });
+    expect(result.ok && result.testFailure).toMatch(/No model answered a real test request/);
     expect(budgetsSent()).toEqual([256, 1024, 256, 1024]); // gpt-oss-20b then gpt-oss-120b, each asked twice at most
   });
 });

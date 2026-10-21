@@ -37,7 +37,7 @@ const CATALOG: ModelInfo[] = [
   { id: PAID, free: false, image: true, audio: false, tools: true, contextLength: 1_000_000 },
   { id: FREE_OR, free: true, image: true, audio: false, tools: true, contextLength: 262_144 },
 ];
-const ok = (text: string) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: text } }] }), text: async () => '' });
+const ok = (text: string) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: text } }] }), text: async () => JSON.stringify(({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: text } }] })) });
 const fail = (status: number, message: string, headers: Record<string, string> = {}) => ({ ok: false, status, headers: new Headers(headers), json: async () => ({ error: { message } }), text: async () => JSON.stringify({ error: { message } }) });
 const CAP_402 = 'Prompt tokens limit exceeded: 7335 > 5458. To increase, visit https://openrouter.ai/settings/credits';
 const ZDR_404 = '0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy. ZDR violation (account setting)';

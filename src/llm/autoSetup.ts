@@ -9,6 +9,10 @@ import { validationBudget } from './validationBudget';
  * (a few tokens, a neutral prompt, no customer data) through the vendor's own adapter returned an answer. Candidates are the models typed by the
  * administrator, or else the vendor's `probeModels` (ids the vendor documents as stable aliases). Each candidate is called at most once, the
  * whole setup is bounded (MAX_PROBES), a rejected key stops it at once, and nothing is retried or routed around a quota.
+ *
+ * The test never decides whether a well-formed key is KEPT: only the provider rejecting the key refuses the save. Any other failure (an empty or unreadable
+ * answer, a refused model, a used-up allowance, an unreachable provider) saves the key with the vendor's documented free default (or the models typed) and
+ * reports `verified: false` with the failure, so the person sees the test failure separately and the provider is never recorded as working.
  */
 export const MAX_PROBES = 3;
 export const MAX_TYPED_MODELS = 5;
@@ -19,7 +23,7 @@ export interface ProbeAttempt { model: string; ok: boolean; category: string; ht
 export type AutoSetupFailure = 'credential' | 'model_required' | 'rate_limited' | 'no_working_model' | 'network';
 
 export type AutoSetupResult =
-  | { ok: true; models: string[]; attempts: ProbeAttempt[] }
+  | { ok: true; models: string[]; attempts: ProbeAttempt[]; verified: boolean; testFailure: string | null }
   | { ok: false; category: AutoSetupFailure; message: string; fields: string[]; attempts: ProbeAttempt[] };
 
 type Classified = { category: string; httpStatus: number | null; detail: string };
@@ -53,11 +57,15 @@ async function probe(vendor: Vendor, baseUrl: string, apiKey: string, model: str
 
 const sentence = (a: ProbeAttempt): string => `${a.model}: ${a.detail}`;
 
+const rejected = (vendor: Vendor, attempts: ProbeAttempt[], attempt: ProbeAttempt): AutoSetupResult => ({ ok: false, category: 'credential', fields: ['config'], attempts, message: `The API key was rejected by ${vendor.name} (HTTP ${attempt.httpStatus ?? '?'}). Check that you pasted the whole key for this provider. Nothing was saved.` });
+
 /**
  * Chooses the model(s) a new provider will use. `typed` are models the administrator entered (all are checked, in order; those that answered are
  * kept). With none typed, the vendor's documented probe models are tried one by one until one answers.
  */
-export async function autoSelectModel(vendor: Vendor, baseUrl: string, apiKey: string, typed: string[] = [], timeoutMs = 15_000): Promise<AutoSetupResult> {
+export async function autoSelectModel(vendor: Vendor, baseUrl: string, apiKey: string, typed: string[] = [], timeoutMs = 15_000, options: { keepOnFailure?: boolean } = {}): Promise<AutoSetupResult> {
+  // keepOnFailure (default): a failed test never refuses a well-formed key. Replacing a key passes false: there the answer is only the verdict on the new key.
+  const lenient = options.keepOnFailure !== false;
   const explicit = typed.length > 0;
   const candidates = (explicit ? typed.slice(0, MAX_TYPED_MODELS) : vendor.probeModels.slice(0, MAX_PROBES));
   if (candidates.length === 0) {
@@ -65,6 +73,7 @@ export async function autoSelectModel(vendor: Vendor, baseUrl: string, apiKey: s
   }
   const attempts: ProbeAttempt[] = [];
   const answered: string[] = [];
+  let unreachable = false;
   for (const model of candidates) {
     const attempt = await probe(vendor, baseUrl, apiKey, model, timeoutMs);
     attempts.push(attempt);
@@ -74,12 +83,28 @@ export async function autoSelectModel(vendor: Vendor, baseUrl: string, apiKey: s
       continue;
     }
     // A rejected key or an unreachable provider ends the setup: another model cannot help, and the key must not be hammered.
-    if (attempt.category === 'credential') return { ok: false, category: 'credential', fields: ['config'], attempts, message: `The API key was rejected by ${vendor.name} (HTTP ${attempt.httpStatus ?? '?'}). Check that you pasted the whole key for this provider. Nothing was saved.` };
-    if (attempt.category === 'network') return { ok: false, category: 'network', fields: [], attempts, message: `${vendor.name} could not be reached, so no model could be confirmed. Nothing was saved; try again in a moment.` };
+    if (attempt.category === 'credential') return rejected(vendor, attempts, attempt);
+    if (attempt.category === 'network') { unreachable = true; break; }
   }
-  if (answered.length > 0) return { ok: true, models: answered, attempts };
+  if (answered.length > 0) return { ok: true, models: answered, attempts, verified: true, testFailure: null };
+  // A typed model that does not answer (a misspelt or unavailable id) must not decide the key's fate: the vendor's documented free default is tried once instead.
+  const fallback = vendor.verifiedDefault;
+  const typedFailures = attempts.map(sentence).join('; ');
+  if (lenient && explicit && fallback && !typed.includes(fallback) && !unreachable && attempts.some((a) => a.category !== 'rate_limited' && a.category !== 'payment_required')) {
+    const attempt = await probe(vendor, baseUrl, apiKey, fallback, timeoutMs);
+    attempts.push(attempt);
+    if (attempt.category === 'credential') return rejected(vendor, attempts, attempt);
+    if (attempt.ok) return { ok: true, models: [fallback], attempts, verified: true, testFailure: `The model(s) typed did not answer (${typedFailures}); ${fallback} did, so ${fallback} is used.` };
+  }
   const limited = attempts.length > 0 && attempts.every((a) => a.category === 'rate_limited' || a.category === 'payment_required');
   const shown = attempts.map(sentence).join('; ');
+  // Keep the key: with the vendor's free default, or the models typed when the vendor has none. Not verified, and said so.
+  const keep = !lenient ? [] : fallback ? [fallback] : explicit ? typed.slice(0, MAX_TYPED_MODELS) : [];
+  if (keep.length > 0) {
+    const why = unreachable ? `${vendor.name} could not be reached (${shown})` : limited ? `The key looks valid but ${vendor.name}'s free allowance is used up right now (${shown})` : `No model answered a real test request (${shown})`;
+    return { ok: true, models: keep, attempts, verified: false, testFailure: why };
+  }
+  if (unreachable) return { ok: false, category: 'network', fields: [], attempts, message: `${vendor.name} could not be reached, so no model could be confirmed. Nothing was saved; try again in a moment.` };
   if (limited) return { ok: false, category: 'rate_limited', fields: [], attempts, message: `The key looks valid but ${vendor.name}'s free allowance is used up right now, so no model could be confirmed (${shown}). Nothing was saved and nothing is retried; add it again after the allowance resets.` };
   return { ok: false, category: 'no_working_model', fields: explicit ? ['models'] : [], attempts, message: `No model answered a real test request (${shown}). Nothing was saved.${explicit ? ' Check the model ids you typed.' : ' Type a model id under More options.'}` };
 }

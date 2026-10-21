@@ -100,7 +100,7 @@ export function createInputFromSimple(body: unknown): AiProviderInput {
 }
 
 /** What the person is told after a key was saved: the model that really answered, and every test request that was made (never a key or a prompt). */
-export interface SetupSummary { models: string[]; attempts: Array<Pick<ProbeAttempt, 'model' | 'ok' | 'category' | 'httpStatus' | 'latencyMs'>>; freeConfirmationRequired: boolean }
+export interface SetupSummary { models: string[]; attempts: Array<Pick<ProbeAttempt, 'model' | 'ok' | 'category' | 'httpStatus' | 'latencyMs'>>; freeConfirmationRequired: boolean; /** false: the key was saved but no real test request answered. */ verified: boolean; /** Why the test failed (or which typed model was replaced); never a key or a prompt. */ testFailure: string | null }
 
 export type PreparedCreate = { ok: true; input: AiProviderInput; setup: SetupSummary | null } | { ok: false; status: number; json: Record<string, unknown> };
 
@@ -123,7 +123,7 @@ export async function prepareCreateInput(body: unknown): Promise<PreparedCreate>
   const attempts = result.attempts.map((a) => ({ model: a.model, ok: a.ok, category: a.category, httpStatus: a.httpStatus, latencyMs: a.latencyMs }));
   if (!result.ok) return { ok: false, status: 422, json: { error: result.message, code: result.category, fields: result.fields, message: result.message, attempts } };
   const input = forCreate({ ...resolved, models: result.models }, body);
-  return { ok: true, input, setup: { models: result.models, attempts, freeConfirmationRequired: input.freeConfirmed !== true } };
+  return { ok: true, input, setup: { models: result.models, attempts, freeConfirmationRequired: input.freeConfirmed !== true, verified: result.verified, testFailure: result.testFailure } };
 }
 
 export interface KeyCheck { ok: boolean; category: string; message: string }
@@ -139,7 +139,7 @@ export async function checkReplacedKey(existing: AiProviderRow, input: AiProvide
   const vendor = vendorById(existing.vendor);
   const model = csv(input.models.join(','))[0];
   if (!vendor || !model) return { check: null };
-  const result = await autoSelectModel(vendor, existing.base_url, key, [model]);
+  const result = await autoSelectModel(vendor, existing.base_url, key, [model], undefined, { keepOnFailure: false });
   if (result.ok) return { check: { ok: true, category: 'ok', message: `${model} answered a real test request with the new key.` } };
   if (result.category === 'credential') return { refuse: { error: result.message.replace('Nothing was saved.', 'The previous key was kept.'), code: 'credential', fields: ['config'], message: result.message, attempts: result.attempts.map((a) => ({ model: a.model, ok: a.ok, category: a.category, httpStatus: a.httpStatus })) } };
   return { check: { ok: false, category: result.category, message: `The new key was saved but could not be verified: ${result.message.replace(' Nothing was saved.', '')}` } };
@@ -149,6 +149,7 @@ export async function checkReplacedKey(existing: AiProviderRow, input: AiProvide
 export function recordSetupTest(row: AiProviderRow, setup: SetupSummary | null): void {
   const hit = setup?.attempts.find((a) => a.ok);
   if (hit) recordProviderTest(row.id, true, `Model ${hit.model} answered in ${(hit.latencyMs / 1000).toFixed(1)} s (setup test).`);
+  else if (setup && !setup.verified) recordProviderTest(row.id, false, `Saved without a working test: ${setup.testFailure ?? 'no model answered'}`.slice(0, 300)); // the failure is recorded as such, never as a pass
 }
 
 /** An edit from the two-field form: only the name and the configuration change; models, capabilities and the rest stay as they were. */

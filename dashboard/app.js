@@ -1437,7 +1437,8 @@ function bindAiForm(host, { endpoint, itemUrl, extraPayload, onDone }) {
       const hit = setup && setup.attempts.find((a) => a.ok);
       const keyCheck = saved && saved.keyCheck;
       if (keyCheck && keyCheck.ok === false) toast(keyCheck.message, 'error'); else
-      toast(hit ? `Saved. ${hit.model} answered a real test request in ${(hit.latencyMs / 1000).toFixed(1)} s.${setup.freeConfirmationRequired ? ' Confirm the free tier before it is used.' : ''}` : 'Saved', 'success');
+      if (setup && setup.verified === false) toast(`The key was saved, but the test request failed: ${setup.testFailure || 'no model answered'}. It is not marked as working.`, 'error'); else
+      toast(hit ? `Saved. ${hit.model} answered a real test request in ${(hit.latencyMs / 1000).toFixed(1)} s.${setup.testFailure ? ' ' + setup.testFailure : ''}${setup.freeConfirmationRequired ? ' Confirm the free tier before it is used.' : ''}` : 'Saved', 'success');
       onDone(true);
     } catch (error) {
       result.textContent = error.fields && error.fields.length && error.message === 'validation_failed' ? `Check ${error.fields.join(', ')}.` : error.message;

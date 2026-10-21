@@ -20,7 +20,7 @@ import { forCreate } from '../../../src/dashboard/aiRoutingRoutes';
 const mutableEnv = env as unknown as Record<string, unknown>;
 const GROQ_KEY = 'gsk_groqgroqgroqgroqgroqgroqgroqgroq000000000';
 const GEMINI_KEY = 'AIzaSyGeminiGeminiGeminiGeminiGemini000000';
-const ok = (text: string) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: text } }] }), text: async () => '' });
+const ok = (text: string) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: text } }] }), text: async () => JSON.stringify(({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: text } }] })) });
 const fail = (status: number, message: string) => ({ ok: false, status, headers: new Headers(), json: async () => ({ error: { message } }), text: async () => JSON.stringify({ error: { message } }) });
 
 const base = (over: Partial<AiProviderInput> = {}): AiProviderInput => ({ name: 'Groq', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', apiKey: GROQ_KEY, models: ['llama-3.3-70b-versatile'], priority: 10, timeoutMs: 3000, ...over });
