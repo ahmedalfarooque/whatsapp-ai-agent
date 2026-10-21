@@ -100,7 +100,17 @@ export function allowUnknownPriceForTests(flag: boolean): void { unknownPriceAll
 export type ResetBasis = 'stated' | 'documented';
 export interface RouteState { scope: 'route' | 'provider'; until: number; why: string; category: string | null; resetKnown: boolean; resetBasis: ResetBasis | null; strikes: number; setAt: number }
 /** reset_known in the database: 0 = our own estimate, 1 = stated by the provider's response, 2 = the provider's documented policy. */
-const basisFromDb = (n: number): ResetBasis | null => (n === 1 ? 'stated' : n === 2 ? 'documented' : null);
+/**
+ * A pause written before the three-valued basis existed carries 0 ("estimate") even when it was Google's documented daily reset. Our own backoffs are never an exact multiple of a
+ * Pacific midnight, so a provider-wide quota pause that ends exactly at 00:00:00 Pacific IS that documented reset.
+ */
+export function endsAtPacificMidnight(untilMs: number): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(untilMs));
+  const n = (t: string): number => Number(parts.find((p) => p.type === t)?.value ?? -1) % 24;
+  return n('hour') === 0 && n('minute') === 0 && n('second') === 0;
+}
+const basisFromDb = (n: number, row?: { scope: string; category: string | null; until_ms: number }): ResetBasis | null =>
+  n === 1 ? 'stated' : n === 2 ? 'documented' : row && row.scope === 'provider' && row.category === 'rate_limited' && endsAtPacificMidnight(row.until_ms) ? 'documented' : null;
 const basisToDb = (b: ResetBasis | null): number => (b === 'stated' ? 1 : b === 'documented' ? 2 : 0);
 const states = new Map<string, RouteState>();
 const MINUTE = 60_000;
@@ -114,7 +124,7 @@ function loadState(key: string): RouteState | undefined {
     // A pause set before a restart: read it back once and keep it in memory (a missing table or database means "none").
     try {
       const row = getDb().prepare('SELECT scope, until_ms, why, category, reset_known, strikes, set_at_ms FROM ai_route_cooldowns WHERE key = ?').get(key) as { scope: 'route' | 'provider'; until_ms: number; why: string; category: string | null; reset_known: number; strikes: number; set_at_ms: number | null } | undefined;
-      if (row) { s = { scope: row.scope, until: row.until_ms, why: row.why, category: row.category, resetKnown: row.reset_known > 0, resetBasis: basisFromDb(row.reset_known), strikes: row.strikes, setAt: row.set_at_ms ?? row.until_ms }; states.set(key, s); }
+      if (row) { s = { scope: row.scope, until: row.until_ms, why: row.why, category: row.category, resetKnown: basisFromDb(row.reset_known, row) !== null, resetBasis: basisFromDb(row.reset_known, row), strikes: row.strikes, setAt: row.set_at_ms ?? row.until_ms }; states.set(key, s); }
     } catch { /* not persisted */ }
   }
   return s;
@@ -536,8 +546,8 @@ export function simulateRestartForTests(): void {
 export function activeCooldowns(now = Date.now()): Array<{ key: string; until: number; why: string; resetKnown: boolean; resetBasis: ResetBasis | null; category: string | null; strikes: number }> {
   const out = new Map<string, { key: string; until: number; why: string; resetKnown: boolean; resetBasis: ResetBasis | null; category: string | null; strikes: number }>();
   try {
-    const rows = getDb().prepare('SELECT key, until_ms, why, category, reset_known, strikes FROM ai_route_cooldowns WHERE until_ms > ? AND key NOT LIKE \'trial:%\'').all(now) as Array<{ key: string; until_ms: number; why: string; category: string | null; reset_known: number; strikes: number }>;
-    for (const r of rows) out.set(r.key, { key: r.key, until: r.until_ms, why: r.why, resetKnown: r.reset_known > 0, resetBasis: basisFromDb(r.reset_known), category: r.category, strikes: r.strikes });
+    const rows = getDb().prepare('SELECT key, scope, until_ms, why, category, reset_known, strikes FROM ai_route_cooldowns WHERE until_ms > ? AND key NOT LIKE \'trial:%\'').all(now) as Array<{ key: string; scope: string; until_ms: number; why: string; category: string | null; reset_known: number; strikes: number }>;
+    for (const r of rows) out.set(r.key, { key: r.key, until: r.until_ms, why: r.why, resetKnown: basisFromDb(r.reset_known, r) !== null, resetBasis: basisFromDb(r.reset_known, r), category: r.category, strikes: r.strikes });
   } catch { /* not persisted */ }
   for (const [key, s] of states) if (s.until > now) out.set(key, { key, until: s.until, why: s.why, resetKnown: s.resetKnown, resetBasis: s.resetBasis, category: s.category, strikes: s.strikes });
   return [...out.values()];

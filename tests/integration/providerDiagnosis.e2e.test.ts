@@ -9,7 +9,8 @@ vi.mock('../../src/whatsapp/client', () => ({
 import path from 'node:path';
 import { sendTextMessage } from '../../src/whatsapp/client';
 import { processInboundMessage, resetCredentialFallbackThrottle } from '../../src/pipeline/processInboundMessage';
-import { allowUnknownPriceForTests, buildCandidates, resetAiRouterForTests, routeCompletion } from '../../src/llm/aiRouter';
+import { allowUnknownPriceForTests, buildCandidates, resetAiRouterForTests, routeCompletion, simulateRestartForTests } from '../../src/llm/aiRouter';
+import { pacificMidnightDelayMs } from '../../src/llm/adapters/geminiAdapter';
 import { getOrCreateCustomer, setCustomerLanguage } from '../../src/memory/customerRepo';
 import { loadKnowledgeBase } from '../../src/knowledge/loader';
 import { getDb } from '../../src/memory/db';
@@ -90,6 +91,7 @@ afterEach(() => {
 const ask = () => runWithAccount(account, () => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'hi' }], maxTokens: 8, temperature: 0, deadline: Date.now() + 8000 }));
 const stamp = () => getDb().prepare('UPDATE ai_route_log SET created_at = ?').run(new Date(Date.now()).toISOString().slice(0, 19).replace('T', ' '));
 const states = () => getDb().prepare("SELECT key, scope, category, reset_known AS known, strikes, until_ms - set_at_ms AS ms FROM ai_route_cooldowns WHERE key NOT LIKE 'trial:%' ORDER BY key").all() as Array<{ key: string; scope: string; category: string; known: number; strikes: number; ms: number }>;
+const db = () => getDb();
 const only = (id: number) => getDb().prepare('DELETE FROM ai_providers WHERE id <> ?').run(id);
 
 describe('OpenRouter: 429, 404-policy and 404-model-missing are three different things', () => {
@@ -179,6 +181,17 @@ describe('Gemini: what the "10:00" reset is, and what is never repeated during i
     expect(health.summary).toMatch(/daily reset/);
     expect(health.detail).toMatch(/documented daily reset/);
     expect(health.detail).toMatch(/carries no timestamp/);
+  });
+
+  it('a daily pause written BEFORE the basis existed (reset_known 0, ending exactly at midnight Pacific) is recognised as the documented reset after a restart; a genuine estimate stays an estimate', () => {
+    const midnight = T0 + pacificMidnightDelayMs(T0);
+    const put = db().prepare("INSERT INTO ai_route_cooldowns (key, scope, until_ms, why, category, reset_known, strikes, set_at_ms) VALUES (?, ?, ?, 'rate limited', 'rate_limited', 0, 1, ?)");
+    put.run(`provider:${gemId}`, 'provider', midnight, T0);
+    put.run(`provider:${orId}`, 'provider', T0 + 17 * MIN + 123, T0);
+    simulateRestartForTests();
+    stamp();
+    expect(providerHealth(getProvider(gemId)!).cooldown).toMatchObject({ resetKnown: true, basis: 'documented' });
+    expect(providerHealth(getProvider(orId)!).cooldown).toMatchObject({ resetKnown: false, basis: null });
   });
 
   it('a reset the response itself states is "stated"; a pause with no reset information is an ESTIMATE — and the longer pause keeps its own basis when a sibling failure arrives', async () => {
