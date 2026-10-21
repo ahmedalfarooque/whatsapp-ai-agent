@@ -1,4 +1,5 @@
 import type { Request, Response, Router } from 'express';
+import { getDb } from '../memory/db';
 import { logger } from '../logger';
 import { currentAccountId } from '../accounts/accountContext';
 import { env } from '../config/env';
@@ -117,6 +118,11 @@ export async function prepareCreateInput(body: unknown): Promise<PreparedCreate>
   const resolved = resolveSimpleProvider({ name: str(b.name), config: str(b.config), provider: str(b.provider), models: str(b.models), baseUrl: str(b.baseUrl), timeoutMs: Number.isFinite(num) && num > 0 ? num : undefined }, { autoModel: true });
   const vendor = vendorById(resolved.vendor);
   if (!vendor) throw new SimpleProviderError('provider_required', ['provider']);
+  // The name is optional: an empty one becomes the detected provider's name, numbered when that provider was already added.
+  if (!resolved.name.trim()) {
+    const same = (getDb().prepare('SELECT COUNT(*) AS n FROM ai_providers WHERE vendor = ?').get(vendor.id) as { n: number }).n;
+    resolved.name = same === 0 ? vendor.name : `${vendor.name} ${same + 1}`;
+  }
   if (!endpointMatchesVendor(vendor.id, resolved.baseUrl)) throw new SimpleProviderError('validation_failed', ['baseUrl']);
   if (!resolved.apiKey || !isUsableApiKey(resolved.apiKey)) throw new SimpleProviderError('validation_failed', ['config']);
   const result = await autoSelectModel(vendor, resolved.baseUrl, resolved.apiKey, resolved.models, Math.min(resolved.timeoutMs ?? 15_000, 20_000));

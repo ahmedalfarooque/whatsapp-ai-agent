@@ -1277,7 +1277,7 @@ function aiProviderFormHtml(meta, entry) {
       ${autofillDecoy()}
       <input type="hidden" name="id" value="${entry && entry.id ? entry.id : ''}" />
       <form-meta hidden data-rules="${esc(JSON.stringify(meta.rules || {}))}" data-presets="${esc(JSON.stringify(presets.map((x) => ({ id: x.id, baseUrl: x.baseUrl, autoSelect: Boolean(x.autoSelect), hint: x.hint }))))}"></form-meta>
-      ${textField('name', 'API / Agent name', 'A name you will recognise, for example "Groq free".', entry ? entry.name : '')}
+      ${textField('name', 'API / Agent name (optional)', 'Leave empty and the provider\'s name is used. Only the API key is required: the provider, endpoint and model are detected automatically.', entry ? entry.name : '')}
       <p class="field-help ai-err" data-err="name" style="color:#c0453f" hidden></p>
       ${pwField('config', 'API configuration', isNew ? 'Paste the API key (stored encrypted, shown masked afterwards).' : 'Leave empty to keep the saved configuration, or enter a new one to replace it.', !isNew)}
       <p class="field-help ai-err" data-err="config" style="color:#c0453f" hidden></p>
@@ -1366,11 +1366,10 @@ function aiFormValidate(form, isNew) {
   const meta = aiFormMeta(form);
   const errors = {};
   const val = (n) => (form.elements[n] ? String(form.elements[n].value || '').trim() : '');
-  if (!val('name')) errors.name = 'Enter a name.';
   if (isNew && !val('config')) errors.config = 'Paste the API key.';
   else if (isNew && /^https?:\/\//i.test(val('config'))) errors.config = 'Paste the API key, not an address. The endpoint goes under More options.';
   const preset = isNew ? aiFormPreset(form, meta) : null;
-  if (isNew && !preset && !val('baseUrl')) errors.provider = 'Choose a provider, or enter the endpoint address and models of a custom one.';
+  if (isNew && !preset && !val('baseUrl')) errors.provider = 'This key\'s provider could not be recognised. Choose it under More options, or enter the endpoint address and models of a custom one.';
   if (isNew && !errors.provider) {
     const baseUrl = val('baseUrl') || (preset ? preset.baseUrl : '');
     if (!meta.baseUrl.test(baseUrl)) errors.baseUrl = baseUrl ? 'Endpoint address must be a full https:// address, for example https://api.example.com/v1.' : 'Endpoint address is required for a custom provider.';

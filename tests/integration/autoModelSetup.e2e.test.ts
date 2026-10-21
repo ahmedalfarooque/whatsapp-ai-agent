@@ -80,6 +80,20 @@ describe('automatic model selection when a key is saved (scripted providers)', (
     expect(JSON.stringify(res.body)).not.toContain(OR_KEY);
   });
 
+  it('the key alone is enough: no name, no provider, no endpoint, no model — all detected; the name is the provider\'s and is numbered on a second key', async () => {
+    network(() => chatOk());
+    const first = await shared({ config: OR_KEY });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(first.body.provider).toMatchObject({ name: 'OpenRouter', models: ['openrouter/free'], baseUrl: 'https://openrouter.ai/api/v1' });
+    const second = await shared({ name: '  ', config: OR_KEY });
+    expect(second.body.provider.name).toBe('OpenRouter 2');
+    const named = await shared({ name: 'My free route', config: OR_KEY });
+    expect(named.body.provider.name).toBe('My free route');
+    const unknown = await shared({ config: 'not-a-known-key-shape-0000000000000000' });
+    expect(unknown.status).toBe(400);
+    expect(unknown.body.fields).toEqual(['provider']);
+  });
+
   it('Groq: the first documented model is refused (404) so the next one is tried; the model that ANSWERED is saved, and the free tier still needs the administrator', async () => {
     network((_u, model) => (model === 'openai/gpt-oss-20b' ? chatModelMissing() : chatOk()));
     const res = await shared({ name: 'Groq', config: GROQ_KEY });

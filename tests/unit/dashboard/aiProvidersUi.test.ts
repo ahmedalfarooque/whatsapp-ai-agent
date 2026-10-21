@@ -40,7 +40,7 @@ describe('the account AI providers list', () => {
   const row = app.slice(app.indexOf('function aiEntryRowHtml'), app.indexOf('function readAiForm'));
 
   it('asks for two things only — a name and the API configuration — with everything else behind "More options"', () => {
-    expect(form).toContain("textField('name', 'API / Agent name'");
+    expect(form).toContain("textField('name', 'API / Agent name (optional)'");
     expect(form).toContain("pwField('config', 'API configuration'");
     const primary = form.slice(0, form.indexOf('<details class="ai-more">'));
     expect(primary).not.toMatch(/visionModels|audioModels|freeTier|supportsTools|priority|timeoutMs/);
