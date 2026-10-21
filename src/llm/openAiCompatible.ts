@@ -50,6 +50,19 @@ export function providerMessageOf(body: string | undefined): string | null {
 }
 
 /**
+ * "Request too large … on tokens per minute (TPM): Limit 8000, Requested 9234": the request alone is bigger than the free tier's per-minute token limit. Read from the FULL error
+ * message (the stored one is shortened), only when the provider says the request is too large — a cumulative rate limit ("Used 7000, Requested 2000") is a 429 and handled as such.
+ */
+export function parseTokenLimit(errorBody: string | undefined, status: number): { limit: number; requested: number } | null {
+  if (!errorBody) return null;
+  let message = errorBody;
+  try { const parsed = JSON.parse(errorBody) as { error?: { message?: unknown } | string }; const m = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message; if (typeof m === 'string') message = m; } catch { /* plain text */ }
+  if (status !== 413 && !/request too large/i.test(message)) return null;
+  const hit = /Limit\s+(\d+)\D{1,40}?Requested\s+(\d+)/i.exec(message);
+  return hit ? { limit: Number(hit[1]), requested: Number(hit[2]) } : null;
+}
+
+/**
  * Checks that a provider answer actually contains something to send: at least one choice with a message, and either text or a tool
  * call. An HTTP 200 with an empty message is a FAILED answer, not a successful empty reply. Returns the response with the message text
  * normalised to a plain string.
@@ -181,6 +194,7 @@ export async function completeOnce(request: EndpointRequest): Promise<ChatComple
     // Whatever reset time the provider STATES (Retry-After, X-RateLimit-Reset, "try again in …") lets the route rest exactly until the limit lifts instead of guessing.
     const stated = statedRetryDelayMs(response.headers, errorBody);
     if (stated) failure.retryAfterMs = stated;
+    failure.tokenLimit = parseTokenLimit(errorBody, response.status);
     throw failure;
   }
   let parsed: unknown;

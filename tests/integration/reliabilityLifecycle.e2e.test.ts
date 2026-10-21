@@ -20,6 +20,7 @@ import { createAccount } from '../../src/accounts/accountRepo';
 import { runWithAccount } from '../../src/accounts/accountContext';
 import { runReplaySweep, type ReplayRunner } from '../../src/replay/replayWorker';
 import { runDeliverySweep, MAX_DELIVERY_ATTEMPTS } from '../../src/replay/deliverySweep';
+import { parseTokenLimit } from '../../src/llm/openAiCompatible';
 
 /**
  * Generation, delivery and recovery as separate facts — scripted providers (mocked), a mocked WhatsApp client, a faked clock where noted. These prove the application's
@@ -160,11 +161,11 @@ describe('a generated answer that WhatsApp would not deliver is delivered later 
 describe('customer replies get a budget a reasoning model can answer within', () => {
   const groq = () => createProvider({ name: 'Groq', kind: 'openai_compatible', adapter: 'openai', vendor: 'groq', baseUrl: 'https://api.groq.com/openai/v1', apiKey: GROQ_KEY, models: ['openai/gpt-oss-20b'], priority: 5, timeoutMs: 3000, freeConfirmed: true }, { accountId: null, updatedBy: 1 });
 
-  it('Groq is asked with 1500 completion tokens (max_completion_tokens); other vendors keep 600 (max_tokens)', async () => {
+  it('Groq is asked with 1000 completion tokens (max_completion_tokens); other vendors keep 600 (max_tokens)', async () => {
     groq();
     network({ 'api.groq.com': () => orOk('Groq answer.'), 'openrouter.ai': () => orOk('OpenRouter answer.') });
     await customerSays();
-    expect(bodies[0]).toMatchObject({ host: 'api.groq.com', body: { max_completion_tokens: 1500 } });
+    expect(bodies[0]).toMatchObject({ host: 'api.groq.com', body: { max_completion_tokens: 1000 } });
     expect(bodies[0]!.body).not.toHaveProperty('max_tokens');
     getDb().prepare("UPDATE ai_providers SET enabled = 0 WHERE vendor = 'groq'").run();
     resetAiRouterForTests();
@@ -174,9 +175,9 @@ describe('customer replies get a budget a reasoning model can answer within', ()
 
   it('a reply whose whole budget went on reasoning is retried ONCE on the same route with a bounded larger budget, and the customer gets ONE answer', async () => {
     groq();
-    network({ 'api.groq.com': (_n, body) => (Number(body.max_completion_tokens) >= 2048 ? orOk('Answer after reasoning.') : reasoningOnly()), 'openrouter.ai': () => orOk('Should not be needed.') });
+    network({ 'api.groq.com': (_n, body) => (Number(body.max_completion_tokens) >= 2000 ? orOk('Answer after reasoning.') : reasoningOnly()), 'openrouter.ai': () => orOk('Should not be needed.') });
     await customerSays();
-    expect(bodies.filter((b) => b.host === 'api.groq.com').map((b) => b.body.max_completion_tokens)).toEqual([1500, 2048]);
+    expect(bodies.filter((b) => b.host === 'api.groq.com').map((b) => b.body.max_completion_tokens)).toEqual([1000, 2000]);
     expect(counts['openrouter.ai']).toBeUndefined();
     expect(sent()).toEqual(['Answer after reasoning.']);
   });
@@ -185,9 +186,51 @@ describe('customer replies get a budget a reasoning model can answer within', ()
     groq();
     network({ 'api.groq.com': () => reasoningOnly(), 'openrouter.ai': () => orOk('OpenRouter answer.') });
     await customerSays();
-    expect(bodies.filter((b) => b.host === 'api.groq.com').map((b) => b.body.max_completion_tokens)).toEqual([1500, 2048]);
+    expect(bodies.filter((b) => b.host === 'api.groq.com').map((b) => b.body.max_completion_tokens)).toEqual([1000, 2000]);
     expect(sent()).toEqual(['OpenRouter answer.']);
     expect(sent().join(' ')).not.toMatch(/think|reasoning/i);
+  });
+
+  const tooLarge = (requested: number) => json(413, { error: { message: `Request too large for model \`openai/gpt-oss-20b\` in organization \`org_x\` service tier \`on_demand\` on tokens per minute (TPM): Limit 8000, Requested ${requested}, please reduce your message size and try again.`, type: 'tokens', code: 'rate_limit_exceeded' } });
+  const cooldownRows = (): number => (getDb().prepare('SELECT COUNT(*) AS n FROM ai_route_cooldowns').get() as { n: number }).n;
+
+  it('Groq says the REQUEST is over its per-minute token limit and the prompt alone does not fit: fail over at once, with no pause on Groq (a smaller request would be fine)', async () => {
+    groq();
+    getDb().prepare('DELETE FROM ai_route_cooldowns').run();
+    network({ 'api.groq.com': () => tooLarge(8900), 'openrouter.ai': () => orOk('OpenRouter answer.') });
+    await customerSays();
+    expect(bodies.filter((b) => b.host === 'api.groq.com')).toHaveLength(1); // not repeated: shrinking the reply cannot make a 7,900-token prompt fit
+    expect(sent()).toEqual(['OpenRouter answer.']);
+    expect(cooldownRows()).toBe(0); // the size is the problem, not the route
+  });
+
+  it('the prompt fits and only the reply budget tips it over: ONE retry with the budget that fits, and Groq answers (no failover, no pause)', async () => {
+    groq();
+    getDb().prepare('DELETE FROM ai_route_cooldowns').run();
+    network({ 'api.groq.com': (_n, body) => (Number(body.max_completion_tokens) > 700 ? tooLarge(7300 + Number(body.max_completion_tokens)) : orOk('Groq answer.')), 'openrouter.ai': () => orOk('Should not be needed.') });
+    await customerSays();
+    expect(bodies.filter((b) => b.host === 'api.groq.com').map((b) => b.body.max_completion_tokens)).toEqual([1000, 600]); // 8000 - 7300 - 100 margin
+    expect(counts['openrouter.ai']).toBeUndefined();
+    expect(sent()).toEqual(['Groq answer.']);
+    expect(cooldownRows()).toBe(0);
+  });
+
+  it('a per-minute limit that is already USED UP (a 429, not "request too large") is still a rate limit and pauses the route as before', async () => {
+    groq();
+    getDb().prepare('DELETE FROM ai_route_cooldowns').run();
+    network({ 'api.groq.com': () => json(429, { error: { message: 'Rate limit reached for model `openai/gpt-oss-20b` on tokens per minute (TPM): Limit 8000, Used 7900, Requested 1000. Please try again in 6.5s.' } }), 'openrouter.ai': () => orOk('OpenRouter answer.') });
+    await customerSays();
+    expect(sent()).toEqual(['OpenRouter answer.']);
+    expect(cooldownRows()).toBeGreaterThan(0);
+  });
+
+  it('parseTokenLimit reads the limit and the request size only when the provider says the request is too large', () => {
+    const body = JSON.stringify({ error: { message: 'Request too large for model x on tokens per minute (TPM): Limit 8000, Requested 9234, please reduce your message size.' } });
+    expect(parseTokenLimit(body, 413)).toEqual({ limit: 8000, requested: 9234 });
+    expect(parseTokenLimit(body, 400)).toEqual({ limit: 8000, requested: 9234 }); // the words "request too large" are enough
+    expect(parseTokenLimit(JSON.stringify({ error: { message: 'Rate limit reached on tokens per minute (TPM): Limit 8000, Used 7000, Requested 2000.' } }), 429)).toBeNull(); // cumulative use is a rate limit
+    expect(parseTokenLimit(undefined, 413)).toBeNull();
+    expect(parseTokenLimit('not json: Limit 1, Requested 2', 500)).toBeNull();
   });
 
   it('an EMPTY answer from the first provider fails over to the next, once', async () => {

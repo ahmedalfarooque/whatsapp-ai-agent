@@ -209,6 +209,8 @@ function cooldownCore(category: FailureCategory, error: AiResponseError | null, 
 export function classifyRouteFailure(error: unknown): FailureCategory {
   if (error instanceof AiCredentialError) return 'auth';
   if (!(error instanceof AiResponseError)) return 'provider_error';
+  // The REQUEST is bigger than the provider's per-minute token limit: that says nothing about the route (a smaller request is fine), so it is never a pause.
+  if (error.tokenLimit || error.httpStatus === 413) return 'context';
   const message = (error.providerMessage ?? '').toLowerCase();
   if (error.network) return message === 'timeout' ? 'timeout' : 'network';
   if (error.reason === 'payment_required') return 'credit';
@@ -447,6 +449,7 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
     // A customer reply gets the vendor's own budget (600 tokens; more for a reasoning model); explicit budgets (validation requests) are used as given.
     let tokens = request.maxTokens ?? chatBudget(vendorForUrl(candidate.baseUrl).id, candidate.baseUrl);
     let escalated = false;
+    let shrunk = false;
     try {
     for (let attempt = 0, limit = onlyRoute && !request.singleAttempt ? 2 : 1; attempt < limit; attempt += 1) {
       const t0 = Date.now();
@@ -482,6 +485,13 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
         const budgetSpent = category === 'empty' && /finish_reason=length|reasoning/.test(responseError?.providerMessage ?? '');
         // (A customer request whose ONLY route hit a momentary limit gets this one quick retry; tests and probes never do — singleAttempt — and a stated or daily limit is excluded above.)
         const transient = !quotaRests && !budgetSpent && (category === 'rate_limited' || category === 'provider_error' || category === 'empty' || category === 'network' || category === 'timeout');
+        // The provider counts the reply budget against its per-minute token limit: when prompt + budget is too large but the prompt alone fits, retry ONCE with the
+        // budget that fits (never below 256); otherwise fail over — a smaller budget cannot make a prompt that is already too large fit.
+        if (responseError?.tokenLimit && request.maxTokens === undefined && !shrunk && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) {
+          const { limit: tpm, requested } = responseError.tokenLimit;
+          const fits = tpm - (requested - tokens) - 100;
+          if (fits >= 256 && fits < tokens) { shrunk = true; tokens = fits; limit = Math.max(limit, attempt + 2); continue; }
+        }
         // A customer reply whose whole budget went on hidden reasoning is retried ONCE on this route with a larger, bounded budget (never above CHAT_BUDGET_CAP); if it is
         // still empty the route fails over like any other failure. Requests with an explicit budget (validation) are not escalated here: they have their own single retry.
         if (budgetSpent && request.maxTokens === undefined && !escalated && tokens < CHAT_BUDGET_CAP && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) {

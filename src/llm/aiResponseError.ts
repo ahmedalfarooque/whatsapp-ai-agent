@@ -29,6 +29,8 @@ export class AiResponseError extends Error {
   retryAfterMs: number | null = null;
   /** Where that time comes from: 'stated' = the provider's response says it (Retry-After, reset header, RetryInfo); 'documented' = the provider's published policy (e.g. Google's daily quota resets at midnight Pacific time) — the response carries no timestamp. */
   retryBasis: 'stated' | 'documented' | null = null;
+  /** Set when the provider says THIS request is larger than its per-minute token limit allows ("Limit 8000, Requested 9234"): the size is the problem, not the route. */
+  tokenLimit: { limit: number; requested: number } | null = null;
 
   constructor(
     public readonly reason: AiResponseReason,
