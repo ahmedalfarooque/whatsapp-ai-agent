@@ -126,6 +126,25 @@ export async function prepareCreateInput(body: unknown): Promise<PreparedCreate>
   return { ok: true, input, setup: { models: result.models, attempts, freeConfirmationRequired: input.freeConfirmed !== true } };
 }
 
+export interface KeyCheck { ok: boolean; category: string; message: string }
+
+/**
+ * Replacing a provider's key from the form is validated like a new key: ONE real minimal request with the provider's own first model (src/llm/autoSetup.ts). A key the
+ * provider REJECTS is refused (HTTP 422, the old key stays, nothing is saved); any other outcome (quota used up, provider unreachable, no visible answer) cannot prove the key
+ * wrong, so it is saved and the response says plainly that it could not be verified — the form never reports a verified key it did not verify.
+ */
+export async function checkReplacedKey(existing: AiProviderRow, input: AiProviderInput, body: unknown): Promise<{ refuse: Record<string, unknown> } | { check: KeyCheck | null }> {
+  const key = input.apiKey;
+  if (!isSimpleBody(body) || !key || !isUsableApiKey(key)) return { check: null };
+  const vendor = vendorById(existing.vendor);
+  const model = csv(input.models.join(','))[0];
+  if (!vendor || !model) return { check: null };
+  const result = await autoSelectModel(vendor, existing.base_url, key, [model]);
+  if (result.ok) return { check: { ok: true, category: 'ok', message: `${model} answered a real test request with the new key.` } };
+  if (result.category === 'credential') return { refuse: { error: result.message.replace('Nothing was saved.', 'The previous key was kept.'), code: 'credential', fields: ['config'], message: result.message, attempts: result.attempts.map((a) => ({ model: a.model, ok: a.ok, category: a.category, httpStatus: a.httpStatus })) } };
+  return { check: { ok: false, category: result.category, message: `The new key was saved but could not be verified: ${result.message.replace(' Nothing was saved.', '')}` } };
+}
+
 /** Records the setup test on the new provider, so its health starts from a real answer rather than from "untested". */
 export function recordSetupTest(row: AiProviderRow, setup: SetupSummary | null): void {
   const hit = setup?.attempts.find((a) => a.ok);
@@ -354,9 +373,18 @@ export function registerAiRoutingRoutes(router: Router): void {
       if (!existing) { res.status(404).json({ error: 'not_found' }); return; }
       if (existing.whatsapp_account_id === null && !mayManageShared(req)) { res.status(403).json({ error: 'Only a super administrator can change a provider shared by every business' }); return; }
       const input = isSimpleBody(req.body) ? updateInputFromSimple(existing, req.body) : inputFrom(req.body);
-      const row = updateProvider(id, currentAccountId(), input, req.adminUserId as number);
-      logger.info({ providerId: row.id, provider: row.name, adminUserId: req.adminUserId, keyChanged: input.apiKey !== undefined }, 'AI provider updated');
-      res.json({ provider: toView(row) });
+      const accountId = currentAccountId();
+      void (async () => {
+        try {
+          const verdict = await checkReplacedKey(existing, input, req.body);
+          if ('refuse' in verdict) { res.status(422).json(verdict.refuse); return; }
+          const row = updateProvider(id, accountId, input, req.adminUserId as number);
+          if (verdict.check?.ok) recordProviderTest(row.id, true, verdict.check.message);
+          logger.info({ providerId: row.id, provider: row.name, adminUserId: req.adminUserId, keyChanged: input.apiKey !== undefined, keyVerified: verdict.check?.ok }, 'AI provider updated');
+          res.json({ provider: toView(getProvider(row.id, accountId) ?? row), keyCheck: verdict.check ?? undefined });
+        } catch (error) { fail(res, error); }
+      })();
+      return;
     } catch (error) {
       fail(res, error);
     }

@@ -66,6 +66,8 @@ export interface ProviderHealth {
   /** The full sanitized explanation, for the expandable details. */
   detail: string;
   /** Set while the provider is paused: when it is tried again, and whether that moment is a reset the PROVIDER stated or only our own bounded backoff. */
+  /** The exact instant of the last answer (ISO), so the page can show it in the operator's own time zone. */
+  at?: string;
   cooldown?: { nextRetryAt: string; resetKnown: boolean; failures: number; category: string | null };
 }
 
@@ -102,10 +104,10 @@ export function providerHealth(row: AiProviderRow, now: number = Date.now(), fre
     const health = make(quota ? 'rate_limited' : 'cooling', quota ? 'Rate limited / quota exhausted' : 'Cooling down', cooling.resetKnown ? `${what} — resets ${utc(cooling.until)}.` : `${what} — retry ~${utc(cooling.until)}.`, `${failure ? `${failure.detail}. ` : ''}${what}: ${basis}. No request is sent to this provider before then; it is then tested with one request, and other requests wait for that result.`);
     return { ...health, cooldown: { nextRetryAt: new Date(cooling.until).toISOString(), resetKnown: cooling.resetKnown, failures: cooling.strikes, category: cooling.category } };
   }
-  if (last?.outcome === 'ok') return make('ok', 'Successful inference', `Answered at ${utc(dbTimeMs(last.created_at))} · ${last.model}`);
+  if (last?.outcome === 'ok') return { ...make('ok', 'Successful inference', `Answered at ${utc(dbTimeMs(last.created_at))} · ${last.model}`), at: new Date(dbTimeMs(last.created_at)).toISOString() };
   if (failure && last) {
     const cat = last.category;
-    const state: ProviderHealthState = cat === 'auth' ? 'invalid_credentials' : cat === 'rate_limited' || cat === 'credit' ? 'rate_limited' : cat === 'model_unavailable' || cat === 'policy' || cat === 'capability' ? 'config_error' : 'request_failed';
+    const state: ProviderHealthState = cat === 'auth' ? 'invalid_credentials' : cat === 'rate_limited' || cat === 'credit' ? 'rate_limited' : cat === 'model_unavailable' || cat === 'invalid_request' || cat === 'policy' || cat === 'capability' ? 'config_error' : 'request_failed';
     const label = { invalid_credentials: 'Invalid credentials', rate_limited: 'Rate limited / quota exhausted', config_error: 'Configuration error', request_failed: 'Request failed' }[state as 'invalid_credentials' | 'rate_limited' | 'config_error' | 'request_failed'];
     return make(state, label, failure.label + (last.http_status ? ` (HTTP ${last.http_status})` : '') + ' — retried automatically.', `${failure.detail}.`);
   }
@@ -144,6 +146,7 @@ export function describeRouteFailure(f: Pick<Latest, 'category' | 'http_status' 
     }
     case 'policy': return { label: 'AI request rejected by provider policy', detail: `${where}${http}${tail}` };
     case 'capability': return { label: 'AI model lacks a needed capability', detail: `${where}${http}${tail}` };
+    case 'invalid_request': return { label: 'AI request rejected as invalid', detail: `${where}${http}${tail}: the provider refused the request itself (not a quota, not a key problem); it is not retried in a loop` };
     case 'model_unavailable':
       return /web page/.test(reason)
         ? { label: 'AI provider address is not an API', detail: `${f.provider_name}${http}: ${reason}. Check the endpoint address` }

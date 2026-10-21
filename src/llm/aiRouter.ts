@@ -6,7 +6,8 @@ import { logger } from '../logger';
 import { getDb } from '../memory/db';
 import { AiCredentialError } from './aiCredentialError';
 import { AiResponseError, type AiResponseReason, type ModelAttemptRecord } from './aiResponseError';
-import { adapterFor } from './adapters';
+import { adapterFor, vendorForUrl } from './adapters';
+import { CHAT_BUDGET_CAP, chatBudget } from './validationBudget';
 import { getModelInfo } from './modelCatalog';
 import { csv, listProvidersForAccount, listSharedProviders, providerApiKey, type AiProviderRow, type ProviderKind } from './providerRepo';
 import { recordRouteAttempt } from './routeLog';
@@ -32,7 +33,7 @@ import type { ToolDefinition } from '../tools';
  *  context and account isolation are preserved. Every attempt is logged (ai_route_log) without the prompt, the key or customer text.
  */
 export type AiTask = 'chat' | 'vision' | 'audio';
-export type FailureCategory = 'context' | 'auth' | 'credit' | 'rate_limited' | 'policy' | 'capability' | 'model_unavailable' | 'timeout' | 'network' | 'provider_error' | 'empty' | 'malformed';
+export type FailureCategory = 'context' | 'auth' | 'credit' | 'rate_limited' | 'policy' | 'capability' | 'model_unavailable' | 'invalid_request' | 'timeout' | 'network' | 'provider_error' | 'empty' | 'malformed';
 export type SkipCategory = 'disabled' | 'no_key' | 'cooldown' | 'recovering' | 'free_only' | 'capability' | 'no_time' | 'limit';
 
 export interface RouteCandidate {
@@ -171,6 +172,8 @@ export function cooldownFor(category: FailureCategory, error: AiResponseError | 
       return { ms: quota ? backoffMs(5 * MINUTE, HOUR, strikes) : backoffMs(MINUTE, 15 * MINUTE, strikes), scope, resetKnown: false };
     }
     // A model the provider itself says is retired will not come back in five minutes: rest it an hour (an unknown or misspelt model backs off from five).
+    // HTTP 400/422 that is not a policy, capability or context problem: the REQUEST is wrong for this route. Not a quota, not a bad key, and never retried in a loop.
+    case 'invalid_request': return { ms: backoffMs(5 * MINUTE, HOUR, strikes), scope: 'route', resetKnown: false };
     case 'model_unavailable': return { ms: RETIRED.test(message) ? HOUR : backoffMs(5 * MINUTE, HOUR, strikes), scope: 'route', resetKnown: false };
     case 'timeout': return { ms: backoffMs(MINUTE, 15 * MINUTE, strikes), scope: 'route', resetKnown: false };
     case 'network': return { ms: backoffMs(MINUTE, 15 * MINUTE, strikes), scope: 'provider', resetKnown: false };
@@ -194,17 +197,18 @@ export function classifyRouteFailure(error: unknown): FailureCategory {
   if (error.reason === 'model_unavailable') {
     if (/context length|context window|maximum context|too many tokens|token limit|reduce the length|input is too long|exceeds the limit of/.test(message) && !/prompt tokens limit exceeded: \d+ > \d+/.test(message)) return 'context';
     if (/data policy|zdr|privacy|guardrail|moderation|not allowed|blocked by/.test(message)) return 'policy';
-    if (/image|audio|modalit|does not support|unsupported|tool|function/.test(message)) return 'capability';
+    // "unsupported" alone is NOT a missing capability ("Unsupported value for this parameter" is an invalid request): only an unsupported kind of input or feature is.
+    if (/image|audio|modalit|does not support|unsupported (input|content|media|image|audio|tool|function|feature)|tool|function/.test(message)) return 'capability';
     if (/credit|quota|billing|insufficient|exceeded your current/.test(message)) return 'credit';
     if (/rate limit|too many requests/.test(message)) return 'rate_limited';
-    return 'model_unavailable';
+    return error.httpStatus === 400 || error.httpStatus === 422 ? 'invalid_request' : 'model_unavailable';
   }
   return 'provider_error';
 }
 
 const reasonOf = (category: FailureCategory): AiResponseReason =>
   category === 'credit' ? 'payment_required' : category === 'rate_limited' ? 'rate_limited' : category === 'empty' ? 'empty_response' : category === 'malformed' ? 'malformed_response'
-    : category === 'policy' || category === 'capability' || category === 'model_unavailable' || category === 'context' ? 'model_unavailable' : 'provider_error';
+    : category === 'policy' || category === 'capability' || category === 'model_unavailable' || category === 'invalid_request' || category === 'context' ? 'model_unavailable' : 'provider_error';
 
 // ---- candidates ------------------------------------------------------------------------------------------------------------------------
 function modelsFor(row: AiProviderRow, task: AiTask): string[] {
@@ -323,6 +327,33 @@ function markFailure(task: AiTask, candidate: RouteCandidate, category: FailureC
 const trialsInFlight = new Map<string, Promise<void>>();
 const TRIAL_WAIT_MS = 8000;
 
+/**
+ * The trial is also a LEASE row in the database (key "trial:<route>"), so a second worker process — or a restarted one that overlaps the old one during a deploy — cannot
+ * run its own trial against the same recovering route: SQLite serialises the check-and-take, a lease that is not released (a crash) expires on its own, and a worker that
+ * finds the lease taken does not wait on another process: it fails over to the next route. Without a database the in-process lock alone applies.
+ */
+const TRIAL_LEASE_SLACK_MS = 15_000;
+function acquireTrialLease(keys: string[], now: number, ttlMs: number): boolean {
+  try {
+    const db = getDb();
+    const take = db.transaction((): boolean => {
+      for (const k of keys) {
+        const row = db.prepare('SELECT until_ms FROM ai_route_cooldowns WHERE key = ?').get(`trial:${k}`) as { until_ms: number } | undefined;
+        if (row && row.until_ms > now) return false;
+      }
+      for (const k of keys) {
+        db.prepare(`INSERT INTO ai_route_cooldowns (key, scope, until_ms, why, category, reset_known, strikes, set_at_ms) VALUES (?, 'route', ?, 'trial in flight', 'trial', 0, 0, ?)
+                    ON CONFLICT(key) DO UPDATE SET until_ms = excluded.until_ms, set_at_ms = excluded.set_at_ms, updated_at = datetime('now')`).run(`trial:${k}`, now + ttlMs, now);
+      }
+      return true;
+    });
+    return take.immediate();
+  } catch { return true; } // no database: the in-process lock still protects this process
+}
+function releaseTrialLease(keys: string[]): void {
+  try { const db = getDb(); for (const k of keys) db.prepare('DELETE FROM ai_route_cooldowns WHERE key = ?').run(`trial:${k}`); } catch { /* not persisted */ }
+}
+
 /** The state keys of a route that has failed recently (its pause may have ended): these are the ones a single trial request guards. */
 function recoveringKeys(task: AiTask, candidate: RouteCandidate, now: number): string[] {
   return [routeCoolKey(task, candidate), candidate.providerKey].filter((k) => { const s = loadState(k); return s !== undefined && now - s.setAt < STRIKE_MEMORY_MS; });
@@ -379,17 +410,24 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
       if (locks.some((k) => trialsInFlight.has(k))) { skipped.push({ candidate, category: 'recovering', reason: 'another request is still testing this route after its pause' }); continue; }
     }
     let releaseTrial: () => void = () => undefined;
+    if (locks.length > 0 && !acquireTrialLease(locks, Date.now(), candidate.timeoutMs + TRIAL_LEASE_SLACK_MS)) {
+      skipped.push({ candidate, category: 'recovering', reason: 'another worker is testing this route after its pause' });
+      continue;
+    }
     if (locks.length > 0) {
       const trial = new Promise<void>((resolve) => { releaseTrial = resolve; });
       for (const k of locks) trialsInFlight.set(k, trial);
     }
+    // A customer reply gets the vendor's own budget (600 tokens; more for a reasoning model); explicit budgets (validation requests) are used as given.
+    let tokens = request.maxTokens ?? chatBudget(vendorForUrl(candidate.baseUrl).id, candidate.baseUrl);
+    let escalated = false;
     try {
-    for (let attempt = 0; attempt < (onlyRoute ? 2 : 1); attempt += 1) {
+    for (let attempt = 0, limit = onlyRoute ? 2 : 1; attempt < limit; attempt += 1) {
       const t0 = Date.now();
       try {
         // The adapter owns this vendor's request/response contract and error mapping; the router sees only a normalised answer or error.
         const response = await adapterFor(candidate.adapter).complete({
-          baseUrl: candidate.baseUrl, apiKey: candidate.apiKey, model: candidate.model, messages, tools: request.tools, temperature: request.temperature, maxTokens: request.maxTokens,
+          baseUrl: candidate.baseUrl, apiKey: candidate.apiKey, model: candidate.model, messages, tools: request.tools, temperature: request.temperature, maxTokens: tokens,
           timeoutMs: Math.min(timeoutMs, Math.max(MIN_ATTEMPT_MS, budgetEnd - Date.now())),
         });
         const latencyMs = Date.now() - t0;
@@ -417,6 +455,11 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
         // An empty answer whose tokens went on hidden reasoning (finish_reason=length) is not a flaky provider: the same request would be empty again, so it is not repeated.
         const budgetSpent = category === 'empty' && /finish_reason=length|reasoning/.test(responseError?.providerMessage ?? '');
         const transient = !quotaRests && !budgetSpent && (category === 'rate_limited' || category === 'provider_error' || category === 'empty' || category === 'network' || category === 'timeout');
+        // A customer reply whose whole budget went on hidden reasoning is retried ONCE on this route with a larger, bounded budget (never above CHAT_BUDGET_CAP); if it is
+        // still empty the route fails over like any other failure. Requests with an explicit budget (validation) are not escalated here: they have their own single retry.
+        if (budgetSpent && request.maxTokens === undefined && !escalated && tokens < CHAT_BUDGET_CAP && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) {
+          escalated = true; tokens = Math.min(tokens * 2, CHAT_BUDGET_CAP); limit = Math.max(limit, attempt + 2); continue;
+        }
         if (onlyRoute && attempt === 0 && transient && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) { await new Promise((r) => setTimeout(r, 300)); continue; }
         markFailure(request.task, candidate, category, responseError);
         break;
@@ -424,6 +467,7 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
     }
     } finally {
       for (const k of locks) trialsInFlight.delete(k);
+      if (locks.length > 0) releaseTrialLease(locks);
       releaseTrial();
     }
     if (!plan.failover) break;
@@ -475,7 +519,7 @@ export function simulateRestartForTests(): void {
 export function activeCooldowns(now = Date.now()): Array<{ key: string; until: number; why: string; resetKnown: boolean; category: string | null; strikes: number }> {
   const out = new Map<string, { key: string; until: number; why: string; resetKnown: boolean; category: string | null; strikes: number }>();
   try {
-    const rows = getDb().prepare('SELECT key, until_ms, why, category, reset_known, strikes FROM ai_route_cooldowns WHERE until_ms > ?').all(now) as Array<{ key: string; until_ms: number; why: string; category: string | null; reset_known: number; strikes: number }>;
+    const rows = getDb().prepare('SELECT key, until_ms, why, category, reset_known, strikes FROM ai_route_cooldowns WHERE until_ms > ? AND key NOT LIKE \'trial:%\'').all(now) as Array<{ key: string; until_ms: number; why: string; category: string | null; reset_known: number; strikes: number }>;
     for (const r of rows) out.set(r.key, { key: r.key, until: r.until_ms, why: r.why, resetKnown: r.reset_known === 1, category: r.category, strikes: r.strikes });
   } catch { /* not persisted */ }
   for (const [key, s] of states) if (s.until > now) out.set(key, { key, until: s.until, why: s.why, resetKnown: s.resetKnown, category: s.category, strikes: s.strikes });

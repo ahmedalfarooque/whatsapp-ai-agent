@@ -7,6 +7,15 @@ import { vendorById, vendorForUrl } from './adapters';
  */
 export const VALIDATION_DEFAULT_TOKENS = 8;
 export const VALIDATION_RETRY_CAP = 1024;
+export const CHAT_DEFAULT_TOKENS = 600;
+/** The most a customer reply may ever be given, even after the one bounded escalation. */
+export const CHAT_BUDGET_CAP = 2048;
+
+/** The completion budget of a normal customer reply on this vendor (a reasoning model such as Groq's gpt-oss gets room for its reasoning plus the answer). */
+export function chatBudget(vendorId: string | null | undefined, baseUrl = ''): number {
+  const vendor = vendorById(vendorId) ?? vendorForUrl(baseUrl);
+  return Math.min(vendor.chatTokens ?? CHAT_DEFAULT_TOKENS, CHAT_BUDGET_CAP);
+}
 
 export function validationBudget(vendorId: string | null | undefined, baseUrl = ''): { first: number; retry: number } {
   const vendor = vendorById(vendorId) ?? vendorForUrl(baseUrl);

@@ -35,6 +35,8 @@ export interface Vendor {
    * models reason before answering needs more, or the whole budget goes on hidden reasoning and the answer is empty (Groq's openai/gpt-oss-20b: empty at 8, answers at 256).
    */
   validationTokens?: number;
+  /** Completion-token budget of a normal customer reply (default 600). A reasoning model needs room for its hidden reasoning AND the answer. */
+  chatTokens?: number;
   free: FreeEligibility;
   hint: string;
 }
@@ -43,7 +45,7 @@ export const VENDORS: Vendor[] = [
   { id: 'openrouter', name: 'OpenRouter', adapter: 'openrouter', kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', hosts: ['openrouter.ai'], docs: 'https://openrouter.ai/docs', keyPrefix: /^sk-or-/, verifiedDefault: 'openrouter/free', probeModels: ['openrouter/free'],
     free: { mode: 'catalog', note: 'OpenRouter\'s public model list carries per-token prices; a model is free only when both are 0. Free models also need the account privacy setting to allow them.' },
     hint: 'Free models end in :free (or use openrouter/free). The account privacy setting must allow free (non-ZDR) endpoints.' },
-  { id: 'groq', name: 'Groq', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', hosts: ['api.groq.com'], docs: 'https://console.groq.com/docs', keyPrefix: /^gsk_/, verifiedDefault: 'openai/gpt-oss-20b', verifiedOn: '2026-10-18', probeModels: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'], validationTokens: 256,
+  { id: 'groq', name: 'Groq', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', hosts: ['api.groq.com'], docs: 'https://console.groq.com/docs', keyPrefix: /^gsk_/, verifiedDefault: 'openai/gpt-oss-20b', verifiedOn: '2026-10-18', probeModels: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'], validationTokens: 256, chatTokens: 1500,
     free: { mode: 'admin_confirmation', note: 'Groq has a free plan with rate limits, but its API does not say which plan a key is on: confirm it yourself.' },
     hint: 'Groq (not xAI Grok). API address https://api.groq.com/openai/v1; get the key at console.groq.com/keys (that page is not the API address).' },
   { id: 'google', name: 'Google AI Studio (Gemini)', adapter: 'gemini', kind: 'openai_compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', hosts: ['generativelanguage.googleapis.com'], docs: 'https://ai.google.dev/api', keyPrefix: /^AIza/, verifiedDefault: '', probeModels: ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.8-flash'],

@@ -7,7 +7,8 @@ import { createProvider, deleteProvider, getSharedProvider, listSharedProviders,
 import { providerActivity } from '../llm/routeLog';
 import { providerHealth } from './aiPoolState';
 import { presetsPayload } from '../llm/providerPresets';
-import { defaultPoolSummary, fail, idParam, inputFrom, isSimpleBody, prepareCreateInput, recordSetupTest, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
+import { checkReplacedKey, defaultPoolSummary, fail, idParam, inputFrom, isSimpleBody, prepareCreateInput, recordSetupTest, runProviderTest, updateInputFromSimple } from './aiRoutingRoutes';
+import { recordProviderTest } from '../llm/providerRepo';
 import { buildCandidates } from '../llm/aiRouter';
 import { adoptBuiltinOpenRouter } from '../llm/adoptOpenRouter';
 import { describeCredential, getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
@@ -134,9 +135,16 @@ export function registerSuperAdminAiRoutes(router: Router): void {
       const existing = getSharedProvider(id);
       if (!existing) { res.status(404).json({ error: 'not_found' }); return; }
       const input = isSimpleBody(req.body) ? updateInputFromSimple(existing, req.body) : inputFrom(req.body);
-      const row = updateProvider(id, currentAccountId(), input, req.adminUserId as number);
-      logger.info({ providerId: row.id, provider: row.name, adminUserId: req.adminUserId, keyChanged: input.apiKey !== undefined }, 'shared AI provider updated');
-      res.json({ provider: toView(row), pool: defaultPoolSummary() });
+      void (async () => {
+        try {
+          const verdict = await checkReplacedKey(existing, input, req.body);
+          if ('refuse' in verdict) { res.status(422).json(verdict.refuse); return; }
+          const row = updateProvider(id, currentAccountId(), input, req.adminUserId as number);
+          if (verdict.check?.ok) recordProviderTest(row.id, true, verdict.check.message);
+          logger.info({ providerId: row.id, provider: row.name, adminUserId: req.adminUserId, keyChanged: input.apiKey !== undefined, keyVerified: verdict.check?.ok }, 'shared AI provider updated');
+          res.json({ provider: toView(getSharedProvider(row.id) ?? row), pool: defaultPoolSummary(), keyCheck: verdict.check ?? undefined });
+        } catch (error) { fail(res, error); }
+      })();
     } catch (error) {
       fail(res, error);
     }

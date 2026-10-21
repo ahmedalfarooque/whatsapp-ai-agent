@@ -1,6 +1,7 @@
 import { logger } from '../logger';
 import { markInterruptedAtBoot } from './pendingReplyRepo';
 import { runReplaySweep, type ReplayRunner } from './replayWorker';
+import { runDeliverySweep } from './deliverySweep';
 import { runEscalationSweep } from '../escalation/escalationService';
 
 /**
@@ -26,7 +27,8 @@ export function startRecoveryLoops(runner: ReplayRunner): void {
     const tick = (): void => {
       if (replayRunning) return;
       replayRunning = true;
-      void runReplaySweep(runner).catch((error) => logger.warn({ error: String((error as Error)?.message ?? error) }, '[REPLAY] sweep failed')).finally(() => { replayRunning = false; });
+      // Answers that were written but not delivered go first (the same stored text, no new AI call); then the questions still waiting for an AI answer.
+      void runDeliverySweep(runner).catch((error) => logger.warn({ error: String((error as Error)?.message ?? error) }, '[DELIVERY] sweep failed')).then(() => runReplaySweep(runner)).catch((error) => logger.warn({ error: String((error as Error)?.message ?? error) }, '[REPLAY] sweep failed')).finally(() => { replayRunning = false; });
     };
     replayTimer = setInterval(tick, REPLAY_SWEEP_MS);
     replayTimer.unref();

@@ -1253,6 +1253,13 @@ const AI_STATE = {
 };
 const aiStateBadge = (state) => { const s = AI_STATE[state] || AI_STATE.untested; return badge(s[0], s[1]); };
 // Per-provider health from the server (facts only: eligibility, cooldown, latest request outcome, a passed test): its badge colour.
+// The server writes times as "HH:MM UTC"; the operator sees them in their own time zone (from the exact instant the server also sends).
+function localizeHealthTimes(text, health) {
+  const iso = health && ((health.cooldown && health.cooldown.nextRetryAt) || health.at);
+  const when = iso ? new Date(iso) : null;
+  if (!text || !when || Number.isNaN(when.getTime())) return text;
+  return text.replace(/\d\d:\d\d UTC/g, when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+}
 const AI_HEALTH_TONE = {
   ok: 'green', available: 'green', untested: 'muted', off: 'muted', ineligible: 'amber', cooling: 'amber', rate_limited: 'amber',
   no_key: 'red', config_error: 'red', invalid_credentials: 'red', request_failed: 'red',
@@ -1294,8 +1301,8 @@ function aiEntryRowHtml(entry, index, count, opts) {
   const isDefault = entry.type === 'default';
   // The status region: a badge and one short summary line; the full diagnostic is in an expandable "Details" (and the tooltip), not a squeezed column.
   const health = entry.health || null;
-  const summary = health ? health.summary : shortText(entry.detail, 100);
-  const full = health ? health.detail : entry.detail || '';
+  const summary = health ? localizeHealthTimes(health.summary, health) : shortText(entry.detail, 100);
+  const full = health ? localizeHealthTimes(health.detail, health) : entry.detail || '';
   const detail = summary ? `<span class="muted ai-summary" title="${esc(full || summary)}">${esc(summary)}</span>` : '';
   const more = full && full !== summary ? `<details class="ai-more-detail"><summary class="muted">Details</summary><p class="muted">${esc(full)}</p></details>` : '';
   const config = isDefault ? 'Shared providers managed by the Super Admin' : entry.config || '';
@@ -1424,10 +1431,12 @@ function bindAiForm(host, { endpoint, itemUrl, extraPayload, onDone }) {
     if (submit) submit.disabled = true;
     try {
       let saved = null;
-      if (id) await api(itemUrl(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (id) saved = await api(itemUrl(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       else saved = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, ...(extraPayload || {}) }) });
       const setup = saved && saved.setup;
       const hit = setup && setup.attempts.find((a) => a.ok);
+      const keyCheck = saved && saved.keyCheck;
+      if (keyCheck && keyCheck.ok === false) toast(keyCheck.message, 'error'); else
       toast(hit ? `Saved. ${hit.model} answered a real test request in ${(hit.latencyMs / 1000).toFixed(1)} s.${setup.freeConfirmationRequired ? ' Confirm the free tier before it is used.' : ''}` : 'Saved', 'success');
       onDone(true);
     } catch (error) {
