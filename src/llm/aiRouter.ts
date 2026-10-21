@@ -414,7 +414,9 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
         // A quota the provider says will not be back for a while (a daily allowance, or a reset/retry time of a second or more) is NEVER retried
         // within the same message: a second call would only hit the exhausted quota again.
         const quotaRests = category === 'rate_limited' && ((responseError?.retryAfterMs ?? 0) >= 1000 || /per[- ]day|daily/i.test(responseError?.providerMessage ?? ''));
-        const transient = !quotaRests && (category === 'rate_limited' || category === 'provider_error' || category === 'empty' || category === 'network' || category === 'timeout');
+        // An empty answer whose tokens went on hidden reasoning (finish_reason=length) is not a flaky provider: the same request would be empty again, so it is not repeated.
+        const budgetSpent = category === 'empty' && /finish_reason=length|reasoning/.test(responseError?.providerMessage ?? '');
+        const transient = !quotaRests && !budgetSpent && (category === 'rate_limited' || category === 'provider_error' || category === 'empty' || category === 'network' || category === 'timeout');
         if (onlyRoute && attempt === 0 && transient && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) { await new Promise((r) => setTimeout(r, 300)); continue; }
         markFailure(request.task, candidate, category, responseError);
         break;

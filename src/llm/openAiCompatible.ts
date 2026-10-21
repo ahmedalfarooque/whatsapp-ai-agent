@@ -19,6 +19,8 @@ export interface EndpointRequest {
   tools?: ToolDefinition['schema'][];
   temperature?: number;
   maxTokens?: number;
+  /** The name of the completion-limit field: Groq documents `max_completion_tokens` (`max_tokens` is deprecated there); everyone else uses `max_tokens`. */
+  tokenParam?: 'max_tokens' | 'max_completion_tokens';
   timeoutMs: number;
   /** Extra headers (OpenRouter's app attribution). */
   headers?: Record<string, string>;
@@ -158,7 +160,7 @@ export async function completeOnce(request: EndpointRequest): Promise<ChatComple
           messages: request.messages,
           ...(request.tools && request.tools.length ? { tools: request.tools } : {}),
           temperature: request.temperature ?? 0.4,
-          max_tokens: request.maxTokens ?? 600,
+          [request.tokenParam ?? 'max_tokens']: request.maxTokens ?? 600,
         }),
       },
       Math.max(1000, request.timeoutMs),

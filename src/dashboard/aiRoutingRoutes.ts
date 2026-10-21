@@ -15,6 +15,7 @@ import { PROVIDER_PRESETS, presetsPayload, resolveSimpleProvider, SimpleProvider
 import { getAccountRouting, RoutingOrderError, saveAccountRouting } from '../llm/routingOrder';
 import { endpointMatchesVendor, vendorById } from '../llm/adapters';
 import { autoSelectModel, type ProbeAttempt } from '../llm/autoSetup';
+import { validationBudget } from '../llm/validationBudget';
 import { listRouteLog, routeStats } from '../llm/routeLog';
 import { pendingReplyCounts } from '../replay/pendingReplyRepo';
 import { listEscalations } from '../escalation/escalationService';
@@ -156,8 +157,17 @@ export async function runProviderTest(row: AiProviderRow): Promise<{ ok: boolean
   if (!apiKey) { recordProviderTest(row.id, false, 'no usable API key saved'); return { ok: false, detail: 'No usable API key is saved for this provider.', latencyMs: 0 }; }
   const candidate: RouteCandidate = { key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, adapter: row.adapter, baseUrl: row.base_url, apiKey, model, free: row.free_tier !== 0, image: null, audio: null, tools: row.supports_tools !== 0, timeoutMs: Math.min(row.timeout_ms, 30_000), builtin: false };
   const started = Date.now();
+  const budget = validationBudget(row.vendor, row.base_url);
+  const run = (maxTokens: number): Promise<unknown> => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens, temperature: 0, deadline: Date.now() + 30_000, candidatesOverride: [candidate] });
   try {
-    await routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: 8, temperature: 0, deadline: Date.now() + 30_000, candidatesOverride: [candidate] });
+    try {
+      await run(budget.first);
+    } catch (first) {
+      // An EMPTY answer is a failed validation (a reasoning model spent the whole budget thinking); it is retried ONCE with a bounded larger budget, only for that case.
+      const empty = first instanceof AiResponseError && first.attempts[0]?.reason === 'empty_response';
+      if (!empty || budget.retry <= budget.first) throw first;
+      await run(budget.retry);
+    }
     const detail = `Model ${model} answered in ${((Date.now() - started) / 1000).toFixed(1)} s.`;
     recordProviderTest(row.id, true, detail);
     return { ok: true, detail, latencyMs: Date.now() - started };

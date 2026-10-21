@@ -3,6 +3,8 @@ import { logger } from '../logger';
 import { getDb } from '../memory/db';
 import { runWithAccount } from '../accounts/accountContext';
 import { buildCandidates, routeCompletion, type RouteCandidate } from './aiRouter';
+import { vendorForUrl } from './adapters';
+import { validationBudget } from './validationBudget';
 
 /**
  * Bounded recovery probes. When a route failed and its cooldown has ended, the next real customer message would be the one to find out whether
@@ -43,7 +45,7 @@ export async function probeRecoveredRoutes(now: number = Date.now(), db = getDb(
       lastProbe.set(candidate.key, now);
       probed += 1;
       try {
-        await runWithAccount(account.id, () => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: 8, temperature: 0, deadline: now + 30_000, candidatesOverride: [candidate] }));
+        await runWithAccount(account.id, () => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: validationBudget(vendorForUrl(candidate.baseUrl).id, candidate.baseUrl).first, temperature: 0, deadline: now + 30_000, candidatesOverride: [candidate] }));
         logger.info({ provider: candidate.providerName, model: candidate.model }, '[AI-PROBE] route answered again');
       } catch {
         logger.info({ provider: candidate.providerName, model: candidate.model }, '[AI-PROBE] route still unavailable (cooldown set again)');

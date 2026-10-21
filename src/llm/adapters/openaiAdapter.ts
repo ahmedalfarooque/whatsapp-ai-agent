@@ -1,6 +1,8 @@
 import { completeOnce, openRouterHeaders } from '../openAiCompatible';
 import type { AdapterId, ProviderAdapter } from './types';
 
+const isGroq = (baseUrl: string): boolean => { try { return /(^|\.)groq\.com$/i.test(new URL(baseUrl).hostname); } catch { return false; } };
+
 /**
  * The OpenAI chat-completions protocol (POST {base}/chat/completions, `Authorization: Bearer`). It is the real, documented contract of OpenRouter,
  * Groq, Mistral, xAI, Cerebras and many custom endpoints; it is one adapter among several, not the rule. OpenRouter differs only by its
@@ -10,7 +12,7 @@ function createOpenAiProtocolAdapter(id: AdapterId, openRouter: boolean): Provid
   return {
     id,
     authentication: 'Authorization: Bearer <key>',
-    complete: (request) => completeOnce({ ...request, headers: openRouter ? openRouterHeaders() : undefined }),
+    complete: (request) => completeOnce({ ...request, headers: openRouter ? openRouterHeaders() : undefined, tokenParam: isGroq(request.baseUrl) ? 'max_completion_tokens' : undefined }),
   };
 }
 

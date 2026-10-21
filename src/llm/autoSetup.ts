@@ -2,6 +2,7 @@ import { adapterFor, type Vendor } from './adapters';
 import { AiCredentialError } from './aiCredentialError';
 import { AiResponseError } from './aiResponseError';
 import { sanitizeProviderReason } from '../dashboard/aiPoolState';
+import { validationBudget } from './validationBudget';
 
 /**
  * Automatic model selection when an API key is saved. No model list is fetched or trusted: a model counts only when ONE real, minimal inference
@@ -34,13 +35,20 @@ function classify(error: unknown): Classified {
 
 async function probe(vendor: Vendor, baseUrl: string, apiKey: string, model: string, timeoutMs: number): Promise<ProbeAttempt> {
   const started = Date.now();
-  try {
-    await adapterFor(vendor.adapter).complete({ baseUrl, apiKey, model, messages: [{ role: 'user', content: PROBE_PROMPT }], maxTokens: 8, temperature: 0, timeoutMs });
-    return { model, ok: true, category: 'ok', httpStatus: 200, detail: 'answered', latencyMs: Date.now() - started };
-  } catch (error) {
-    const c = classify(error);
-    return { model, ok: false, category: c.category, httpStatus: c.httpStatus, detail: c.detail, latencyMs: Date.now() - started };
+  const budget = validationBudget(vendor.id, baseUrl);
+  let last: ProbeAttempt | null = null;
+  // The vendor's own budget first; an EMPTY answer (a reasoning model that spent its budget thinking) is a failed validation, retried ONCE with a bounded larger budget.
+  for (const maxTokens of [budget.first, budget.retry]) {
+    try {
+      await adapterFor(vendor.adapter).complete({ baseUrl, apiKey, model, messages: [{ role: 'user', content: PROBE_PROMPT }], maxTokens, temperature: 0, timeoutMs });
+      return { model, ok: true, category: 'ok', httpStatus: 200, detail: maxTokens === budget.first ? 'answered' : `answered with a budget of ${maxTokens} tokens`, latencyMs: Date.now() - started };
+    } catch (error) {
+      const c = classify(error);
+      last = { model, ok: false, category: c.category, httpStatus: c.httpStatus, detail: c.detail, latencyMs: Date.now() - started };
+      if (c.category !== 'empty_response' || budget.retry <= maxTokens) break;
+    }
   }
+  return last!;
 }
 
 const sentence = (a: ProbeAttempt): string => `${a.model}: ${a.detail}`;
