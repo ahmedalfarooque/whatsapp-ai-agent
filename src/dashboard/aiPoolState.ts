@@ -65,6 +65,8 @@ export interface ProviderHealth {
   summary: string;
   /** The full sanitized explanation, for the expandable details. */
   detail: string;
+  /** Set while the provider is paused: when it is tried again, and whether that moment is a reset the PROVIDER stated or only our own bounded backoff. */
+  cooldown?: { nextRetryAt: string; resetKnown: boolean; failures: number; category: string | null };
 }
 
 const utc = (ms: number): string => `${new Date(ms).toISOString().slice(11, 16)} UTC`;
@@ -94,7 +96,11 @@ export function providerHealth(row: AiProviderRow, now: number = Date.now(), fre
   const cooling = coolingUntil(`provider:${row.id}`, now) ?? models.map((m) => coolingUntil(`chat:${row.id}:${m}`, now)).find(Boolean) ?? null;
   if (cooling) {
     const quota = /rate limited|credit/.test(cooling.why);
-    return make(quota ? 'rate_limited' : 'cooling', quota ? 'Rate limited / quota exhausted' : 'Cooling down', `${quota ? 'Rate limit or free quota reached' : `Resting (${cooling.why})`} — eligible again at ${utc(cooling.until)}.`, `${failure ? `${failure.detail}. ` : ''}No request is sent to this provider until ${utc(cooling.until)}.`);
+    // Honest about where the retry time comes from: a reset the provider stated is shown as its reset; our own backoff is shown as an estimate, never as a reset time.
+    const basis = cooling.resetKnown ? `the provider says it resets at ${utc(cooling.until)}` : `no reset time from the provider — next retry about ${utc(cooling.until)} (bounded backoff, failure ${cooling.strikes})`;
+    const what = quota ? 'Rate limit or free quota reached' : `Resting (${cooling.why})`;
+    const health = make(quota ? 'rate_limited' : 'cooling', quota ? 'Rate limited / quota exhausted' : 'Cooling down', cooling.resetKnown ? `${what} — resets ${utc(cooling.until)}.` : `${what} — retry ~${utc(cooling.until)}.`, `${failure ? `${failure.detail}. ` : ''}${what}: ${basis}. No request is sent to this provider before then; it is then tested with one request, and other requests wait for that result.`);
+    return { ...health, cooldown: { nextRetryAt: new Date(cooling.until).toISOString(), resetKnown: cooling.resetKnown, failures: cooling.strikes, category: cooling.category } };
   }
   if (last?.outcome === 'ok') return make('ok', 'Successful inference', `Answered at ${utc(dbTimeMs(last.created_at))} · ${last.model}`);
   if (failure && last) {

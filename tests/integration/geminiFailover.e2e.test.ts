@@ -141,7 +141,9 @@ describe('strict free-only routing for Gemini', () => {
  * rules, the cooldowns and the recovery sweep — not Google's or OpenRouter's real availability, and not a real WhatsApp delivery.
  */
 describe('OpenRouter ⇄ Gemini with cooldowns, quota resets and recovery (scripted providers)', () => {
-  const T0 = Date.UTC(2026, 9, 20, 10, 0, 0); // 03:00 Pacific: Gemini's daily quota resets 21 h later
+  // 03:00 Pacific two days from now (Gemini's daily quota resets 21 h later); two days ahead so rows the real clock stamped are always older than the scenario.
+  const T0 = ((d) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 2, 10, 0, 0))(new Date());
+  beforeEach(() => { getDb().prepare('DELETE FROM pending_replies').run(); });
   const MIN = 60_000;
   const geminiDaily = () => json(429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'You exceeded your current quota', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }, { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '20s' }] } });
   const invalidKey = () => json(400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'API key not valid. Please pass a valid API key.' } });

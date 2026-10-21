@@ -33,7 +33,7 @@ import type { ToolDefinition } from '../tools';
  */
 export type AiTask = 'chat' | 'vision' | 'audio';
 export type FailureCategory = 'context' | 'auth' | 'credit' | 'rate_limited' | 'policy' | 'capability' | 'model_unavailable' | 'timeout' | 'network' | 'provider_error' | 'empty' | 'malformed';
-export type SkipCategory = 'disabled' | 'no_key' | 'cooldown' | 'free_only' | 'capability' | 'no_time' | 'limit';
+export type SkipCategory = 'disabled' | 'no_key' | 'cooldown' | 'recovering' | 'free_only' | 'capability' | 'no_time' | 'limit';
 
 export interface RouteCandidate {
   key: string;
@@ -86,67 +86,98 @@ const MIN_ATTEMPT_MS = 1500;
 let unknownPriceAllowedInTests = false;
 export function allowUnknownPriceForTests(flag: boolean): void { unknownPriceAllowedInTests = flag; }
 
-// ---- cooldowns (in memory; a restart clears them, which is fine: the next failure sets them again) ---------------------------------
-const routeCooling = new Map<string, { until: number; why: string }>();
-const providerCooling = new Map<string, { until: number; why: string }>();
+// ---- cooldowns and recovery ----------------------------------------------------------------------------------------------------------
+/**
+ * One state per route key (task + provider + model) or per provider key. It lives in memory AND in ai_route_cooldowns, so a restart does not forget a pause (a
+ * freshly started process would otherwise hammer a provider that just reported "quota exhausted"). `resetKnown` means the end of the pause is a reset time the
+ * PROVIDER stated (Retry-After, X-RateLimit-Reset, Google's RetryInfo or daily reset); otherwise it is our own bounded backoff (doubling per consecutive failure up
+ * to a cap) and is shown as an estimate, never as a reset time. The state stays after the pause ends until a success clears it (or six quiet hours pass): the next
+ * failure continues the backoff, and a route that failed before is tested by ONE request at a time when it comes back (the trial lock in routeCompletion).
+ */
+export interface RouteState { scope: 'route' | 'provider'; until: number; why: string; category: string | null; resetKnown: boolean; strikes: number; setAt: number }
+const states = new Map<string, RouteState>();
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const STRIKE_MEMORY_MS = 6 * HOUR;
+const STATE_KEEP_MS = 24 * HOUR;
 
-export function coolingUntil(key: string, now = Date.now()): { until: number; why: string } | null {
-  let entry = routeCooling.get(key) ?? providerCooling.get(key);
-  if (!entry) {
-    // A cooldown set before a restart: read it back once and keep it in memory (a missing table or database means "none").
+function loadState(key: string): RouteState | undefined {
+  let s = states.get(key);
+  if (!s) {
+    // A pause set before a restart: read it back once and keep it in memory (a missing table or database means "none").
     try {
-      const row = getDb().prepare('SELECT scope, until_ms, why FROM ai_route_cooldowns WHERE key = ?').get(key) as { scope: 'route' | 'provider'; until_ms: number; why: string } | undefined;
-      if (row) { entry = { until: row.until_ms, why: row.why }; (row.scope === 'provider' ? providerCooling : routeCooling).set(key, entry); }
+      const row = getDb().prepare('SELECT scope, until_ms, why, category, reset_known, strikes, set_at_ms FROM ai_route_cooldowns WHERE key = ?').get(key) as { scope: 'route' | 'provider'; until_ms: number; why: string; category: string | null; reset_known: number; strikes: number; set_at_ms: number | null } | undefined;
+      if (row) { s = { scope: row.scope, until: row.until_ms, why: row.why, category: row.category, resetKnown: row.reset_known === 1, strikes: row.strikes, setAt: row.set_at_ms ?? row.until_ms }; states.set(key, s); }
     } catch { /* not persisted */ }
   }
-  if (!entry) return null;
-  if (entry.until <= now) {
-    routeCooling.delete(key); providerCooling.delete(key);
-    try { getDb().prepare('DELETE FROM ai_route_cooldowns WHERE key = ?').run(key); } catch { /* not persisted */ }
-    return null;
-  }
-  return entry;
+  return s;
 }
 
-/** A route that just ANSWERED is available, whatever an earlier failure said (a test, a probe or a replay can reach it while it rests): its cooldowns end. */
+/** The pause that is still running for this key (null once it has ended: the state itself stays for the backoff and the trial lock). */
+export function coolingUntil(key: string, now = Date.now()): RouteState | null {
+  const s = loadState(key);
+  return s && s.until > now ? s : null;
+}
+
+/** A route that just ANSWERED is available, whatever an earlier failure said (a test, a probe or a replay can reach it while it rests): its state ends. */
 function clearCooldowns(keys: string[]): void {
   for (const key of keys) {
-    routeCooling.delete(key);
-    providerCooling.delete(key);
+    states.delete(key);
     try { getDb().prepare('DELETE FROM ai_route_cooldowns WHERE key = ?').run(key); } catch { /* not persisted */ }
   }
 }
 
-function persistCooldown(key: string, scope: 'route' | 'provider', entry: { until: number; why: string }): void {
+function persistState(key: string, s: RouteState): void {
   try {
-    getDb().prepare(`INSERT INTO ai_route_cooldowns (key, scope, until_ms, why) VALUES (?, ?, ?, ?)
-                     ON CONFLICT(key) DO UPDATE SET scope = excluded.scope, until_ms = excluded.until_ms, why = excluded.why, updated_at = datetime('now')`).run(key, scope, entry.until, entry.why);
-  } catch { /* the in-memory cooldown still protects this process */ }
+    const db = getDb();
+    db.prepare(`INSERT INTO ai_route_cooldowns (key, scope, until_ms, why, category, reset_known, strikes, set_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET scope = excluded.scope, until_ms = excluded.until_ms, why = excluded.why, category = excluded.category, reset_known = excluded.reset_known, strikes = excluded.strikes, set_at_ms = excluded.set_at_ms, updated_at = datetime('now')`)
+      .run(key, s.scope, s.until, s.why, s.category, s.resetKnown ? 1 : 0, s.strikes, s.setAt);
+    db.prepare('DELETE FROM ai_route_cooldowns WHERE until_ms < ?').run(s.setAt - STATE_KEEP_MS); // old, long-ended states are not kept for ever
+  } catch { /* the in-memory state still protects this process */ }
 }
 
-function cooldownFor(category: FailureCategory, error: AiResponseError | null): { ms: number; scope: 'route' | 'provider' } {
+/** Bounded exponential backoff: base × 2^(failures-1), never more than the cap. Used only when the provider did not say when the limit lifts. */
+export const backoffMs = (baseMs: number, capMs: number, strikes: number): number => Math.min(baseMs * 2 ** Math.max(0, strikes - 1), capMs);
+const RETIRED = /no longer available|deprecated|retired|discontinued/i;
+
+/**
+ * How long a failed route rests. A reset time the provider STATED is honoured as given (never invented, never shortened); when it did not say, the pause is a bounded
+ * backoff that doubles with each consecutive failure up to a cap, so an exhausted provider is retried later and later, not every minute. `strikes` = consecutive failures.
+ */
+export function cooldownFor(category: FailureCategory, error: AiResponseError | null, strikes = 1): { ms: number; scope: 'route' | 'provider'; resetKnown: boolean } {
+  const message = error?.providerMessage ?? '';
   switch (category) {
     // A prompt that is too long for THIS model says nothing about the route: a shorter prompt may fit.
-    case 'context': return { ms: 0, scope: 'route' };
-    case 'auth': return { ms: 10 * 60_000, scope: 'provider' };
-    case 'credit': return { ms: 30 * 60_000, scope: 'provider' };
-    case 'policy': return { ms: 30 * 60_000, scope: 'route' };
-    case 'capability': return { ms: 60 * 60_000, scope: 'route' };
+    case 'context': return { ms: 0, scope: 'route', resetKnown: false };
+    case 'auth': return { ms: backoffMs(10 * MINUTE, HOUR, strikes), scope: 'provider', resetKnown: false };
+    case 'credit': return { ms: backoffMs(30 * MINUTE, 6 * HOUR, strikes), scope: 'provider', resetKnown: false };
+    case 'policy': return { ms: backoffMs(30 * MINUTE, 2 * HOUR, strikes), scope: 'route', resetKnown: false };
+    case 'capability': return { ms: HOUR, scope: 'route', resetKnown: false };
     case 'rate_limited': {
-      // A DAILY allowance ("free-models-per-day") does not recover in a minute: retrying every minute would keep calling an exhausted provider all day
-      // (production did, ~28 calls in 6 h). It rests for 30 minutes (longer if the provider says so) and, being account-wide, for the whole provider.
-      const daily = /per[- ]day|daily/i.test(error?.providerMessage ?? '');
-      // `retryAfterMs` is the provider's own Retry-After or published quota-reset time: it is honoured when it is longer (up to the reset itself).
-      return { ms: Math.max(error?.retryAfterMs ?? 0, daily ? 30 * 60_000 : 60_000), scope: daily ? 'provider' : 'route' };
+      // A DAILY allowance does not recover in a minute (production once called an exhausted provider ~28 times in 6 h) and, being account-wide, rests the provider.
+      const daily = /per[- ]day|daily/i.test(message);
+      const quota = daily || /quota/i.test(message);
+      const scope = quota ? 'provider' : 'route';
+      const stated = error?.retryAfterMs ?? 0;
+      if (daily) {
+        const floor = backoffMs(30 * MINUTE, 2 * HOUR, strikes); // a short hint on a daily limit must not make us retry within seconds
+        return { ms: Math.max(stated, floor), scope, resetKnown: stated >= floor };
+      }
+      if (stated > 0) {
+        const lengthened = strikes > 2 ? backoffMs(MINUTE, 15 * MINUTE, strikes - 2) : 0; // repeated failure at the stated time lengthens it, never shortens it
+        return { ms: Math.max(stated, lengthened, 1000), scope, resetKnown: stated >= lengthened };
+      }
+      return { ms: quota ? backoffMs(5 * MINUTE, HOUR, strikes) : backoffMs(MINUTE, 15 * MINUTE, strikes), scope, resetKnown: false };
     }
-    // A model the provider itself says is retired / no longer offered will not come back in five minutes: rest it an hour (an unknown or misspelt model keeps five).
-    case 'model_unavailable': return { ms: /no longer available|deprecated|retired|discontinued/i.test(error?.providerMessage ?? '') ? 60 * 60_000 : 5 * 60_000, scope: 'route' };
-    case 'timeout': return { ms: 60_000, scope: 'route' };
-    case 'network': return { ms: 60_000, scope: 'provider' };
-    case 'provider_error': return { ms: 60_000, scope: 'route' };
+    // A model the provider itself says is retired will not come back in five minutes: rest it an hour (an unknown or misspelt model backs off from five).
+    case 'model_unavailable': return { ms: RETIRED.test(message) ? HOUR : backoffMs(5 * MINUTE, HOUR, strikes), scope: 'route', resetKnown: false };
+    case 'timeout': return { ms: backoffMs(MINUTE, 15 * MINUTE, strikes), scope: 'route', resetKnown: false };
+    case 'network': return { ms: backoffMs(MINUTE, 15 * MINUTE, strikes), scope: 'provider', resetKnown: false };
+    case 'provider_error': return { ms: backoffMs(MINUTE, 15 * MINUTE, strikes), scope: 'route', resetKnown: false };
     // One empty or malformed answer says nothing about the next one: no cooldown (the failure is still logged and counted).
     case 'empty':
-    case 'malformed': return { ms: 0, scope: 'route' };
+    case 'malformed': return { ms: 0, scope: 'route', resetKnown: false };
   }
 }
 
@@ -268,16 +299,33 @@ const routeCoolKey = (task: AiTask, candidate: RouteCandidate): string => `${tas
 const META_ROUTER_MODEL = /^openrouter\/(free|auto)$/;
 
 function markFailure(task: AiTask, candidate: RouteCandidate, category: FailureCategory, error: AiResponseError | null, now = Date.now()): void {
-  const base = cooldownFor(category, error);
+  const first = cooldownFor(category, error, 1);
+  if (first.ms <= 0) return;
+  const key = first.scope === 'provider' ? candidate.providerKey : routeCoolKey(task, candidate);
+  const previous = loadState(key);
+  // A failure counts as ANOTHER strike only when it comes after the previous pause ended (the route was tried again and failed again): sibling routes of one provider
+  // failing inside the same message, or a failure while the pause still runs, are one event, not an escalation.
+  const stillResting = previous !== undefined && previous.until > now;
+  const strikes = previous && now - previous.setAt < STRIKE_MEMORY_MS ? (stillResting ? previous.strikes : previous.strikes + 1) : 1;
+  const next = cooldownFor(category, error, strikes);
   // `openrouter/free` is a ROUTER over many free endpoints: a data-policy refusal there is about the endpoint it happened to pick for THIS request, not about the
   // model (the routing history shows a policy 404 followed by an answer seconds later), so it rests one minute, not half an hour.
-  const ms = category === 'policy' && META_ROUTER_MODEL.test(candidate.model) ? Math.min(base.ms, 60_000) : base.ms;
-  const scope = base.scope;
-  if (ms <= 0) return;
-  const entry = { until: now + ms, why: category.replace(/_/g, ' ') };
-  const key = scope === 'provider' ? candidate.providerKey : routeCoolKey(task, candidate);
-  (scope === 'provider' ? providerCooling : routeCooling).set(key, entry);
-  persistCooldown(key, scope, entry);
+  const routerPolicy = category === 'policy' && META_ROUTER_MODEL.test(candidate.model);
+  const ms = routerPolicy ? Math.min(next.ms, MINUTE) : next.ms;
+  const until = Math.max(now + ms, stillResting ? previous!.until : 0); // a pause that is already running is never shortened by a sibling failure
+  const state: RouteState = { scope: next.scope, until, why: category.replace(/_/g, ' '), category, resetKnown: next.resetKnown && !routerPolicy && until === now + ms, strikes, setAt: stillResting ? previous!.setAt : now };
+  states.set(key, state);
+  persistState(key, state);
+}
+
+// A route that failed before comes back through ONE request at a time: while that trial is in flight, other requests for the same route wait for its result
+// (it either clears the state or sets a new pause), so a recovering provider is never hit by a burst. Healthy routes have no state and no lock.
+const trialsInFlight = new Map<string, Promise<void>>();
+const TRIAL_WAIT_MS = 8000;
+
+/** The state keys of a route that has failed recently (its pause may have ended): these are the ones a single trial request guards. */
+function recoveringKeys(task: AiTask, candidate: RouteCandidate, now: number): string[] {
+  return [routeCoolKey(task, candidate), candidate.providerKey].filter((k) => { const s = loadState(k); return s !== undefined && now - s.setAt < STRIKE_MEMORY_MS; });
 }
 
 /** The route as it may be returned or logged: everything except the key. */
@@ -318,6 +366,24 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
     const timeoutMs = Math.min(candidate.timeoutMs, budgetEnd - now);
     const messages = request.messages;
     const onlyRoute = queue.length === 1;
+
+    // Recovery safety: a route that failed before is tested by one request at a time; the others wait for that result instead of piling on.
+    let locks = recoveringKeys(request.task, candidate, now);
+    const inFlight = locks.map((k) => trialsInFlight.get(k)).find((p) => p !== undefined);
+    if (inFlight) {
+      const waitMs = Math.min(TRIAL_WAIT_MS, Math.max(0, budgetEnd - Date.now() - MIN_ATTEMPT_MS));
+      await Promise.race([inFlight, new Promise<void>((resolve) => { setTimeout(resolve, waitMs).unref?.(); })]);
+      const resting = coolingUntil(routeCoolKey(request.task, candidate)) ?? coolingUntil(candidate.providerKey);
+      if (resting) { skipped.push({ candidate, category: 'cooldown', reason: `cooling down until ${new Date(resting.until).toISOString().slice(11, 19)} UTC (${resting.why})` }); continue; }
+      locks = recoveringKeys(request.task, candidate, Date.now());
+      if (locks.some((k) => trialsInFlight.has(k))) { skipped.push({ candidate, category: 'recovering', reason: 'another request is still testing this route after its pause' }); continue; }
+    }
+    let releaseTrial: () => void = () => undefined;
+    if (locks.length > 0) {
+      const trial = new Promise<void>((resolve) => { releaseTrial = resolve; });
+      for (const k of locks) trialsInFlight.set(k, trial);
+    }
+    try {
     for (let attempt = 0; attempt < (onlyRoute ? 2 : 1); attempt += 1) {
       const t0 = Date.now();
       try {
@@ -354,6 +420,10 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
         break;
       }
     }
+    } finally {
+      for (const k of locks) trialsInFlight.delete(k);
+      releaseTrial();
+    }
     if (!plan.failover) break;
   }
 
@@ -388,14 +458,24 @@ export async function explainRoutes(accountId: number, task: AiTask): Promise<{ 
 }
 
 export function resetAiRouterForTests(): void {
-  routeCooling.clear();
-  providerCooling.clear();
+  states.clear();
+  trialsInFlight.clear();
   try { getDb().prepare('DELETE FROM ai_route_cooldowns').run(); } catch { /* no database in this test */ }
 }
 
-/** Every cooldown currently active (for the dashboard health view). */
-export function activeCooldowns(now = Date.now()): Array<{ key: string; until: number; why: string }> {
-  const out: Array<{ key: string; until: number; why: string }> = [];
-  for (const [key, entry] of [...routeCooling, ...providerCooling]) if (entry.until > now) out.push({ key, until: entry.until, why: entry.why });
-  return out;
+/** Test hook: a restart forgets everything held in memory; the database keeps the pauses (this is what a restart looks like to the router). */
+export function simulateRestartForTests(): void {
+  states.clear();
+  trialsInFlight.clear();
+}
+
+/** Every pause currently running (memory and database, so one set before a restart is included), for the dashboard health view. */
+export function activeCooldowns(now = Date.now()): Array<{ key: string; until: number; why: string; resetKnown: boolean; category: string | null; strikes: number }> {
+  const out = new Map<string, { key: string; until: number; why: string; resetKnown: boolean; category: string | null; strikes: number }>();
+  try {
+    const rows = getDb().prepare('SELECT key, until_ms, why, category, reset_known, strikes FROM ai_route_cooldowns WHERE until_ms > ?').all(now) as Array<{ key: string; until_ms: number; why: string; category: string | null; reset_known: number; strikes: number }>;
+    for (const r of rows) out.set(r.key, { key: r.key, until: r.until_ms, why: r.why, resetKnown: r.reset_known === 1, category: r.category, strikes: r.strikes });
+  } catch { /* not persisted */ }
+  for (const [key, s] of states) if (s.until > now) out.set(key, { key, until: s.until, why: s.why, resetKnown: s.resetKnown, category: s.category, strikes: s.strikes });
+  return [...out.values()];
 }

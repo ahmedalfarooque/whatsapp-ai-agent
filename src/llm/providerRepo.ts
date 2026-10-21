@@ -191,6 +191,13 @@ export function providerApiKey(row: AiProviderRow): string | null {
   }
 }
 
+/** A new SHARED provider joins the end of the Default pool (after the existing ones, 10 apart) unless a priority is given; a business's own provider keeps the neutral 100 (its order is the saved routing order). */
+function nextSharedPriority(db: Database.Database, accountId: number | null): number {
+  if (accountId !== null) return 100;
+  const top = (db.prepare('SELECT MAX(priority) AS p FROM ai_providers WHERE whatsapp_account_id IS NULL').get() as { p: number | null }).p;
+  return top === null ? 100 : Math.min(1000, Math.max(100, top + 10));
+}
+
 export function createProvider(input: AiProviderInput, scope: { accountId: number | null; updatedBy: number }, db: Database.Database = getDb()): AiProviderRow {
   validate(input);
   const ciphertext = input.apiKey ? encryptWithKey(input.apiKey, getSecretEncryptionKey()) : null;
@@ -198,7 +205,7 @@ export function createProvider(input: AiProviderInput, scope: { accountId: numbe
     .prepare(`INSERT INTO ai_providers (whatsapp_account_id, name, kind, base_url, key_ciphertext, models, vision_models, audio_models, free_tier, free_confirmed, supports_tools, enabled, priority, timeout_ms, notes, updated_by, adapter, vendor)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(scope.accountId, input.name.trim(), input.kind, input.baseUrl.replace(/\/+$/, ''), ciphertext, input.models.join(','), (input.visionModels ?? []).join(','), (input.audioModels ?? []).join(','),
-      input.freeTier === false ? 0 : 1, input.freeConfirmed === false ? 0 : 1, input.supportsTools === false ? 0 : 1, input.enabled === false ? 0 : 1, input.priority ?? 100, input.timeoutMs ?? 20000, input.notes?.trim() || null, scope.updatedBy, input.adapter ?? (input.kind === 'openrouter' ? 'openrouter' : 'openai'), input.vendor ?? (input.kind === 'openrouter' ? 'openrouter' : vendorForUrl(input.baseUrl).id));
+      input.freeTier === false ? 0 : 1, input.freeConfirmed === false ? 0 : 1, input.supportsTools === false ? 0 : 1, input.enabled === false ? 0 : 1, input.priority ?? nextSharedPriority(db, scope.accountId), input.timeoutMs ?? 20000, input.notes?.trim() || null, scope.updatedBy, input.adapter ?? (input.kind === 'openrouter' ? 'openrouter' : 'openai'), input.vendor ?? (input.kind === 'openrouter' ? 'openrouter' : vendorForUrl(input.baseUrl).id));
   // A business's own provider joins ITS routing order (at the end); a shared one lives inside the Default entry of every business.
   if (scope.accountId !== null) ensureAccountRouting(scope.accountId, db);
   return db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(result.lastInsertRowid) as AiProviderRow;

@@ -130,7 +130,8 @@ describe('Gemini native adapter', () => {
     [400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'API key not valid. Please pass a valid API key.' } }, 'credential'],
     [403, { error: { code: 403, status: 'PERMISSION_DENIED', message: 'denied' } }, 'credential'],
     [404, { error: { code: 404, status: 'NOT_FOUND', message: 'models/x is not found' } }, 'model_unavailable'],
-    [429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'You exceeded your current quota, please check your plan and billing details.' } }, 'payment_required'],
+    [429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'You exceeded your current quota, please check your plan and billing details.' } }, 'rate_limited'], // a quota is a quota, not a billing error and not a bad key
+    [402, { error: { code: 402, message: 'Payment required' } }, 'payment_required'],
     [429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Too many requests, retry shortly.' } }, 'rate_limited'],
     [503, { error: { code: 503, status: 'UNAVAILABLE', message: 'overloaded' } }, 'provider_error'],
   ])('Gemini HTTP %i is normalised (%#)', async (status, errBody, expected) => {

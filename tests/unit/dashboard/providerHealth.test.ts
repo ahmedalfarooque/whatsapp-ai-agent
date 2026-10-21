@@ -92,8 +92,13 @@ describe('per-provider health states (facts only, never "a key is saved")', () =
     await expect(runWithAccount(acc, () => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'hi' }], maxTokens: 8, deadline: Date.now() + 5000 }))).rejects.toBeTruthy();
     const h = providerHealth(get(id));
     expect(h).toMatchObject({ state: 'rate_limited', label: 'Rate limited / quota exhausted' });
-    expect(h.summary).toMatch(/eligible again at \d\d:\d\d UTC/);
-    expect(h.detail).toContain('No request is sent to this provider until');
+    // The provider stated no reset time here, so the card says "retry ~HH:MM" (an estimate) and never claims a reset.
+    expect(h.summary).toMatch(/retry ~\d\d:\d\d UTC/);
+    expect(h.summary).not.toMatch(/resets/);
+    expect(h.detail).toContain('no reset time from the provider');
+    expect(h.detail).toContain('No request is sent to this provider before then');
+    expect(h.cooldown).toMatchObject({ resetKnown: false, failures: 1, category: 'rate_limited' });
+    expect(Date.parse(h.cooldown!.nextRetryAt)).toBeGreaterThan(Date.now());
     expect(h.summary.length).toBeLessThanOrEqual(100);
   });
 

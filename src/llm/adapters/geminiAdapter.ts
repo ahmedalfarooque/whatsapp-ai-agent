@@ -1,7 +1,7 @@
 import { fetchWithTimeout } from '../../utils/retry';
 import { AiCredentialError } from '../aiCredentialError';
 import { AiResponseError } from '../aiResponseError';
-import { providerMessageOf } from '../openAiCompatible';
+import { providerMessageOf, statedRetryDelayMs } from '../openAiCompatible';
 import type { ChatCompletionResponse, ChatMessage, ContentPart, ToolCall } from '../types';
 import type { AdapterCompleteRequest, ProviderAdapter } from './types';
 
@@ -133,7 +133,8 @@ export function pacificMidnightDelayMs(now: number = Date.now()): number {
   return Math.max(60_000, 24 * 3600_000 - elapsed);
 }
 
-function failureFor(status: number, bodyText: string | undefined, model: string, retryAfter: number): AiResponseError | AiCredentialError {
+function failureFor(status: number, bodyText: string | undefined, model: string, headers?: Headers): AiResponseError | AiCredentialError {
+  const retryAfter = (statedRetryDelayMs(headers, undefined) ?? 0) / 1000;
   let google = '';
   try { google = String((JSON.parse(bodyText ?? '{}') as { error?: { status?: unknown } }).error?.status ?? ''); } catch { /* not JSON */ }
   const message = providerMessageOf(bodyText);
@@ -154,15 +155,17 @@ function failureFor(status: number, bodyText: string | undefined, model: string,
     if (info.quotaIds.some((q) => /perminute/i.test(q))) {
       const failure = new AiResponseError('rate_limited', status, model, message);
       const waitMs = info.retryDelayMs ?? (retryAfter > 0 ? retryAfter * 1000 : 60_000);
-      failure.retryAfterMs = Math.min(Math.max(waitMs, 1000), 15 * 60_000);
+      failure.retryAfterMs = Math.min(Math.max(waitMs, 1000), 25 * 3_600_000);
       return failure;
     }
-    // Quota exhausted (daily / free-tier allowance) rests longer than a momentary rate limit.
-    const quota = /quota|billing|exceeded your current|free tier|per day|daily/.test(lower);
-    const failure = new AiResponseError(quota ? 'payment_required' : 'rate_limited', status, model, message);
-    if (retryAfter > 0) failure.retryAfterMs = Math.min(retryAfter * 1000, 15 * 60_000);
+    // Any other HTTP 429 / RESOURCE_EXHAUSTED is a QUOTA or rate limit: it is neither a rejected key nor a billing error, and it is never answered with a paid route.
+    // Only a reset time Google actually states (RetryInfo, Retry-After) is kept; without one the router backs off by its own bounded schedule and says so.
+    const failure = new AiResponseError('rate_limited', status, model, message);
+    const stated = info.retryDelayMs ?? (retryAfter > 0 ? retryAfter * 1000 : 0);
+    if (stated >= 1000) failure.retryAfterMs = Math.min(stated, 25 * 3_600_000);
     return failure;
   }
+  if (status === 402) return new AiResponseError('payment_required', status, model, message);
   if (status === 404 || google === 'NOT_FOUND') return new AiResponseError('model_unavailable', status, model, message ?? 'model not found for this API version');
   if (status >= 500) return new AiResponseError('provider_error', status, model, message);
   return new AiResponseError('model_unavailable', status, model, message);
@@ -188,7 +191,7 @@ export const geminiAdapter: ProviderAdapter = {
     }
     if (!response.ok) {
       const text = await response.text().catch(() => undefined);
-      throw failureFor(response.status, text, request.model, Number(response.headers?.get?.('retry-after') ?? ''));
+      throw failureFor(response.status, text, request.model, response.headers);
     }
     let parsed: unknown;
     try { parsed = await response.json(); } catch { throw new AiResponseError('malformed_response', response.status, request.model); }

@@ -229,7 +229,7 @@ describe('when the assistant cannot answer, customers get ONE local automated me
     expect(activity.some((x) => x.startsWith('error:AI credential problem (rejected): fallback sent') && x.includes('the earlier automated reply stands, nothing repeated'))).toBe(true); // staff still see every failure
   });
 
-  it('the full automated reply is available again after the window', async () => {
+  it('the notice is sent ONCE per outage: not repeated after the old ten-minute window (or after a restart), and a NEW outage — after a real AI answer — is told again', async () => {
     vi.mocked(chatCompletion).mockRejectedValue(new AiCredentialError('missing', 'missing'));
     const waId = '966511000603';
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -241,9 +241,20 @@ describe('when the assistant cannot answer, customers get ONE local automated me
       await processInboundMessage(msg(PAINT, waId, 'Still waiting for an answer please'), { knowledge: PAINT_KB });
       expect(sent()).toHaveLength(1); // inside the window: nothing repeated
       vi.setSystemTime(new Date('2030-01-01T10:11:00Z'));
+      resetCredentialFallbackThrottle(); // what a restart does to the in-memory throttle: the database still knows the customer was told
       await processInboundMessage(msg(PAINT, waId, 'Any update on my question now'), { knowledge: PAINT_KB });
+      expect(sent()).toHaveLength(1); // same outage, same conversation: told once
+      // The provider is back and answers: the outage is over.
+      vi.setSystemTime(new Date('2030-01-01T10:20:00Z'));
+      vi.mocked(chatCompletion).mockResolvedValueOnce(text('We have exterior paint in several colours.') as never);
+      await processInboundMessage(msg(PAINT, waId, 'And do you have interior paint too?'), { knowledge: PAINT_KB });
       expect(sent()).toHaveLength(2);
-      expect(sent()[1]).toMatch(UNAVAILABLE);
+      expect(sent()[1]).toBe('We have exterior paint in several colours.');
+      // A later, separate outage is announced again (once).
+      vi.setSystemTime(new Date('2030-01-01T12:00:00Z'));
+      await processInboundMessage(msg(PAINT, waId, 'What about the price of the paint?'), { knowledge: PAINT_KB });
+      expect(sent()).toHaveLength(3);
+      expect(sent()[2]).toMatch(UNAVAILABLE);
     } finally {
       vi.useRealTimers();
     }

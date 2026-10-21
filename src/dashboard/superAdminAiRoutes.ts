@@ -57,11 +57,19 @@ export function registerSuperAdminAiRoutes(router: Router): void {
       const key = getEffectiveCredential('OPENROUTER_API_KEY');
       const diag = describeCredential('OPENROUTER_API_KEY');
       const next = (await buildCandidates(currentAccountId(), 'chat', { wantsTools: true })).eligible[0];
+      const shared = listSharedProviders().map((r) => ({ ...toView(r), activity: providerActivity(r.id), health: providerHealth(r) }));
+      // The provider that answered last (a fact from the routing history) and, while any provider is resting, the earliest moment one of them is tried again —
+      // with whether that moment is a reset time the provider stated or only our own bounded backoff.
+      const lastOk = getDb().prepare("SELECT provider_name AS provider, model, created_at AS answeredAt FROM ai_route_log WHERE task = 'chat' AND outcome = 'ok' AND provider_id IN (SELECT id FROM ai_providers WHERE whatsapp_account_id IS NULL) ORDER BY id DESC LIMIT 1").get() as { provider: string; model: string; answeredAt: string } | undefined;
+      const retries = shared.filter((p) => p.health.cooldown).map((p) => ({ provider: p.name, ...p.health.cooldown! })).sort((a, b) => a.nextRetryAt.localeCompare(b.nextRetryAt));
       res.json({
+        active: lastOk ? { provider: lastOk.provider, model: lastOk.model, answeredAt: `${lastOk.answeredAt.replace(' ', 'T')}Z` } : null,
+        nextRetry: retries[0] ? { provider: retries[0].provider, at: retries[0].nextRetryAt, resetKnown: retries[0].resetKnown } : null,
+        allResting: !next && retries.length > 0,
         status: await defaultStatus(currentAccountId()),
         // The route the next message would use first, by name only (never a key). Quota may change at any time: this is the plan, not a promise.
         nextRoute: next ? { provider: next.providerName, model: next.model } : null,
-        providers: listSharedProviders().map((r) => ({ ...toView(r), activity: providerActivity(r.id), health: providerHealth(r) })),
+        providers: shared,
         ...presetsPayload(),
         pool: defaultPoolSummary(),
         accounts: accountCount(),

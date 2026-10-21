@@ -103,6 +103,43 @@ export function quotaResetDelayMs(headerValue: string | null, errorBody: string 
   return null;
 }
 
+const MAX_STATED_WAIT_MS = 25 * 3_600_000;
+
+/** "1h2m3.5s", "7m12s", "34s", "250ms" → milliseconds (null when the text holds no duration). */
+export function parseDurationMs(text: string): number | null {
+  let total = 0;
+  let found = false;
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*(ms|h|m|s)(?![a-z])/gi)) {
+    const n = Number(m[1]);
+    const unit = m[2]!.toLowerCase();
+    total += unit === 'ms' ? n : unit === 's' ? n * 1000 : unit === 'm' ? n * 60_000 : n * 3_600_000;
+    found = true;
+  }
+  return found ? Math.round(total) : null;
+}
+
+/**
+ * When the provider itself says the limit lifts, in milliseconds from now — and ONLY then (null = it did not say; nothing is invented). Read, in the provider's own
+ * words: `Retry-After` (seconds or an HTTP date), `retry-after-ms`, `X-RateLimit-Reset` (header or error metadata, epoch), and the wording "Please try again in 6m43.2s" that
+ * OpenAI-protocol providers put in the error body. Several statements: the longest wins. Only believable values count: between one second and 25 hours.
+ */
+export function statedRetryDelayMs(headers: Headers | undefined, errorBody: string | undefined, now: number = Date.now()): number | null {
+  const found: number[] = [];
+  const add = (ms: number | null): void => { if (ms !== null && Number.isFinite(ms) && ms >= 1000) found.push(Math.min(ms, MAX_STATED_WAIT_MS)); };
+  const afterMs = Number(headers?.get?.('retry-after-ms') ?? '');
+  if (Number.isFinite(afterMs) && afterMs > 0) add(afterMs);
+  const retryAfter = headers?.get?.('retry-after') ?? '';
+  if (retryAfter.trim()) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) add(seconds * 1000);
+    else { const at = Date.parse(retryAfter); if (Number.isFinite(at)) add(at - now); }
+  }
+  add(quotaResetDelayMs(headers?.get?.('x-ratelimit-reset') ?? null, errorBody, now));
+  const wording = /(?:try again|retry)\s+(?:in|after)\s+([0-9hms.\s]{2,24})/i.exec(providerMessageOf(errorBody) ?? '');
+  if (wording) add(parseDurationMs(wording[1]!));
+  return found.length ? Math.max(...found) : null;
+}
+
 export async function completeOnce(request: EndpointRequest): Promise<ChatCompletionResponse> {
   const url = `${request.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   let response: Response;
@@ -138,15 +175,10 @@ export async function completeOnce(request: EndpointRequest): Promise<ChatComple
   }
   if (!response.ok) {
     const errorBody = await response.text().catch(() => undefined);
-    const retryAfter = Number(response.headers?.get?.('retry-after') ?? '');
     const failure = new AiResponseError(reasonForHttpStatus(response.status), response.status, request.model, providerMessageOf(errorBody));
-    if (Number.isFinite(retryAfter) && retryAfter > 0) failure.retryAfterMs = Math.min(retryAfter * 1000, 15 * 60_000);
-    // A quota-reset time the provider publishes (OpenRouter: X-RateLimit-Reset, as a header or inside the error metadata) lets the route rest
-    // exactly until the allowance returns instead of guessing.
-    if (response.status === 429) {
-      const reset = quotaResetDelayMs(response.headers?.get?.('x-ratelimit-reset') ?? null, errorBody);
-      if (reset) failure.retryAfterMs = Math.max(failure.retryAfterMs ?? 0, reset);
-    }
+    // Whatever reset time the provider STATES (Retry-After, X-RateLimit-Reset, "try again in …") lets the route rest exactly until the limit lifts instead of guessing.
+    const stated = statedRetryDelayMs(response.headers, errorBody);
+    if (stated) failure.retryAfterMs = stated;
     throw failure;
   }
   let parsed: unknown;

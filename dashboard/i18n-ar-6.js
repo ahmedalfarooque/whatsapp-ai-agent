@@ -407,6 +407,11 @@ window.I18N_AR_PATTERNS.push(
 Object.assign(window.I18N_AR, {
   'Added to the Default list': 'تمت الإضافة إلى قائمة الافتراضي',
   'Confirm free tier': 'تأكيد أنه مجاني',
+  'Active provider (last answer):': 'المزوّد النشط (آخر إجابة):',
+  'Next retry of a resting provider:': 'موعد إعادة المحاولة لمزوّد في فترة راحة:',
+  '(the provider stated this reset time)': '(وقت إعادة التعيين أعلنه المزوّد)',
+  '(our estimated backoff: the provider gave no reset time)': '(تقديرنا المحدود للانتظار: لم يذكر المزوّد وقتاً لإعادة التعيين)',
+  '—  (every provider is resting; customers get one friendly notice and their question is answered later)': '—  (جميع المزوّدين في فترة راحة؛ يصل العملاء إشعاراً لطيفاً واحداً ويُجاب عن سؤالهم لاحقاً)',
   'Testing the key with a real request…': 'جارٍ اختبار المفتاح بطلب حقيقي…',
   'Type the model id to use: this provider has no model that can be chosen automatically.': 'اكتب معرّف النموذج المطلوب: لا يوجد لهذا المزوّد نموذج يمكن اختياره تلقائياً.',
   'Chosen automatically for known providers': 'يُختار تلقائياً للمزودات المعروفة',

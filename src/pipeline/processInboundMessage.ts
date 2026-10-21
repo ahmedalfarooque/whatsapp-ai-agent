@@ -25,6 +25,7 @@ import {
   resetConversation,
   recordOutboundDelivery,
 } from '../memory/conversationRepo';
+import { getDb } from '../memory/db';
 import { clearBookingSession } from '../memory/bookingSessionRepo';
 import { createCustomerRequest } from '../memory/customerRequestRepo';
 import { notifyBusinessNewRequest } from '../requests/requestService';
@@ -183,6 +184,14 @@ function allowCredentialFallback(accountId: number, waId: string, now = Date.now
   return true;
 }
 
+/** True when this conversation already received the "assistant unavailable" message and no real AI answer has been sent since: the customer is told once per outage. */
+export function unavailableNoticeAlreadySent(conversationId: number): boolean {
+  const db = getDb();
+  const notice = db.prepare(`SELECT MAX(id) AS id FROM conversation_messages WHERE conversation_id = ? AND role = 'assistant' AND direction = 'outbound' AND metadata LIKE '%"templateKey":"assistant_unavailable%'`).get(conversationId) as { id: number | null };
+  if (!notice.id) return false;
+  const answer = db.prepare(`SELECT MAX(id) AS id FROM conversation_messages WHERE conversation_id = ? AND id > ? AND role = 'assistant' AND direction = 'outbound' AND (metadata IS NULL OR metadata NOT LIKE '%"templateKey"%')`).get(conversationId, notice.id) as { id: number | null };
+  return !answer.id;
+}
 /** Test hook. */
 export function resetCredentialFallbackThrottle(): void {
   lastCredentialFallback.clear();
@@ -591,7 +600,9 @@ async function sendAssistantUnavailable(ctx: ReplyContext): Promise<string | nul
   const language = fresh.language;
   const nextCtx: ReplyContext = { ...ctx, customer: fresh, language };
   const closed = biz.afterHoursEnabled && biz.hoursConfigured && isOutsideBusinessHours(biz) === true;
-  const full = allowCredentialFallback(currentAccountId(), ctx.msg.waId);
+  // ONE notice per outage and conversation: none while the conversation already holds the notice and no real AI answer has followed it (recorded in the database, so a restart
+  // cannot repeat it); the in-memory throttle only covers two messages racing each other. The waiting message itself is answered later by the recovery sweep.
+  const full = !unavailableNoticeAlreadySent(ctx.conversationId) && allowCredentialFallback(currentAccountId(), ctx.msg.waId);
   try {
     if (!full) {
       // Already told within the window: no second unavailable message and no second menu (the customer has the options; the request is stored).
