@@ -122,7 +122,7 @@ describe('quota errors are told apart from bad keys, billing and ordinary failur
     network({ 'generativelanguage.googleapis.com': () => detail('GenerateRequestsPerDayPerProjectPerModel-FreeTier', '20s') });
     await ask().catch(() => undefined);
     const day = state('%')!;
-    expect(day).toMatchObject({ category: 'rate_limited', scope: 'provider', known: 1 });
+    expect(day).toMatchObject({ category: 'rate_limited', scope: 'provider', known: 2 }); // 2 = Google's documented daily reset (its response carries no timestamp), not a stated one
     expect(day.ms).toBeGreaterThan(MIN); // the daily reset (midnight Pacific), never the 20 s hint
     expect(day.ms).toBeLessThanOrEqual(24 * 60 * MIN);
     resetAiRouterForTests();

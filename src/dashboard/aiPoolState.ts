@@ -68,7 +68,7 @@ export interface ProviderHealth {
   /** Set while the provider is paused: when it is tried again, and whether that moment is a reset the PROVIDER stated or only our own bounded backoff. */
   /** The exact instant of the last answer (ISO), so the page can show it in the operator's own time zone. */
   at?: string;
-  cooldown?: { nextRetryAt: string; resetKnown: boolean; failures: number; category: string | null };
+  cooldown?: { nextRetryAt: string; resetKnown: boolean; /** 'stated' (the response says it), 'documented' (the provider's published daily reset), or null (our own estimate). */ basis: 'stated' | 'documented' | null; failures: number; category: string | null };
 }
 
 const utc = (ms: number): string => `${new Date(ms).toISOString().slice(11, 16)} UTC`;
@@ -99,10 +99,12 @@ export function providerHealth(row: AiProviderRow, now: number = Date.now(), fre
   if (cooling) {
     const quota = /rate limited|credit/.test(cooling.why);
     // Honest about where the retry time comes from: a reset the provider stated is shown as its reset; our own backoff is shown as an estimate, never as a reset time.
-    const basis = cooling.resetKnown ? `the provider says it resets at ${utc(cooling.until)}` : `no reset time from the provider — next retry about ${utc(cooling.until)} (bounded backoff, failure ${cooling.strikes})`;
+    const basis = cooling.resetBasis === 'stated' ? `the provider says it resets at ${utc(cooling.until)}`
+      : cooling.resetBasis === 'documented' ? `this is the provider's documented daily reset (${utc(cooling.until)}); its response names the quota but carries no timestamp`
+        : `no reset time from the provider — next retry about ${utc(cooling.until)} (bounded backoff, failure ${cooling.strikes})`;
     const what = quota ? 'Rate limit or free quota reached' : `Resting (${cooling.why})`;
-    const health = make(quota ? 'rate_limited' : 'cooling', quota ? 'Rate limited / quota exhausted' : 'Cooling down', cooling.resetKnown ? `${what} — resets ${utc(cooling.until)}.` : `${what} — retry ~${utc(cooling.until)}.`, `${failure ? `${failure.detail}. ` : ''}${what}: ${basis}. No request is sent to this provider before then; it is then tested with one request, and other requests wait for that result.`);
-    return { ...health, cooldown: { nextRetryAt: new Date(cooling.until).toISOString(), resetKnown: cooling.resetKnown, failures: cooling.strikes, category: cooling.category } };
+    const health = make(quota ? 'rate_limited' : 'cooling', quota ? 'Rate limited / quota exhausted' : 'Cooling down', cooling.resetBasis === 'stated' ? `${what} — resets ${utc(cooling.until)}.` : cooling.resetBasis === 'documented' ? `${what} — daily reset ${utc(cooling.until)}.` : `${what} — retry ~${utc(cooling.until)}.`, `${failure ? `${failure.detail}. ` : ''}${what}: ${basis}. No request is sent to this provider before then; it is then tested with one request, and other requests wait for that result.`);
+    return { ...health, cooldown: { nextRetryAt: new Date(cooling.until).toISOString(), resetKnown: cooling.resetKnown, basis: cooling.resetBasis, failures: cooling.strikes, category: cooling.category } };
   }
   if (last?.outcome === 'ok') return { ...make('ok', 'Successful inference', `Answered at ${utc(dbTimeMs(last.created_at))} · ${last.model}`), at: new Date(dbTimeMs(last.created_at)).toISOString() };
   if (failure && last) {
@@ -144,7 +146,7 @@ export function describeRouteFailure(f: Pick<Latest, 'category' | 'http_status' 
       const daily = /per[- ]day|daily|quota/i.test(reason);
       return { label: daily ? 'AI free quota reached' : 'AI rate limit reached', detail: `${where}${http}${daily ? ': daily free allowance used up' : ': too many requests'}${tail}; it is retried later and nothing is purchased` };
     }
-    case 'policy': return { label: 'AI request rejected by provider policy', detail: `${where}${http}${tail}` };
+    case 'policy': return { label: 'AI request rejected by provider policy', detail: `${where}${http}${tail}${/guardrail|data policy|privacy/i.test(f.detail ?? '') ? '. This comes from the provider ACCOUNT\'s privacy / data-policy settings (for OpenRouter: openrouter.ai/settings/privacy), not from the model name or the quota' : ''}` };
     case 'capability': return { label: 'AI model lacks a needed capability', detail: `${where}${http}${tail}` };
     case 'invalid_request': return { label: 'AI request rejected as invalid', detail: `${where}${http}${tail}: the provider refused the request itself (not a quota, not a key problem); it is not retried in a loop` };
     case 'model_unavailable':

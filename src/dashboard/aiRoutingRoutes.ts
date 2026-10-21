@@ -6,7 +6,7 @@ import { getBusinessSettings, updateBusinessSettings } from '../config/businessS
 import { describeCredential, getEffectiveCredential, isUsableApiKey } from '../config/effectiveConfig';
 import { isSuperAdmin, type AuthUser } from './permissions';
 import { providerHealth } from './aiPoolState';
-import { activeCooldowns, BUILTIN_OPENROUTER_PRIORITY, buildCandidates, explainRoutes, routeCompletion, type RouteCandidate } from '../llm/aiRouter';
+import { activeCooldowns, BUILTIN_OPENROUTER_PRIORITY, buildCandidates, coolingUntil, explainRoutes, routeCompletion, type RouteCandidate } from '../llm/aiRouter';
 import { AiCredentialError } from '../llm/aiCredentialError';
 import { AiResponseError } from '../llm/aiResponseError';
 import { getModelInfo } from '../llm/modelCatalog';
@@ -169,15 +169,21 @@ export function mayManageShared(req: Request): boolean {
 }
 
 /** One tiny completion on the provider's first chat model: proves the key, the endpoint and the model. Never sends a customer message. */
-export async function runProviderTest(row: AiProviderRow): Promise<{ ok: boolean; detail: string; latencyMs: number; category?: string }> {
+export async function runProviderTest(row: AiProviderRow): Promise<{ ok: boolean; detail: string; latencyMs: number; category?: string; skipped?: boolean }> {
   const model = csv(row.models)[0] ?? csv(row.vision_models)[0];
   if (!model) return { ok: false, detail: 'No model is configured for this provider.', latencyMs: 0 };
   const apiKey = providerApiKey(row);
   if (!apiKey) { recordProviderTest(row.id, false, 'no usable API key saved'); return { ok: false, detail: 'No usable API key is saved for this provider.', latencyMs: 0 }; }
   const candidate: RouteCandidate = { key: `${row.id}:${model}`, providerKey: `provider:${row.id}`, providerId: row.id, providerName: row.name, kind: row.kind, adapter: row.adapter, baseUrl: row.base_url, apiKey, model, free: row.free_tier !== 0, image: null, audio: null, tools: row.supports_tools !== 0, timeoutMs: Math.min(row.timeout_ms, 30_000), builtin: false };
+  // While the provider is paused until a reset it (or its published policy) named, a test could only fail and would spend allowance: it is not sent. An estimated pause may be tested.
+  const paused = coolingUntil(`provider:${row.id}`) ?? coolingUntil(`chat:${row.id}:${model}`);
+  if (paused && paused.resetBasis) {
+    const when = new Date(paused.until).toISOString().slice(0, 16).replace('T', ' ');
+    return { ok: false, skipped: true, category: 'cooldown', latencyMs: 0, detail: `Not tested: ${paused.why} until ${when} UTC (${paused.resetBasis === 'documented' ? "the provider's documented daily reset" : 'reset time stated by the provider'}). A request now could only fail and use up allowance; test again after that time.` };
+  }
   const started = Date.now();
   const budget = validationBudget(row.vendor, row.base_url);
-  const run = (maxTokens: number): Promise<unknown> => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens, temperature: 0, deadline: Date.now() + 30_000, candidatesOverride: [candidate] });
+  const run = (maxTokens: number): Promise<unknown> => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens, temperature: 0, deadline: Date.now() + 30_000, candidatesOverride: [candidate], singleAttempt: true });
   try {
     try {
       await run(budget.first);

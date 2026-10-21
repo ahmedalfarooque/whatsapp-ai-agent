@@ -27,6 +27,8 @@ export class AiResponseError extends Error {
   fallbackSkipped: string | null = null;
   /** The provider's Retry-After, in ms, when it sent one (rate limits); the router uses it for the route's cooldown. */
   retryAfterMs: number | null = null;
+  /** Where that time comes from: 'stated' = the provider's response says it (Retry-After, reset header, RetryInfo); 'documented' = the provider's published policy (e.g. Google's daily quota resets at midnight Pacific time) — the response carries no timestamp. */
+  retryBasis: 'stated' | 'documented' | null = null;
 
   constructor(
     public readonly reason: AiResponseReason,

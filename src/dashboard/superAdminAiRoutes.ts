@@ -65,7 +65,7 @@ export function registerSuperAdminAiRoutes(router: Router): void {
       const retries = shared.filter((p) => p.health.cooldown).map((p) => ({ provider: p.name, ...p.health.cooldown! })).sort((a, b) => a.nextRetryAt.localeCompare(b.nextRetryAt));
       res.json({
         active: lastOk ? { provider: lastOk.provider, model: lastOk.model, answeredAt: `${lastOk.answeredAt.replace(' ', 'T')}Z` } : null,
-        nextRetry: retries[0] ? { provider: retries[0].provider, at: retries[0].nextRetryAt, resetKnown: retries[0].resetKnown } : null,
+        nextRetry: retries[0] ? { provider: retries[0].provider, at: retries[0].nextRetryAt, resetKnown: retries[0].resetKnown, basis: retries[0].basis } : null,
         allResting: !next && retries.length > 0,
         status: await defaultStatus(currentAccountId()),
         // The route the next message would use first, by name only (never a key). Quota may change at any time: this is the plan, not a promise.

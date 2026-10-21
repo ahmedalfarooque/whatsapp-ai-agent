@@ -154,6 +154,7 @@ function failureFor(status: number, bodyText: string | undefined, model: string,
     if (info.quotaIds.some((q) => /perday/i.test(q)) || /per day|daily/.test(lower)) {
       const failure = new AiResponseError('rate_limited', status, model, `${message ?? 'quota exhausted'} (daily quota, resets at midnight Pacific time)`);
       failure.retryAfterMs = pacificMidnightDelayMs();
+      failure.retryBasis = 'documented'; // Google's response names the quota but carries no reset timestamp: this is its published daily reset, not a value it sent
       return failure;
     }
     if (info.quotaIds.some((q) => /perminute/i.test(q))) {

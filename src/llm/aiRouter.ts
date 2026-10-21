@@ -66,6 +66,8 @@ export interface RouteRequest {
   /** Epoch ms after which no new attempt may start. */
   deadline?: number;
   needs?: { image?: boolean; audio?: boolean };
+  /** One request to each candidate, nothing repeated (provider tests and recovery probes: a test must not spend two requests of a limited allowance). */
+  singleAttempt?: boolean;
   /** Pins the route list to these candidates (tests / provider tests). */
   candidatesOverride?: RouteCandidate[];
 }
@@ -95,7 +97,11 @@ export function allowUnknownPriceForTests(flag: boolean): void { unknownPriceAll
  * to a cap) and is shown as an estimate, never as a reset time. The state stays after the pause ends until a success clears it (or six quiet hours pass): the next
  * failure continues the backoff, and a route that failed before is tested by ONE request at a time when it comes back (the trial lock in routeCompletion).
  */
-export interface RouteState { scope: 'route' | 'provider'; until: number; why: string; category: string | null; resetKnown: boolean; strikes: number; setAt: number }
+export type ResetBasis = 'stated' | 'documented';
+export interface RouteState { scope: 'route' | 'provider'; until: number; why: string; category: string | null; resetKnown: boolean; resetBasis: ResetBasis | null; strikes: number; setAt: number }
+/** reset_known in the database: 0 = our own estimate, 1 = stated by the provider's response, 2 = the provider's documented policy. */
+const basisFromDb = (n: number): ResetBasis | null => (n === 1 ? 'stated' : n === 2 ? 'documented' : null);
+const basisToDb = (b: ResetBasis | null): number => (b === 'stated' ? 1 : b === 'documented' ? 2 : 0);
 const states = new Map<string, RouteState>();
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -108,7 +114,7 @@ function loadState(key: string): RouteState | undefined {
     // A pause set before a restart: read it back once and keep it in memory (a missing table or database means "none").
     try {
       const row = getDb().prepare('SELECT scope, until_ms, why, category, reset_known, strikes, set_at_ms FROM ai_route_cooldowns WHERE key = ?').get(key) as { scope: 'route' | 'provider'; until_ms: number; why: string; category: string | null; reset_known: number; strikes: number; set_at_ms: number | null } | undefined;
-      if (row) { s = { scope: row.scope, until: row.until_ms, why: row.why, category: row.category, resetKnown: row.reset_known === 1, strikes: row.strikes, setAt: row.set_at_ms ?? row.until_ms }; states.set(key, s); }
+      if (row) { s = { scope: row.scope, until: row.until_ms, why: row.why, category: row.category, resetKnown: row.reset_known > 0, resetBasis: basisFromDb(row.reset_known), strikes: row.strikes, setAt: row.set_at_ms ?? row.until_ms }; states.set(key, s); }
     } catch { /* not persisted */ }
   }
   return s;
@@ -133,7 +139,7 @@ function persistState(key: string, s: RouteState): void {
     const db = getDb();
     db.prepare(`INSERT INTO ai_route_cooldowns (key, scope, until_ms, why, category, reset_known, strikes, set_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET scope = excluded.scope, until_ms = excluded.until_ms, why = excluded.why, category = excluded.category, reset_known = excluded.reset_known, strikes = excluded.strikes, set_at_ms = excluded.set_at_ms, updated_at = datetime('now')`)
-      .run(key, s.scope, s.until, s.why, s.category, s.resetKnown ? 1 : 0, s.strikes, s.setAt);
+      .run(key, s.scope, s.until, s.why, s.category, basisToDb(s.resetBasis), s.strikes, s.setAt);
     db.prepare('DELETE FROM ai_route_cooldowns WHERE until_ms < ?').run(s.setAt - STATE_KEEP_MS); // old, long-ended states are not kept for ever
   } catch { /* the in-memory state still protects this process */ }
 }
@@ -146,7 +152,12 @@ const RETIRED = /no longer available|deprecated|retired|discontinued/i;
  * How long a failed route rests. A reset time the provider STATED is honoured as given (never invented, never shortened); when it did not say, the pause is a bounded
  * backoff that doubles with each consecutive failure up to a cap, so an exhausted provider is retried later and later, not every minute. `strikes` = consecutive failures.
  */
-export function cooldownFor(category: FailureCategory, error: AiResponseError | null, strikes = 1): { ms: number; scope: 'route' | 'provider'; resetKnown: boolean } {
+export function cooldownFor(category: FailureCategory, error: AiResponseError | null, strikes = 1): { ms: number; scope: 'route' | 'provider'; resetKnown: boolean; resetBasis: ResetBasis | null } {
+  const r = cooldownCore(category, error, strikes);
+  return { ...r, resetBasis: r.resetKnown ? (error?.retryBasis ?? 'stated') : null };
+}
+
+function cooldownCore(category: FailureCategory, error: AiResponseError | null, strikes: number): { ms: number; scope: 'route' | 'provider'; resetKnown: boolean } {
   const message = error?.providerMessage ?? '';
   switch (category) {
     // A prompt that is too long for THIS model says nothing about the route: a shorter prompt may fit.
@@ -314,10 +325,15 @@ function markFailure(task: AiTask, candidate: RouteCandidate, category: FailureC
   const next = cooldownFor(category, error, strikes);
   // `openrouter/free` is a ROUTER over many free endpoints: a data-policy refusal there is about the endpoint it happened to pick for THIS request, not about the
   // model (the routing history shows a policy 404 followed by an answer seconds later), so it rests one minute, not half an hour.
+  // A refusal that repeats is not retried every minute: one minute for the first refusals, then a doubling backoff (up to two hours) — the account's data policy does not change by itself.
   const routerPolicy = category === 'policy' && META_ROUTER_MODEL.test(candidate.model);
-  const ms = routerPolicy ? Math.min(next.ms, MINUTE) : next.ms;
-  const until = Math.max(now + ms, stillResting ? previous!.until : 0); // a pause that is already running is never shortened by a sibling failure
-  const state: RouteState = { scope: next.scope, until, why: category.replace(/_/g, ' '), category, resetKnown: next.resetKnown && !routerPolicy && until === now + ms, strikes, setAt: stillResting ? previous!.setAt : now };
+  const ms = routerPolicy ? backoffMs(MINUTE, 2 * HOUR, strikes) : next.ms;
+  // A pause that is already running is never shortened by a sibling failure; whichever pause ends later keeps its own basis (stated / documented / estimate).
+  const newEnd = now + ms;
+  const keepsPrevious = stillResting && previous!.until >= newEnd;
+  const until = keepsPrevious ? previous!.until : newEnd;
+  const basis: ResetBasis | null = routerPolicy ? null : keepsPrevious ? previous!.resetBasis : next.resetBasis;
+  const state: RouteState = { scope: next.scope, until, why: category.replace(/_/g, ' '), category, resetKnown: basis !== null, resetBasis: basis, strikes, setAt: stillResting ? previous!.setAt : now };
   states.set(key, state);
   persistState(key, state);
 }
@@ -422,7 +438,7 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
     let tokens = request.maxTokens ?? chatBudget(vendorForUrl(candidate.baseUrl).id, candidate.baseUrl);
     let escalated = false;
     try {
-    for (let attempt = 0, limit = onlyRoute ? 2 : 1; attempt < limit; attempt += 1) {
+    for (let attempt = 0, limit = onlyRoute && !request.singleAttempt ? 2 : 1; attempt < limit; attempt += 1) {
       const t0 = Date.now();
       try {
         // The adapter owns this vendor's request/response contract and error mapping; the router sees only a normalised answer or error.
@@ -454,13 +470,14 @@ export async function routeCompletion(request: RouteRequest): Promise<RoutedResp
         const quotaRests = category === 'rate_limited' && ((responseError?.retryAfterMs ?? 0) >= 1000 || /per[- ]day|daily/i.test(responseError?.providerMessage ?? ''));
         // An empty answer whose tokens went on hidden reasoning (finish_reason=length) is not a flaky provider: the same request would be empty again, so it is not repeated.
         const budgetSpent = category === 'empty' && /finish_reason=length|reasoning/.test(responseError?.providerMessage ?? '');
+        // (A customer request whose ONLY route hit a momentary limit gets this one quick retry; tests and probes never do — singleAttempt — and a stated or daily limit is excluded above.)
         const transient = !quotaRests && !budgetSpent && (category === 'rate_limited' || category === 'provider_error' || category === 'empty' || category === 'network' || category === 'timeout');
         // A customer reply whose whole budget went on hidden reasoning is retried ONCE on this route with a larger, bounded budget (never above CHAT_BUDGET_CAP); if it is
         // still empty the route fails over like any other failure. Requests with an explicit budget (validation) are not escalated here: they have their own single retry.
         if (budgetSpent && request.maxTokens === undefined && !escalated && tokens < CHAT_BUDGET_CAP && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) {
           escalated = true; tokens = Math.min(tokens * 2, CHAT_BUDGET_CAP); limit = Math.max(limit, attempt + 2); continue;
         }
-        if (onlyRoute && attempt === 0 && transient && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) { await new Promise((r) => setTimeout(r, 300)); continue; }
+        if (onlyRoute && !request.singleAttempt && attempt === 0 && transient && Date.now() + MIN_ATTEMPT_MS + 300 < budgetEnd) { await new Promise((r) => setTimeout(r, 300)); continue; }
         markFailure(request.task, candidate, category, responseError);
         break;
       }
@@ -516,12 +533,12 @@ export function simulateRestartForTests(): void {
 }
 
 /** Every pause currently running (memory and database, so one set before a restart is included), for the dashboard health view. */
-export function activeCooldowns(now = Date.now()): Array<{ key: string; until: number; why: string; resetKnown: boolean; category: string | null; strikes: number }> {
-  const out = new Map<string, { key: string; until: number; why: string; resetKnown: boolean; category: string | null; strikes: number }>();
+export function activeCooldowns(now = Date.now()): Array<{ key: string; until: number; why: string; resetKnown: boolean; resetBasis: ResetBasis | null; category: string | null; strikes: number }> {
+  const out = new Map<string, { key: string; until: number; why: string; resetKnown: boolean; resetBasis: ResetBasis | null; category: string | null; strikes: number }>();
   try {
     const rows = getDb().prepare('SELECT key, until_ms, why, category, reset_known, strikes FROM ai_route_cooldowns WHERE until_ms > ? AND key NOT LIKE \'trial:%\'').all(now) as Array<{ key: string; until_ms: number; why: string; category: string | null; reset_known: number; strikes: number }>;
-    for (const r of rows) out.set(r.key, { key: r.key, until: r.until_ms, why: r.why, resetKnown: r.reset_known === 1, category: r.category, strikes: r.strikes });
+    for (const r of rows) out.set(r.key, { key: r.key, until: r.until_ms, why: r.why, resetKnown: r.reset_known > 0, resetBasis: basisFromDb(r.reset_known), category: r.category, strikes: r.strikes });
   } catch { /* not persisted */ }
-  for (const [key, s] of states) if (s.until > now) out.set(key, { key, until: s.until, why: s.why, resetKnown: s.resetKnown, category: s.category, strikes: s.strikes });
+  for (const [key, s] of states) if (s.until > now) out.set(key, { key, until: s.until, why: s.why, resetKnown: s.resetKnown, resetBasis: s.resetBasis, category: s.category, strikes: s.strikes });
   return [...out.values()];
 }

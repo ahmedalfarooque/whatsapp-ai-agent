@@ -45,7 +45,7 @@ export async function probeRecoveredRoutes(now: number = Date.now(), db = getDb(
       lastProbe.set(candidate.key, now);
       probed += 1;
       try {
-        await runWithAccount(account.id, () => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: validationBudget(vendorForUrl(candidate.baseUrl).id, candidate.baseUrl).first, temperature: 0, deadline: now + 30_000, candidatesOverride: [candidate] }));
+        await runWithAccount(account.id, () => routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: validationBudget(vendorForUrl(candidate.baseUrl).id, candidate.baseUrl).first, temperature: 0, deadline: now + 30_000, candidatesOverride: [candidate], singleAttempt: true }));
         logger.info({ provider: candidate.providerName, model: candidate.model }, '[AI-PROBE] route answered again');
       } catch {
         logger.info({ provider: candidate.providerName, model: candidate.model }, '[AI-PROBE] route still unavailable (cooldown set again)');
