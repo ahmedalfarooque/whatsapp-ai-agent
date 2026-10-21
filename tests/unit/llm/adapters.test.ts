@@ -14,6 +14,7 @@ import { AiResponseError } from '../../../src/llm/aiResponseError';
 import { adapterFor, endpointMatchesVendor, vendorById, vendorForUrl, VENDORS } from '../../../src/llm/adapters';
 import { fromGeminiResponse, pacificMidnightDelayMs, quotaInfo, toGeminiRequest } from '../../../src/llm/adapters/geminiAdapter';
 import { allowUnknownPriceForTests, resetAiRouterForTests, routeCompletion } from '../../../src/llm/aiRouter';
+import { endWithCustomerTurn } from '../../../src/llm/agentLoop';
 import { createProvider, PROVIDER_RULES } from '../../../src/llm/providerRepo';
 import { setModelCatalogForTests } from '../../../src/llm/modelCatalog';
 
@@ -155,6 +156,18 @@ describe('Gemini native adapter', () => {
     expect(day.providerMessage).toMatch(/daily quota/);
     expect(day.retryAfterMs!).toBeGreaterThan(20_000); // the daily reset, not the 20 s hint: retrying in 20 s would call an exhausted quota again
     expect(day.retryAfterMs!).toBeLessThanOrEqual(24 * 3600_000);
+  });
+
+  it('a conversation never reaches Gemini ending with a model turn (HTTP 400 in production on replayed questions); a tool-call turn is left alone; the agent loop leaves the automated notice out', () => {
+    const base = { baseUrl: '', apiKey: null, model: 'm', timeoutMs: 1000 };
+    const ended = toGeminiRequest({ ...base, messages: [{ role: 'user', content: 'Do you open on Fridays?' }, { role: 'assistant', content: 'Automated reply: our assistant cannot answer right now.' }] }) as { contents: Array<{ role: string }> };
+    expect(ended.contents.map((c) => c.role)).toEqual(['user', 'model', 'user']);
+    const withCall = toGeminiRequest({ ...base, messages: [{ role: 'user', content: 'book it' }, { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'book', arguments: '{}' } }] }] }) as { contents: Array<{ role: string }> };
+    expect(withCall.contents.map((c) => c.role)).toEqual(['user', 'model']);
+    const loop = endWithCustomerTurn([{ role: 'system', content: 's' }, { role: 'user', content: 'q1' }, { role: 'assistant', content: 'notice' }, { role: 'assistant', content: 'notice 2' }]);
+    expect(loop.map((m) => m.role)).toEqual(['system', 'user']);
+    expect(endWithCustomerTurn([{ role: 'system', content: 's' }, { role: 'user', content: 'q' }])).toHaveLength(2); // already ends with the customer: unchanged
+    expect(endWithCustomerTurn([{ role: 'system', content: 's' }, { role: 'assistant', content: 'only an assistant turn' }])).toHaveLength(2); // nothing to answer: unchanged
   });
 
   it('quotaInfo reads quota ids and the retry delay and tolerates bodies without them; the daily reset delay is between one minute and a day', () => {

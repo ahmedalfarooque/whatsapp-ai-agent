@@ -74,6 +74,10 @@ export function toGeminiRequest(request: AdapterCompleteRequest): Record<string,
     const parts = partsOf(m.content);
     if (parts.length) contents.push({ role: 'user', parts });
   }
+  // Gemini refuses a request whose LAST turn is the model's ("Requests ending with a model turn are not supported", HTTP 400 — seen in production on every replayed
+  // question, because the stored conversation ends with the automated notice). The conversation therefore always ends with the customer's side.
+  const tail = contents[contents.length - 1];
+  if (tail && tail.role === 'model' && !tail.parts.some((p) => 'functionCall' in p)) contents.push({ role: 'user', parts: [{ text: 'Please reply to my latest message above.' }] });
   return {
     contents,
     ...(system.length ? { systemInstruction: { parts: [{ text: system.join('\n\n') }] } } : {}),

@@ -43,6 +43,17 @@ export function historyToChatMessages(history: ChatMessageForLlm[]): ChatMessage
 }
 
 
+/**
+ * The model must answer the customer's LAST message, so the conversation it sees ends with the customer's turn. A question that is answered later (the recovery
+ * sweep replays it) is followed in storage by the automated "assistant unavailable" notice: that trailing assistant text is left out of what the model sees —
+ * providers differ about a request ending with an assistant turn (Gemini refuses it with HTTP 400), and the notice is not part of the answer to give.
+ */
+export function endWithCustomerTurn(messages: ChatMessage[]): ChatMessage[] {
+  let end = messages.length;
+  while (end > 1 && messages[end - 1]!.role === 'assistant' && messages.slice(0, end - 1).some((m) => m.role === 'user')) end -= 1;
+  return end === messages.length ? messages : messages.slice(0, end);
+}
+
 /** Parses the model's argument string. `null` means it was not valid JSON: that is reported to the model, never silently turned into {}. */
 function parseArgs(raw: string | undefined): unknown | null {
   if (raw === undefined || raw.trim() === '') return {};
@@ -81,7 +92,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
   const deadline = Date.now() + (params.timeBudgetMs ?? env.AI_LOOP_TIMEOUT_MS);
   const messages: ChatMessage[] = [
     { role: 'system', content: params.systemPrompt },
-    ...historyToChatMessages(params.history),
+    ...endWithCustomerTurn(historyToChatMessages(params.history)),
   ];
   const generatedMessages: GeneratedMessage[] = [];
   const executed = new Map<string, string>(); // canonical call -> the result it produced

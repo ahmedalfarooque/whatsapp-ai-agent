@@ -47,14 +47,14 @@ const at = (ms: number) => vi.setSystemTime(T0 + ms);
 
 type Host = 'openrouter.ai' | 'generativelanguage.googleapis.com' | 'api.groq.com';
 let counts: Record<string, number>;
-function network(handlers: Partial<Record<Host, (n: number) => Response | Promise<Response>>>, delayMs = 0) {
+function network(handlers: Partial<Record<Host, (n: number, body: Record<string, unknown>) => Response | Promise<Response>>>, delayMs = 0) {
   counts = {};
-  vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const host = new URL(String(url)).host as Host;
     counts[host] = (counts[host] ?? 0) + 1;
     if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
     const handler = handlers[host];
-    return handler ? await handler(counts[host]!) : err(500, 'no script');
+    return handler ? await handler(counts[host]!, init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}) : err(500, 'no script');
   }));
 }
 
@@ -316,6 +316,33 @@ describe('every provider exhausted: customers are told once, never see a provide
     expect(sendersOf()).toEqual(['We open Saturday to Thursday.']);
     expect(await runReplaySweep(runner, new Date(), getDb())).toMatchObject({ replayed: 0 });
     expect(sendersOf()).toHaveLength(1);
+  });
+
+  it('a question answered LATER by Gemini reaches it as a conversation that ends with the customer\'s turn (Gemini refuses a request ending with a model turn: production, HTTP 400 on every replay)', async () => {
+    let geminiUp = false;
+    const lastRoles: string[] = [];
+    network({
+      'openrouter.ai': () => err(429, 'Rate limit exceeded: free-models-per-day'),
+      'generativelanguage.googleapis.com': (_n, body) => {
+        const contents = ((body as { contents?: unknown }).contents ?? []) as Array<{ role: string }>;
+        lastRoles.push(contents[contents.length - 1]?.role ?? 'none');
+        if (contents[contents.length - 1]?.role === 'model') return json(400, { error: { status: 'INVALID_ARGUMENT', message: 'Requests ending with a model turn are not supported.' } });
+        return geminiUp ? gemOk('Gemini late answer') : gemQuota();
+      },
+    });
+    vi.mocked(sendTextMessage).mockClear();
+    vi.mocked(sendTextMessage).mockResolvedValue({ messages: [{ id: 'wamid.OUT' }] } as never);
+    const waId = await customerSays('Do you open on Fridays?');
+    getDb().prepare('UPDATE pending_replies SET created_at = ?, updated_at = ? WHERE wa_id = ?').run(new Date(Date.now()).toISOString().slice(0, 19).replace('T', ' '), new Date(Date.now()).toISOString().slice(0, 19).replace('T', ' '), waId);
+    expect(sendersOf()).toHaveLength(1); // the automated notice; the stored conversation now ENDS with an assistant turn
+    at(3 * 60 * MIN); geminiUp = true; // both pauses are over; OpenRouter still has its daily limit, Gemini is back
+    getDb().prepare('UPDATE pending_replies SET created_at = ?, updated_at = ? WHERE wa_id = ?').run(new Date(T0 + 179 * MIN).toISOString().slice(0, 19).replace('T', ' '), new Date(T0 + 179 * MIN).toISOString().slice(0, 19).replace('T', ' '), waId);
+    vi.mocked(sendTextMessage).mockClear();
+    const recovered = await runReplaySweep(runner, new Date(), getDb());
+    expect(recovered).toMatchObject({ replayed: 1, answered: 1 });
+    expect(sendersOf()).toEqual(['Gemini late answer']);
+    expect(lastRoles[lastRoles.length - 1]).toBe('user');
+    expect(lastRoles).not.toContain('model');
   });
 
   it('the same WhatsApp message delivered twice at once (a webhook retry) while providers fail over produces ONE reply', async () => {
