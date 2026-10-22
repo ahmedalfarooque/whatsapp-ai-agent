@@ -59,7 +59,7 @@ describe('vendor identity', () => {
   });
 
   it('no vendor lists a default model that was not seen in its live model list (only Groq and OpenRouter have a verified default)', () => {
-    expect(VENDORS.filter((v) => v.verifiedDefault).map((v) => v.id).sort()).toEqual(['groq', 'openrouter']);
+    expect(VENDORS.filter((v) => v.verifiedDefault).map((v) => v.id).sort()).toEqual(['groq', 'omniroute', 'openrouter']); // omniroute: auto/best-free was seen in the gateway's live /v1/models list on 2026-10-22
   });
 });
 

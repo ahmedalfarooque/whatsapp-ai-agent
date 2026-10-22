@@ -99,8 +99,9 @@ export interface AiProviderInput {
 export const PROVIDER_KINDS: readonly ProviderKind[] = ['openrouter', 'openai_compatible'];
 // A model id is never an address: :// is refused (a pasted console / key-page URL is not a model).
 const MODEL_ID = /^(?!.*:\/\/)[A-Za-z0-9._:/@-]{1,120}$/;
-// Every provider is reached over HTTPS: an API key is never sent in clear text.
-const URL_RE = /^https:\/\/[^\s"'<>]{3,200}$/;
+// Every provider is reached over HTTPS: an API key is never sent in clear text. The one exception is a gateway on this machine's own loopback address (OmniRoute),
+// where nothing leaves the host.
+const URL_RE = /^(https:\/\/[^\s"'<>]{3,200}|http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{2,5})?(\/[^\s"'<>]{0,150})?)$/;
 
 /** The one definition of a valid endpoint and model id: the server checks with it and the dashboard form receives its source, so both always agree. */
 export const PROVIDER_RULES = { baseUrl: URL_RE, model: MODEL_ID } as const;

@@ -60,6 +60,11 @@ export const VENDORS: Vendor[] = [
   { id: 'cerebras', name: 'Cerebras', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'https://api.cerebras.ai/v1', hosts: ['api.cerebras.ai'], docs: 'https://inference-docs.cerebras.ai', keyPrefix: /^csk-/, verifiedDefault: '', probeModels: [],
     free: { mode: 'admin_confirmation', note: 'Cerebras has a free tier with limits; confirm it yourself.' },
     hint: 'API address https://api.cerebras.ai/v1. Type a model id under More options; it is tested with a real request when you save.' },
+  // OmniRoute: a local gateway (npm "omniroute") with an OpenAI-compatible API on loopback. Its keys are plain `sk-…` (no prefix to recognise), so it is detected by asking the
+  // gateway itself (src/llm/omniRoute.ts). `auto/best-free` is its own free-only combo; any other model it offers can be paid by the account behind it.
+  { id: 'omniroute', name: 'OmniRoute', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'http://127.0.0.1:20128/v1', hosts: ['127.0.0.1', 'localhost'], docs: 'https://github.com/diegosouzapw/OmniRoute', verifiedDefault: 'auto/best-free', verifiedOn: '2026-10-22', probeModels: ['auto/best-free'],
+    free: { mode: 'admin_confirmation', note: 'OmniRoute routes to whatever accounts are connected inside it. Only its free-only combo (auto/best-free) is treated as free; any other model is yours to confirm.' },
+    hint: 'OmniRoute running on this server (http://127.0.0.1:20128/v1). Leave the key empty on a PC where OmniRoute is installed and its local key is used automatically.' },
   { id: 'custom', name: 'Custom OpenAI-compatible', adapter: 'openai', kind: 'openai_compatible', baseUrl: '', hosts: [], docs: '', verifiedDefault: '', probeModels: [],
     free: { mode: 'admin_confirmation', note: 'An unknown endpoint: confirm its free tier yourself.' },
     hint: 'Any API that implements /v1/chat/completions. The endpoint is its API base URL (not a web page) and the models are required.' },

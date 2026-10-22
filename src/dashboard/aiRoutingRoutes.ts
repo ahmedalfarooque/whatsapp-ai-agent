@@ -12,9 +12,10 @@ import { AiCredentialError } from '../llm/aiCredentialError';
 import { AiResponseError } from '../llm/aiResponseError';
 import { getModelInfo } from '../llm/modelCatalog';
 import { createProvider, csv, deleteProvider, getProvider, listProvidersForAccount, listSharedProviders, PROVIDER_KINDS, providerApiKey, ProviderValidationError, recordProviderTest, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider, type AiProviderInput, type AiProviderRow, type ProviderKind } from '../llm/providerRepo';
-import { PROVIDER_PRESETS, presetsPayload, resolveSimpleProvider, SimpleProviderError } from '../llm/providerPresets';
+import { PROVIDER_PRESETS, detectPresetId, presetsPayload, resolveSimpleProvider, SimpleProviderError } from '../llm/providerPresets';
 import { getAccountRouting, RoutingOrderError, saveAccountRouting } from '../llm/routingOrder';
 import { endpointMatchesVendor, vendorById } from '../llm/adapters';
+import { OMNIROUTE_FREE_MODEL, discoverLocalOmniRouteKey, isOmniRouteKey, omniRouteReachable } from '../llm/omniRoute';
 import { autoSelectModel, type ProbeAttempt } from '../llm/autoSetup';
 import { validationBudget } from '../llm/validationBudget';
 import { listRouteLog, routeStats } from '../llm/routeLog';
@@ -87,6 +88,8 @@ export function inputFrom(body: unknown): AiProviderInput {
  */
 export function forCreate(input: AiProviderInput, body: unknown): AiProviderInput {
   const asked = (body as { freeConfirmed?: unknown } | null)?.freeConfirmed === true;
+  // OmniRoute's own free-only combo counts as free; it is also tried FIRST (priority 5, ahead of OpenRouter 10 / Gemini 100 / Groq 110), the others stay as they are.
+  if (input.vendor === 'omniroute') return { ...input, priority: input.priority ?? 5, freeConfirmed: asked || (input.models.length > 0 && input.models.every((m) => m === OMNIROUTE_FREE_MODEL)) };
   return { ...input, freeConfirmed: input.kind === 'openrouter' ? true : asked };
 }
 
@@ -115,7 +118,19 @@ export async function prepareCreateInput(body: unknown): Promise<PreparedCreate>
   if (!isSimpleBody(body)) return { ok: true, input: forCreate(inputFrom(body), body), setup: null };
   const b = (body ?? {}) as Record<string, unknown>;
   const num = Number(b.timeoutMs);
-  const resolved = resolveSimpleProvider({ name: str(b.name), config: str(b.config), provider: str(b.provider), models: str(b.models), baseUrl: str(b.baseUrl), timeoutMs: Number.isFinite(num) && num > 0 ? num : undefined }, { autoModel: true });
+  let config = str(b.config);
+  let provider = str(b.provider);
+  const wantsOmniRoute = provider === 'omniroute' || (!provider || provider === 'auto') && !config && /omni/i.test(str(b.name));
+  // OmniRoute on this machine: no key typed means "use the one OmniRoute already has here"; it must be running, and a key is never invented.
+  if (wantsOmniRoute && !config) {
+    const local = (await omniRouteReachable()) ? await discoverLocalOmniRouteKey() : null;
+    if (!local) return { ok: false, status: 422, json: { error: 'OmniRoute was not found on this server, or its client key could not be read. Start it (omniroute) or paste its client key; nothing was saved.', code: 'omniroute_unavailable', fields: ['config'] } };
+    config = local;
+    provider = 'omniroute';
+  } else if ((!provider || provider === 'auto') && config && !detectPresetId(config) && !/^https?:\/\//i.test(config) && (await isOmniRouteKey(config))) {
+    provider = 'omniroute'; // a key no vendor prefix explains, accepted by the OmniRoute gateway on loopback
+  }
+  const resolved = resolveSimpleProvider({ name: str(b.name), config, provider, models: str(b.models), baseUrl: str(b.baseUrl), timeoutMs: Number.isFinite(num) && num > 0 ? num : undefined }, { autoModel: true });
   const vendor = vendorById(resolved.vendor);
   if (!vendor) throw new SimpleProviderError('provider_required', ['provider']);
   // The name is optional: an empty one becomes the detected provider's name, numbered when that provider was already added.

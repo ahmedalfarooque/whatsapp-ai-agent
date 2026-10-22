@@ -282,7 +282,7 @@ describe('automatic model selection when a key is saved (scripted providers)', (
 
   it('the preset list tells the form which vendors choose their model automatically, and offers no model-list feature', () => {
     const payload = presetsPayload();
-    expect(Object.fromEntries(payload.presets.map((p) => [p.id, p.autoSelect]))).toEqual({ openrouter: true, groq: true, google: true, xai: false, mistral: true, cerebras: false, custom: false });
+    expect(Object.fromEntries(payload.presets.map((p) => [p.id, p.autoSelect]))).toEqual({ openrouter: true, groq: true, google: true, xai: false, mistral: true, cerebras: false, omniroute: true, custom: false });
     expect(JSON.stringify(payload)).not.toMatch(/discovery|fetch/i);
     expect(VENDORS.every((v) => Array.isArray(v.probeModels))).toBe(true);
   });

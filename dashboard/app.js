@@ -1366,7 +1366,8 @@ function aiFormValidate(form, isNew) {
   const meta = aiFormMeta(form);
   const errors = {};
   const val = (n) => (form.elements[n] ? String(form.elements[n].value || '').trim() : '');
-  if (isNew && !val('config')) errors.config = 'Paste the API key.';
+  const omniLocal = isNew && (val('provider') === 'omniroute' || /omni/i.test(val('name'))); // OmniRoute on this server needs no pasted key: its own local key is used
+  if (isNew && !val('config') && !omniLocal) errors.config = 'Paste the API key.';
   else if (isNew && /^https?:\/\//i.test(val('config'))) errors.config = 'Paste the API key, not an address. The endpoint goes under More options.';
   const preset = isNew ? aiFormPreset(form, meta) : null;
   if (isNew && !preset && !val('baseUrl')) errors.provider = 'This key\'s provider could not be recognised. Choose it under More options, or enter the endpoint address and models of a custom one.';
