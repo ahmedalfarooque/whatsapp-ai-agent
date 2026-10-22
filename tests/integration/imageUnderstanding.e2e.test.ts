@@ -1,3 +1,4 @@
+import { setVideoDepsForTests } from '../../src/media/videoAnalysis';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/whatsapp/client', () => ({
@@ -302,5 +303,45 @@ describe('pictures respect the same boundaries as text', () => {
     expect(sent()).toHaveLength(2);
     expect(sent()[1]).toMatch(/voice notes, videos or files/);
     expect(fetchMock).toHaveBeenCalledTimes(1); // the voice note never reached the model: no audio model is configured
+  });
+
+  describe('a video is examined through its frames and audio, or honestly reported as not examined', () => {
+    const fakeAnalysis = (ok: boolean) => async () => (ok ? { ok: true as const, report: 'A red Toyota Land Cruiser parked outside a workshop.', confidence: 'high' as const, model: 'vision-x', durationMs: 5 } : { ok: false as const, reason: 'provider_failed' as const, durationMs: 5 });
+    const video = (ms = 'video/mp4') => media({ kind: 'video', mimeType: ms, fileLength: 1000, download: async () => Buffer.alloc(1000, 1) });
+    afterEach(() => setVideoDepsForTests(null));
+
+    it('with FFmpeg available the model receives timestamped frame observations, says what was not examined, and the customer gets ONE answer', async () => {
+      setVideoDepsForTests({ extract: async () => ({ ok: true, frames: [{ atSeconds: 0, bytes: Buffer.from('f0') }, { atSeconds: 10, bytes: Buffer.from('f1') }], audio: Buffer.alloc(2000, 1) }), analyze: fakeAnalysis(true), transcribe: async () => ({ ok: false, reason: 'not_configured', durationMs: 0 }) });
+      provider(() => answer(CAMRY));
+      const waId = nextWa();
+      await processInboundMessage({ waId, messageId: `wamid.vid.${++counter}`, timestamp: Date.now(), type: 'video', text: 'what is in this?', accountId: AUTO, media: video() }, { knowledge: LAND_CRUISER_KB });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const body = String((fetchMock.mock.calls[0]![1] as { body: string }).body);
+      expect(body).toContain('VIDEO ANALYSIS');
+      expect(body).toContain('FRAME at 0:00');
+      expect(body).toContain('FRAME at 0:10');
+      expect(body).toContain('A red Toyota Land Cruiser');
+      expect(body).toContain('NOT EXAMINED');
+      expect(body).toContain('no audio model is configured');
+      expect(sent()).toHaveLength(1);
+    });
+
+    it('without FFmpeg, with an unsupported format, or when every frame fails, the model is told the video was NOT analysed (never a made-up description)', async () => {
+      const cases: Array<[string, Parameters<typeof setVideoDepsForTests>[0], string]> = [
+        ['video/mp4', { extract: async () => ({ ok: false, reason: 'ffmpeg_unavailable' }), analyze: fakeAnalysis(true), transcribe: async () => ({ ok: false, reason: 'not_configured', durationMs: 0 }) }, 'VIDEO NOT ANALYSED'],
+        ['video/x-flv', { extract: async () => ({ ok: false, reason: 'failed' }), analyze: fakeAnalysis(true), transcribe: async () => ({ ok: false, reason: 'not_configured', durationMs: 0 }) }, 'format cannot be read'],
+        ['video/mp4', { extract: async () => ({ ok: true, frames: [{ atSeconds: 0, bytes: Buffer.from('f0') }], audio: null }), analyze: fakeAnalysis(false), transcribe: async () => ({ ok: false, reason: 'not_configured', durationMs: 0 }) }, 'nothing in it could be examined'],
+      ];
+      for (const [mime, deps, expected] of cases) {
+        setVideoDepsForTests(deps);
+        fetchMock.mockClear();
+        provider(() => answer(CAMRY));
+        await processInboundMessage({ waId: nextWa(), messageId: `wamid.vid.${++counter}`, timestamp: Date.now(), type: 'video', text: 'what is in this?', accountId: AUTO, media: video(mime) }, { knowledge: LAND_CRUISER_KB });
+        const body = String((fetchMock.mock.calls[0]![1] as { body: string }).body);
+        expect(body).toContain('VIDEO NOT ANALYSED');
+        expect(body).toContain(expected === 'VIDEO NOT ANALYSED' ? 'not installed' : expected);
+        expect(body).not.toContain('VIDEO ANALYSIS —');
+      }
+    });
   });
 });

@@ -16,7 +16,8 @@ import { afterHoursNoticeSend, followupMenuSend, followupOptionsText, FOLLOWUP_S
 import { describeMoment, nextOpening } from '../setup/hours';
 import { AUDIO_TRANSCRIPT_TOOL, audioContextLine, transcribeAudio, type AudioTranscription } from '../llm/audio';
 import { extractDocumentText, isExtractableDocument, type DocumentTextResult } from '../media/textExtractors';
-import { DOCUMENT_TEXT_TOOL, MEDIA_NOTE_TOOL, documentContextLine, videoContextLine } from '../llm/mediaContext';
+import { DOCUMENT_TEXT_TOOL, MEDIA_NOTE_TOOL, documentContextLine } from '../llm/mediaContext';
+import { analyseVideo } from '../media/videoAnalysis';
 import { trimHistoryToBudget } from '../knowledge/select';
 import {
   getOrCreateActiveConversation,
@@ -384,13 +385,17 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     appendMessage(conversation.id, { role: 'tool', toolName: DOCUMENT_TEXT_TOOL, content: documentContextLine(documentText, document.fileName), whatsappMessageId: msg.messageId, metadata: { ok: documentText.ok, reason: documentText.ok ? undefined : documentText.reason, kind: documentText.kind, chars: documentText.ok ? documentText.chars : undefined, durationMs: Date.now() - extractionStarted } });
     mediaNotes.push(documentText.ok ? `${documentText.kind} read in ${((Date.now() - extractionStarted) / 1000).toFixed(1)} s (${documentText.chars} chars${documentText.truncated ? ', truncated' : ''})` : `file not read (${documentText.reason})`);
   }
+  let videoTranscript: string | null = null;
   if (video) {
-    appendMessage(conversation.id, { role: 'tool', toolName: MEDIA_NOTE_TOOL, content: videoContextLine(), whatsappMessageId: msg.messageId, metadata: { ok: false, reason: 'video_not_supported' } });
-    mediaNotes.push('video not analysed (no frame or audio extraction here)');
+    // Frames go to the vision model and the audio to the transcription model (when configured); the answer rests only on what they returned.
+    const watched = await analyseVideo({ mimeType: video.mimeType, fileLength: video.fileLength, download: video.download, caption: msg.text, transcribeSpeech: Boolean(getBusinessSettings().openRouterAudioModel), deadline: startedAt + env.AI_LOOP_TIMEOUT_MS });
+    appendMessage(conversation.id, { role: 'tool', toolName: MEDIA_NOTE_TOOL, content: watched.line, whatsappMessageId: msg.messageId, metadata: { ok: watched.ok, reason: watched.ok ? undefined : watched.reason, frames: watched.frames, transcribed: Boolean(watched.transcript) } });
+    mediaNotes.push(watched.note);
+    videoTranscript = watched.transcript?.text ?? null;
   }
   // What the customer "said" this turn: their text or caption, else the transcript of their voice note, else the readable text of their
   // file — the reply language follows it (shared policy: detected language → menu language → English).
-  const latestText = msg.text?.trim() || (transcript?.ok ? transcript.text : '') || (documentText?.ok ? documentText.text.slice(0, 2000) : '') || null;
+  const latestText = msg.text?.trim() || (transcript?.ok ? transcript.text : '') || (videoTranscript ?? '') || (documentText?.ok ? documentText.text.slice(0, 2000) : '') || null;
 
   // The model's memory of this customer in this business: this conversation only, the latest N messages, and nothing older than
   // CONVERSATION_MEMORY_HOURS (docs/AI_ASSISTANT.md). The stored conversation is untouched.
