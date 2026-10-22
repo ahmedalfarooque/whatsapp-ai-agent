@@ -18,6 +18,7 @@ import { AUDIO_TRANSCRIPT_TOOL, audioConfigured, audioContextLine, transcribeAud
 import { extractDocumentText, isExtractableDocument, type DocumentTextResult } from '../media/textExtractors';
 import { DOCUMENT_TEXT_TOOL, MEDIA_NOTE_TOOL, documentContextLine } from '../llm/mediaContext';
 import { analyseVideo } from '../media/videoAnalysis';
+import { analyseScannedPdf, type ScannedPdfResult } from '../media/scannedPdf';
 import { trimHistoryToBudget } from '../knowledge/select';
 import {
   getOrCreateActiveConversation,
@@ -375,14 +376,20 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   }
   if (document) {
     const extractionStarted = Date.now();
+    let docBytes: Buffer | null = null;
     try {
       const bytes = await document.download();
+      docBytes = bytes;
       documentText = await extractDocumentText({ bytes, mimeType: document.mimeType, fileName: document.fileName });
     } catch (error) {
       logger.warn({ waId: maskedId, errorName: (error as Error)?.name }, 'customer file could not be downloaded for reading');
       documentText = { ok: false, kind: 'unknown', reason: 'extraction_failed', detail: 'download failed' };
     }
-    appendMessage(conversation.id, { role: 'tool', toolName: DOCUMENT_TEXT_TOOL, content: documentContextLine(documentText, document.fileName), whatsappMessageId: msg.messageId, metadata: { ok: documentText.ok, reason: documentText.ok ? undefined : documentText.reason, kind: documentText.kind, chars: documentText.ok ? documentText.chars : undefined, durationMs: Date.now() - extractionStarted } });
+    // A scanned PDF (no text layer) is read page by page by the vision model when a page renderer exists; otherwise it is reported as not read.
+    let scanned: ScannedPdfResult | null = null;
+    if (!documentText.ok && documentText.reason === 'no_text_layer' && docBytes) scanned = await analyseScannedPdf({ bytes: docBytes, fileName: document.fileName, caption: msg.text, deadline: startedAt + env.AI_LOOP_TIMEOUT_MS });
+    appendMessage(conversation.id, { role: 'tool', toolName: DOCUMENT_TEXT_TOOL, content: scanned ? scanned.line : documentContextLine(documentText, document.fileName), whatsappMessageId: msg.messageId, metadata: { ok: documentText.ok || Boolean(scanned?.ok), reason: documentText.ok ? undefined : (scanned?.ok ? undefined : documentText.reason), kind: documentText.kind, chars: documentText.ok ? documentText.chars : undefined, scannedPagesRead: scanned?.pagesRead, durationMs: Date.now() - extractionStarted } });
+    if (scanned) mediaNotes.push(scanned.note); else
     mediaNotes.push(documentText.ok ? `${documentText.kind} read in ${((Date.now() - extractionStarted) / 1000).toFixed(1)} s (${documentText.chars} chars${documentText.truncated ? ', truncated' : ''})` : `file not read (${documentText.reason})`);
   }
   let videoTranscript: string | null = null;
