@@ -37,6 +37,8 @@ export interface Vendor {
   validationTokens?: number;
   /** Completion-token budget of a normal customer reply (default 600). A reasoning model needs room for its hidden reasoning AND the answer. */
   chatTokens?: number;
+  /** Documented native input modalities of this vendor's chat models: a provider of this vendor serves pictures / audio with its own chat models when no model is listed for the task. */
+  media?: { vision: boolean; audio: boolean };
   free: FreeEligibility;
   hint: string;
 }
@@ -48,7 +50,7 @@ export const VENDORS: Vendor[] = [
   { id: 'groq', name: 'Groq', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', hosts: ['api.groq.com'], docs: 'https://console.groq.com/docs', keyPrefix: /^gsk_/, verifiedDefault: 'openai/gpt-oss-20b', verifiedOn: '2026-10-18', probeModels: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'], validationTokens: 256, chatTokens: 1000,
     free: { mode: 'admin_confirmation', note: 'Groq has a free plan with rate limits, but its API does not say which plan a key is on: confirm it yourself.' },
     hint: 'Groq (not xAI Grok). API address https://api.groq.com/openai/v1; get the key at console.groq.com/keys (that page is not the API address).' },
-  { id: 'google', name: 'Google AI Studio (Gemini)', adapter: 'gemini', kind: 'openai_compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', hosts: ['generativelanguage.googleapis.com'], docs: 'https://ai.google.dev/api', keyPrefix: /^AIza/, verifiedDefault: '', probeModels: ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.8-flash'],
+  { id: 'google', name: 'Google AI Studio (Gemini)', adapter: 'gemini', kind: 'openai_compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', hosts: ['generativelanguage.googleapis.com'], docs: 'https://ai.google.dev/api', keyPrefix: /^AIza/, verifiedDefault: '', probeModels: ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.8-flash'], media: { vision: true, audio: true },
     free: { mode: 'admin_confirmation', note: 'The Gemini API has a free tier for some models; the model list does not say which. Check your key\'s rate-limit page, then confirm.' },
     hint: 'Native Gemini API (generateContent). The model is chosen automatically: when you save, the key is tested with a real request.' },
   { id: 'xai', name: 'xAI (Grok)', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'https://api.x.ai/v1', hosts: ['api.x.ai'], docs: 'https://docs.x.ai', keyPrefix: /^xai-/, verifiedDefault: '', probeModels: [],

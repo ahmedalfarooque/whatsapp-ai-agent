@@ -47,6 +47,16 @@ describe('the account AI providers list', () => {
     expect(form).toContain('More options');
   });
 
+  it('Provider, Models and Endpoint are NOT visible by default: all three sit inside the collapsed More options (the provider is detected from the key)', () => {
+    const primary = form.slice(0, form.indexOf('<details class="ai-more">'));
+    expect(primary).not.toMatch(/name="provider"|name="models"|name="baseUrl"|'models'|'baseUrl'/);
+    const more = form.slice(form.indexOf('<details class="ai-more">'), form.indexOf('</details>'));
+    expect(more).toContain('name="provider"');
+    expect(more).toContain("textField('models'");
+    expect(more).toContain("textField('baseUrl'");
+    expect(more).toContain('Detect from the key');
+  });
+
   it('shows one row per entry with a compact status and the actions order / test / on-off / edit / remove — Default has no edit or remove', () => {
     for (const act of ['up', 'down', 'test', 'toggle', 'edit', 'remove']) expect(row).toContain(`data-act="${act}"`);
     expect(row).toMatch(/isDefault \? '' : '<button type="button" class="btn small" data-act="edit">/);

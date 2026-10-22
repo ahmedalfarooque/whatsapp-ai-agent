@@ -6,7 +6,7 @@ import { chatCompletion } from './openRouterClient';
 import { contentText } from './types';
 import { AiCredentialError } from './aiCredentialError';
 import { AiResponseError } from './aiResponseError';
-import { csv, listProvidersForAccount } from './providerRepo';
+import { listProvidersForAccount, providerModelsFor } from './providerRepo';
 
 /**
  * Voice-note transcription through the existing OpenRouter provider abstraction: the actual audio bytes are sent to the business's
@@ -57,14 +57,17 @@ export function audioFormatOf(mimeType: string): string | null {
   return FORMAT_BY_MIME[mime] ?? null;
 }
 
+/** An audio route exists when the business set an audio model (built-in OpenRouter key) or an enabled provider lists audio models (e.g. Gemini). */
+export function audioConfigured(): boolean {
+  return Boolean(getBusinessSettings().openRouterAudioModel) || listProvidersForAccount(currentAccountId()).some((p) => p.enabled !== 0 && providerModelsFor(p, 'audio').length > 0);
+}
+
 /** Transcribes one voice note / audio file. Never throws. */
 export async function transcribeAudio(input: TranscribeAudioInput): Promise<AudioTranscription> {
   const started = Date.now();
   const done = (r: AudioTranscription): AudioTranscription => r;
-  // An audio route exists when the business set an audio model (built-in OpenRouter key) or a configured provider lists audio models.
   const model = getBusinessSettings().openRouterAudioModel;
-  const providerAudio = listProvidersForAccount(currentAccountId()).some((p) => p.enabled !== 0 && csv(p.audio_models).length > 0);
-  if (!model && !providerAudio) return done({ ok: false, reason: 'not_configured', durationMs: 0 });
+  if (!audioConfigured()) return done({ ok: false, reason: 'not_configured', durationMs: 0 });
   const format = audioFormatOf(input.mimeType);
   if (!format) return done({ ok: false, reason: 'unsupported_format', durationMs: Date.now() - started });
   if (input.fileLength && input.fileLength > env.AUDIO_MAX_BYTES) return done({ ok: false, reason: 'too_large', durationMs: Date.now() - started });

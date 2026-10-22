@@ -14,7 +14,7 @@ import {
 } from '../memory/customerRepo';
 import { afterHoursNoticeSend, followupMenuSend, followupOptionsText, FOLLOWUP_STATES, isFollowupState, routeFollowup, type FollowupRouteResult } from '../followups/customerFlow';
 import { describeMoment, nextOpening } from '../setup/hours';
-import { AUDIO_TRANSCRIPT_TOOL, audioContextLine, transcribeAudio, type AudioTranscription } from '../llm/audio';
+import { AUDIO_TRANSCRIPT_TOOL, audioConfigured, audioContextLine, transcribeAudio, type AudioTranscription } from '../llm/audio';
 import { extractDocumentText, isExtractableDocument, type DocumentTextResult } from '../media/textExtractors';
 import { DOCUMENT_TEXT_TOOL, MEDIA_NOTE_TOOL, documentContextLine } from '../llm/mediaContext';
 import { analyseVideo } from '../media/videoAnalysis';
@@ -220,7 +220,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   // A voice note is transcribed by the business's audio model (when one is configured) and then answered like typed text; a readable file
   // (PDF, Word, Excel, PowerPoint, text) has its text read and is answered from it; a video is recorded and answered with an honest
   // "cannot watch videos" note. Everything else keeps the one acknowledgement per window.
-  const voice = (msg.type === 'voice' || msg.type === 'audio') && msg.media && canAnalyse && getBusinessSettings().openRouterAudioModel ? msg.media : null;
+  const voice = (msg.type === 'voice' || msg.type === 'audio') && msg.media && canAnalyse && audioConfigured() ? msg.media : null;
   const document = msg.type === 'document' && msg.media && canAnalyse && isExtractableDocument(msg.media.mimeType, msg.media.fileName) ? msg.media : null;
   const video = msg.type === 'video' && msg.media && canAnalyse ? msg.media : null;
   const analysedMedia = picture ?? voice ?? document ?? video;
@@ -388,7 +388,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   let videoTranscript: string | null = null;
   if (video) {
     // Frames go to the vision model and the audio to the transcription model (when configured); the answer rests only on what they returned.
-    const watched = await analyseVideo({ mimeType: video.mimeType, fileLength: video.fileLength, download: video.download, caption: msg.text, transcribeSpeech: Boolean(getBusinessSettings().openRouterAudioModel), deadline: startedAt + env.AI_LOOP_TIMEOUT_MS });
+    const watched = await analyseVideo({ mimeType: video.mimeType, fileLength: video.fileLength, download: video.download, caption: msg.text, transcribeSpeech: audioConfigured(), deadline: startedAt + env.AI_LOOP_TIMEOUT_MS });
     appendMessage(conversation.id, { role: 'tool', toolName: MEDIA_NOTE_TOOL, content: watched.line, whatsappMessageId: msg.messageId, metadata: { ok: watched.ok, reason: watched.ok ? undefined : watched.reason, frames: watched.frames, transcribed: Boolean(watched.transcript) } });
     mediaNotes.push(watched.note);
     videoTranscript = watched.transcript?.text ?? null;

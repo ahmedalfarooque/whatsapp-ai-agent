@@ -9,7 +9,7 @@ import { AiResponseError, type AiResponseReason, type ModelAttemptRecord } from 
 import { adapterFor, vendorForUrl } from './adapters';
 import { CHAT_BUDGET_CAP, chatBudget } from './validationBudget';
 import { getModelInfo } from './modelCatalog';
-import { csv, listProvidersForAccount, listSharedProviders, providerApiKey, type AiProviderRow, type ProviderKind } from './providerRepo';
+import { csv, listProvidersForAccount, listSharedProviders, providerApiKey, providerModelsFor, type AiProviderRow, type ProviderKind } from './providerRepo';
 import { recordRouteAttempt } from './routeLog';
 import { DEFAULT_ENTRY, getAccountRouting, providerEntryKey } from './routingOrder';
 import type { ChatCompletionResponse, ChatMessage } from './types';
@@ -235,7 +235,7 @@ const reasonOf = (category: FailureCategory): AiResponseReason =>
 
 // ---- candidates ------------------------------------------------------------------------------------------------------------------------
 function modelsFor(row: AiProviderRow, task: AiTask): string[] {
-  return csv(task === 'chat' ? row.models : task === 'vision' ? row.vision_models : row.audio_models);
+  return providerModelsFor(row, task);
 }
 
 async function describeModel(kind: ProviderKind, model: string, row: AiProviderRow | null, task: AiTask): Promise<Pick<RouteCandidate, 'free' | 'image' | 'audio' | 'tools'>> {

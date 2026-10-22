@@ -5,7 +5,7 @@ import { getSecretEncryptionKey } from '../config/masterKey';
 import { isUsableApiKey } from '../config/effectiveConfig';
 import { logger } from '../logger';
 import { ensureAccountRouting, forgetProviderEntry } from './routingOrder';
-import { endpointMatchesVendor, isAdapterId, vendorForUrl } from './adapters';
+import { endpointMatchesVendor, isAdapterId, vendorById, vendorForUrl } from './adapters';
 
 /**
  * AI providers configured in the dashboard (table ai_providers, migration 027). A provider is a chat-completions endpoint with its own
@@ -114,6 +114,16 @@ export class ProviderValidationError extends Error {
 }
 
 export const csv = (v: string | null | undefined): string[] => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+
+/**
+ * The models a provider offers for a task. Models listed for the task win; otherwise a vendor whose chat models natively take pictures / audio (Gemini, per
+ * vendors.ts `media`) serves them with its chat models — verified for real with gemini-3.8-flash (picture read, speech transcribed) — so no one has to list them by hand.
+ */
+export function providerModelsFor(row: Pick<AiProviderRow, 'models' | 'vision_models' | 'audio_models' | 'vendor'>, task: 'chat' | 'vision' | 'audio'): string[] {
+  const listed = csv(task === 'chat' ? row.models : task === 'vision' ? row.vision_models : row.audio_models);
+  if (listed.length > 0 || task === 'chat') return listed;
+  return vendorById(row.vendor)?.media?.[task] ? csv(row.models) : [];
+}
 
 function validate(input: AiProviderInput): void {
   const fields: string[] = [];

@@ -1281,8 +1281,8 @@ function aiProviderFormHtml(meta, entry) {
       <p class="field-help ai-err" data-err="name" style="color:#c0453f" hidden></p>
       ${pwField('config', 'API configuration', isNew ? 'Paste the API key (stored encrypted, shown masked afterwards).' : 'Leave empty to keep the saved configuration, or enter a new one to replace it.', !isNew)}
       <p class="field-help ai-err" data-err="config" style="color:#c0453f" hidden></p>
-      ${isNew ? `<div class="field"><label for="wa-field-provider">Provider</label><select id="wa-field-provider" name="provider"><option value="auto">Detect from the key</option>${presetOptions}</select><p class="field-help ai-provider-hint"></p><p class="field-help ai-err" data-err="provider" style="color:#c0453f" hidden></p></div>` : ''}
-      <details class="ai-more"><summary>More options</summary>
+      <details class="ai-more"><summary>More options (only if the key is not recognised automatically)</summary>
+        ${isNew ? `<div class="field"><label for="wa-field-provider">Provider</label><select id="wa-field-provider" name="provider"><option value="auto">Detect from the key</option>${presetOptions}</select><p class="field-help ai-provider-hint"></p><p class="field-help ai-err" data-err="provider" style="color:#c0453f" hidden></p></div>` : ''}
         ${textField('models', 'Models (optional, comma-separated, best first)', isNew ? 'Leave empty: when you save, the key is tested with a real request and a model that answered is chosen automatically. Type model ids only to test those instead. Required for a custom endpoint, xAI and Cerebras. A provider is never used until its free tier is confirmed.' : 'The models this provider may use, best first. A provider is never used until its free tier is confirmed.', entry && entry.models ? entry.models.join(', ') : '')}
         <p class="field-help ai-err" data-err="models" style="color:#c0453f" hidden></p>
         ${isNew ? textField('baseUrl', 'Endpoint address', 'Filled in for known providers. Required for a custom endpoint: a full https:// address.', '') : ''}
@@ -1380,7 +1380,7 @@ function aiFormValidate(form, isNew) {
   if (isNew && models.length === 0 && !(preset && preset.autoSelect)) errors.models = 'Type the model id to use: this provider has no model that can be chosen automatically.';
   else if (models.some((m) => !meta.model.test(m))) errors.models = 'A model id may only contain letters, digits and . _ : / @ - (separate several with commas).';
   form.querySelectorAll('.ai-err').forEach((p) => { const m = errors[p.dataset.err]; p.textContent = m || ''; p.hidden = !m; });
-  if (errors.baseUrl || errors.models) form.querySelector('.ai-more').open = true;
+  if (errors.baseUrl || errors.models || errors.provider) form.querySelector('.ai-more').open = true;
   const first = Object.keys(errors)[0];
   if (first && form.elements[first] && form.elements[first].focus) form.elements[first].focus();
   return !first;
