@@ -68,7 +68,8 @@ async function api(url, options) {
     selectAccount(null, { silent: true });
   }
   if (!response.ok) {
-    const message = (body && body.error) || `Request failed (${response.status})`;
+    // The local window (scripts/dev-proxy.cjs) refuses production writes with a plain-language reason in `message`: show that, not the bare code.
+    const message = (body && (body.error === 'blocked_by_local_window' || body.error === 'cross_origin_blocked') && body.message) || (body && body.error) || `Request failed (${response.status})`;
     const error = new Error(message);
     error.status = response.status;
     if (body && body.fields) error.fields = body.fields;
@@ -1285,6 +1286,7 @@ function aiProviderFormHtml(meta, entry) {
         ${isNew ? `<div class="field"><label for="wa-field-provider">Provider</label><select id="wa-field-provider" name="provider"><option value="auto">Detect from the key</option>${presetOptions}</select><p class="field-help ai-provider-hint"></p><p class="field-help ai-err" data-err="provider" style="color:#c0453f" hidden></p></div>` : ''}
         ${textField('models', 'Models (optional, comma-separated, best first)', isNew ? 'Leave empty: when you save, the key is tested with a real request and a model that answered is chosen automatically. Type model ids only to test those instead. Required for a custom endpoint, xAI and Cerebras. A provider is never used until its free tier is confirmed.' : 'The models this provider may use, best first. A provider is never used until its free tier is confirmed.', entry && entry.models ? entry.models.join(', ') : '')}
         <p class="field-help ai-err" data-err="models" style="color:#c0453f" hidden></p>
+        ${isNew ? '<div class="ai-omni-models field" hidden><button type="button" class="btn small" data-act="omni-models">Load models from the gateway</button> <span class="muted small ai-omni-status" role="status"></span><datalist id="ai-omni-model-list"></datalist></div>' : ''}
         ${isNew ? textField('baseUrl', 'Endpoint address', 'Filled in for known providers. Required for a custom endpoint: a full https:// address.', '') : ''}
         <p class="field-help ai-err" data-err="baseUrl" style="color:#c0453f" hidden></p>
       </details>
@@ -1359,6 +1361,42 @@ function aiFormApplyPreset(form, meta) {
   const hint = form.querySelector('.ai-provider-hint');
   if (hint) hint.textContent = preset ? (custom ? 'Custom endpoint: Endpoint address and Models are required.' : preset.hint) : '';
   if (custom) form.querySelector('.ai-more').open = true;
+  aiFormOmniModels(form, Boolean(preset && preset.id === 'omniroute'));
+}
+
+/**
+ * OmniRoute only: lists the models the gateway offers (read by the server with its own key; no key is typed or shown here) as SUGGESTIONS for the Models box.
+ * A listed model is not proof that it works, so nothing is chosen for the person: saving tests the model they pick with a real request.
+ */
+function aiFormOmniModels(form, isOmni) {
+  const box = form.querySelector('.ai-omni-models');
+  if (!box) return;
+  box.hidden = !isOmni;
+  if (isOmni) form.elements.models.setAttribute('list', 'ai-omni-model-list'); else form.elements.models.removeAttribute('list');
+  if (!isOmni) return;
+  form.querySelector('.ai-more').open = true;
+  const button = box.querySelector('button');
+  const status = box.querySelector('.ai-omni-status');
+  const list = box.querySelector('datalist');
+  const REASONS = {
+    not_running: 'OmniRoute is not running at its address. Start it (omniroute, from its own folder), then try again.',
+    no_key: 'OmniRoute is running, but no OmniRoute key was found on this machine (set OMNIROUTE_API_KEY and restart).',
+    rejected: 'OmniRoute rejected the key it was given.',
+    unreadable: 'OmniRoute answered, but its model list could not be read.',
+  };
+  button.onclick = async () => {
+    button.disabled = true;
+    status.textContent = 'Loading models…';
+    try {
+      const r = await api('/api/dashboard/ai-routing/omniroute/models');
+      list.innerHTML = '';
+      for (const id of r.models || []) { const o = document.createElement('option'); o.value = id; list.appendChild(o); }
+      status.textContent = (r.models || []).length
+        ? `${r.models.length} models listed. A listed model is not proof that it works: the one you choose is tested with a real request when you save.`
+        : (REASONS[r.reason] || 'No models were listed.');
+    } catch (error) { status.textContent = error.message; }
+    button.disabled = false;
+  };
 }
 
 /** Inline checks before Save, using the server's own rules: returns false when something is missing or invalid. */
@@ -1366,7 +1404,7 @@ function aiFormValidate(form, isNew) {
   const meta = aiFormMeta(form);
   const errors = {};
   const val = (n) => (form.elements[n] ? String(form.elements[n].value || '').trim() : '');
-  const omniLocal = isNew && (val('provider') === 'omniroute' || /omni/i.test(val('name'))); // OmniRoute on this server needs no pasted key: its own local key is used
+  const omniLocal = isNew && val('provider') === 'omniroute'; // only when OmniRoute is CHOSEN under More options (a name containing "omni" selects nothing): then no pasted key is needed, its own local key is used
   if (isNew && !val('config') && !omniLocal) errors.config = 'Paste the API key.';
   else if (isNew && /^https?:\/\//i.test(val('config'))) errors.config = 'Paste the API key, not an address. The endpoint goes under More options.';
   const preset = isNew ? aiFormPreset(form, meta) : null;

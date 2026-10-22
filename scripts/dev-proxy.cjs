@@ -29,6 +29,7 @@ const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
+const localAiTest = require('./local-ai-test.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const DASHBOARD_DIR = path.join(ROOT, 'dashboard');
@@ -58,6 +59,12 @@ const BUSINESS_WRITES = [
   ['POST|PUT|PATCH', /^\/api\/dashboard\/realestate\/(leads\/\d+|projects(\/\d+(\/archive)?)?)$/],
 ];
 
+/** Writes that exist only on production, with the sentence the person is shown instead of a bare "blocked". */
+const PRODUCTION_ONLY_HINTS = [
+  [/^\/api\/dashboard\/(super-admin\/ai|ai-routing)\/(providers|adopt-openrouter|entries|settings)/, "AI provider settings, keys and order are saved on production only (use the production dashboard). The Test button on this window does work: it runs on this PC with this PC's own key and writes nothing to production"],
+];
+const productionOnlyHint = (pathname) => (PRODUCTION_ONLY_HINTS.find(([re]) => re.test(pathname)) || [])[1];
+
 function safePath(pathname) {
   let decoded;
   try { decoded = decodeURIComponent(pathname); } catch { return false; }
@@ -73,15 +80,20 @@ function decide(method, pathname, mode = 'read-only') {
   if (!safePath(pathname)) return { allow: false, reason: 'malformed path' };
   const isApi = pathname.startsWith('/api/dashboard/') || pathname === '/health' || pathname === '/readiness';
   if (!isApi) return { allow: false, reason: 'not an API path' };
+  // The OmniRoute "Load models" list is read from THIS PC's gateway (not production's), so it is answered locally.
+  if (localAiTest.matchOmniRouteModels(m, pathname)) return { allow: false, local: 'omniroute-models', reason: "the OmniRoute model list of this PC is read locally, not from production" };
   if (m === 'GET' || m === 'HEAD') {
     if (READ_DENY.some((re) => re.test(pathname))) return { allow: false, reason: 'WhatsApp pairing, credentials and webhook secrets are never exposed through this local window' };
     return { allow: true, reason: 'read' };
   }
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(m)) return { allow: false, reason: `method ${m} is not supported` };
   if (m === 'POST' && AUTH_OK.test(pathname)) return { allow: true, reason: 'sign-in / sign-out of your own session' };
-  if (mode !== 'business-data') return { allow: false, reason: 'this local window is read-only (restart with --write-business-data to edit business content)' };
+  // An AI provider TEST is not forwarded (production would decrypt its own key, spend its quota and record the result): the server answers it locally, from this PC, in EVERY mode.
+  if (localAiTest.matchProviderTest(m, pathname)) return { allow: false, local: 'ai-provider-test', reason: "AI provider tests are not sent to production: they run on this PC with this PC's own key" };
+  const hint = productionOnlyHint(pathname);
+  if (mode !== 'business-data') return { allow: false, reason: hint || 'this local window is read-only (restart with --write-business-data to edit business content)' };
   const hit = BUSINESS_WRITES.some(([methods, re]) => methods.split('|').includes(m) && re.test(pathname));
-  return hit ? { allow: true, reason: 'business content' } : { allow: false, reason: 'this operation connects WhatsApp, sends a message or changes users, credentials or settings: it must be done on production itself' };
+  return hit ? { allow: true, reason: 'business content' } : { allow: false, reason: hint || 'this operation connects WhatsApp, sends a message or changes users, credentials or settings: it must be done on production itself' };
 }
 
 /** Only production, or a loopback test server, may be the upstream. */
@@ -144,6 +156,62 @@ function createProxyServer(options = {}) {
   const client = upstreamUrl.protocol === 'https:' ? https : http;
   const log = options.log || (() => {});
   const state = { port: options.port || 3100 };
+  const runLocalTest = options.runLocalTest || ((view) => localAiTest.runLocalProviderTest(view, { root: ROOT }));
+  const listLocalModels = options.listLocalModels || (() => localAiTest.listOmniRouteModelsLocal({ root: ROOT }));
+
+  /** GET one dashboard page from production with the person's own session (cookie + selected business); the provider's view is read from it. Never a write. */
+  function fetchUpstreamJson(listPath, req) {
+    return new Promise((resolve, reject) => {
+      const headers = { accept: 'application/json', host: upstreamUrl.host };
+      for (const name of ['cookie', 'x-whatsapp-account']) if (req.headers[name]) headers[name] = req.headers[name];
+      const up = client.request({ protocol: upstreamUrl.protocol, hostname: upstreamUrl.hostname, port: upstreamUrl.port || undefined, method: 'GET', path: listPath, headers, timeout: 20000 }, (r) => {
+        const chunks = [];
+        let size = 0;
+        r.on('data', (c) => { size += c.length; if (size > 2000000) up.destroy(new Error('response too large')); else chunks.push(c); });
+        r.on('end', () => {
+          let json = null;
+          try { json = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { json = null; }
+          resolve({ status: r.statusCode || 502, json });
+        });
+      });
+      up.on('timeout', () => up.destroy(new Error('upstream timeout')));
+      up.on('error', reject);
+      up.end();
+    });
+  }
+
+  /** GET /ai-routing/omniroute/models from this PC's gateway. Needs a signed-in production session with the same permission the real route needs (read from production, nothing written). */
+  async function handleLocalOmniModels(req, res) {
+    try {
+      const probe = await fetchUpstreamJson('/api/dashboard/ai-routing', req);
+      if (probe.status !== 200) { sendJson(res, probe.status === 200 ? 502 : probe.status, probe.json && typeof probe.json === 'object' ? probe.json : { error: 'upstream_error', message: 'Production did not confirm the session, so nothing was listed.' }); return; }
+      sendJson(res, 200, await listLocalModels());
+    } catch (error) {
+      if (!res.headersSent) sendJson(res, 502, { error: 'local_models_failed', message: `The model list could not be read (${error && error.message ? error.message : 'unknown error'}); nothing was changed.` });
+    }
+  }
+
+  async function handleLocalProviderTest(req, res, pathname, expectedHost) {
+    const origin = req.headers.origin;
+    const site = req.headers['sec-fetch-site'];
+    if ((origin && origin.toLowerCase() !== `http://${expectedHost}`) || (site && !['same-origin', 'none'].includes(site))) { sendJson(res, 403, { error: 'cross_origin_blocked', message: 'Cross-origin write refused.' }); return; }
+    req.resume(); // the request body is not used
+    const match = localAiTest.matchProviderTest(req.method, pathname);
+    try {
+      const listed = await fetchUpstreamJson(match.list, req); // production's own permission check decides who may even see this provider
+      if (listed.status !== 200 || !listed.json || typeof listed.json !== 'object') {
+        sendJson(res, listed.status === 200 ? 502 : listed.status, listed.json && typeof listed.json === 'object' ? listed.json : { error: 'upstream_error', message: 'Production did not return the provider list, so nothing was tested.' });
+        return;
+      }
+      const view = (Array.isArray(listed.json.providers) ? listed.json.providers : []).find((p) => p && p.id === match.id);
+      if (!view) { sendJson(res, 404, { error: 'not_found' }); return; }
+      const result = await runLocalTest(view);
+      log(`LOCAL AI TEST ${pathname} -> ${result.ok ? 'ok' : result.category || 'failed'} (nothing sent to production)`);
+      sendJson(res, 200, { ...result, provider: view });
+    } catch (error) {
+      if (!res.headersSent) sendJson(res, 502, { error: 'local_test_failed', message: `The local test could not run (${error && error.message ? error.message : 'unknown error'}); nothing was changed.` });
+    }
+  }
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url || '/', 'http://local');
@@ -171,6 +239,8 @@ function createProxyServer(options = {}) {
     }
 
     const verdict = decide(req.method, pathname, mode);
+    if (verdict.local === 'omniroute-models') { void handleLocalOmniModels(req, res); return; }
+    if (verdict.local === 'ai-provider-test') { void handleLocalProviderTest(req, res, pathname, expectedHost); return; }
     if (!verdict.allow) {
       if (req.method !== 'GET') log(`BLOCKED ${req.method} ${pathname} - ${verdict.reason}`);
       sendJson(res, 403, { error: 'blocked_by_local_window', message: `Blocked on this local window: ${verdict.reason}.` });
@@ -235,6 +305,7 @@ function main() {
     console.log(`Local dashboard on production data: http://${COOKIE_HOST}:${port}/dashboard`);
     console.log(`  UI from this checkout (${buildInfo({ upstream, mode }).commit}); data from ${upstream}; mode: ${mode}`);
     console.log(mode === 'read-only' ? '  Read-only: nothing can be changed from here. Use --write-business-data to edit business content.' : '  WRITE MODE: business-content edits go to PRODUCTION immediately. WhatsApp connections and sending stay blocked.');
+    console.log("  AI provider Test buttons run on THIS PC with this PC's own keys (see .env.example: OPENROUTER_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, OMNIROUTE_API_KEY); nothing is sent to production.");
     console.log('  Press Ctrl+C to stop.');
   });
 }

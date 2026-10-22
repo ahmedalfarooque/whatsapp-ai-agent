@@ -38,6 +38,7 @@ import { renderPublishedProjects } from '../realestate/realEstateRepo';
 import { redactSensitiveText } from '../realestate/leadFields';
 import { accountHasFeature, FEATURES } from '../accounts/accountFeatures';
 import { runAgentLoop, CONTEXT_TOOL_ROWS } from '../llm/agentLoop';
+import { beginSkillRun, prepareSkillTurn } from '../skills/skillEngine';
 import { IMAGE_ANALYSIS_TOOL, analyzeImage, imageContextLine, type ImageAnalysis } from '../llm/vision';
 import fs from 'node:fs';
 import { sendTextMessage, sendDocumentMessage, sendImageMessage, ImageDeliveryUnsupportedError, DocumentDeliveryUnsupportedError } from '../whatsapp/client';
@@ -404,6 +405,11 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   // file — the reply language follows it (shared policy: detected language → menu language → English).
   const latestText = msg.text?.trim() || (transcript?.ok ? transcript.text : '') || (videoTranscript ?? '') || (documentText?.ok ? documentText.text.slice(0, 2000) : '') || null;
 
+  // A business skill (src/skills, docs/SKILLS.md): chosen from the customer's own text BEFORE the model is called. Only the one selected skill's instructions enter the
+  // prompt and, while it is active, only the tools it lists are offered. No skill (the usual case, or skills switched off) leaves this turn exactly as it was.
+  const skillTurn = prepareSkillTurn(currentAccountId(), { typedText: msg.type === 'text' ? msg.text : null, text: latestText });
+  const skillRun = beginSkillRun(currentAccountId(), conversation.id, skillTurn);
+
   // The model's memory of this customer in this business: this conversation only, the latest N messages, and nothing older than
   // CONVERSATION_MEMORY_HOURS (docs/AI_ASSISTANT.md). The stored conversation is untouched.
   // ...and never more text than HISTORY_PROMPT_CHARS: a long conversation drops its oldest turns rather than growing the prompt past the
@@ -415,7 +421,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
     const history = trimHistoryToBudget(getRecentMessages(conversation.id, getBusinessSettings().conversationHistoryLimit, undefined, env.CONVERSATION_MEMORY_HOURS), Math.floor(env.HISTORY_PROMPT_CHARS * scale));
     // The long media rules are needed only when a picture, voice note or file is part of this conversation.
     const mediaInPlay = Boolean(picture || analysis || transcript || documentText || video) || history.some((h) => h.tool_name != null && CONTEXT_TOOL_ROWS.has(h.tool_name));
-    return { history, systemPrompt: buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText, knowledgeScale: scale, compactMediaRules: !mediaInPlay }) };
+    return { history, systemPrompt: buildSystemPrompt(deps.knowledge, customer.language ?? undefined, new Date(), { customerId: customer.id, latestText, knowledgeScale: scale, compactMediaRules: !mediaInPlay }) + skillTurn.promptSection };
   };
   let { history, systemPrompt } = buildPrompt(promptScale);
   // A local model on a CPU is slow in proportion to the prompt: when a local route exists it is given a COMPACT rendering of the same
@@ -432,7 +438,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   try {
     let loopResult: Awaited<ReturnType<typeof runAgentLoop>>;
     try {
-      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
+      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id, allowedTools: skillTurn.allowedTools });
     } catch (firstError) {
       // HTTP 402 "Prompt tokens limit exceeded: N > CAP": send less (same model, no extra cost) and try ONCE more; anything else rethrows.
       const cap = firstError instanceof AiResponseError && firstError.reason === 'payment_required' && !firstError.afterToolCalls ? parsePromptCap(firstError.providerMessage) : null;
@@ -442,10 +448,11 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
       rememberPromptScale(promptAccountId, promptScale);
       logger.warn({ waId: maskedId, account: promptAccountId, promptTokens: cap.used, tokenCap: cap.cap, scale: Number(promptScale.toFixed(2)), systemChars: systemPrompt.length, historyChars: history.reduce((n, h) => n + (h.content?.length ?? 0), 0), historyMessages: history.length }, 'provider token cap is below the prompt size; retrying once with a smaller prompt');
       ({ history, systemPrompt } = buildPrompt(promptScale));
-      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id });
+      loopResult = await runAgentLoop({ systemPrompt, history, conversationId: conversation.id, allowedTools: skillTurn.allowedTools });
     }
     logger.info({ waId: maskedId, account: currentAccountId(), totalMs: Date.now() - startedAt, visionMs: analysis?.durationMs ?? 0, picture: Boolean(picture), model: loopResult.servedBy?.model, fallbackFrom: loopResult.servedBy?.fallbackFrom, rounds: loopResult.generatedMessages.filter((g) => g.content.startsWith('[requested tools:')).length + 1 }, 'AI reply ready');
     finalText = loopResult.finalText;
+    skillRun?.finish('answered', loopResult.generatedMessages.filter((g) => g.role === 'tool').map((g) => g.toolName ?? ''));
     // The activity says honestly where the answer came from: cloud AI or local AI, which provider / model, and whether a failover happened.
     if (loopResult.servedBy) {
       const s = loopResult.servedBy;
@@ -476,6 +483,7 @@ async function processInboundMessageUnlocked(inbound: InboundMessage, deps: Proc
   } catch (error) {
     const credentialProblem = error instanceof AiCredentialError ? error : null;
     const responseProblem = error instanceof AiResponseError ? error : null;
+    skillRun?.finish('failed', [], responseProblem?.reason ?? (credentialProblem ? 'credential' : 'error'));
     // Safe diagnostics only: category, HTTP status, model and the provider's short reason — never the key, the prompt or the customer's text.
     logger.error(
       {

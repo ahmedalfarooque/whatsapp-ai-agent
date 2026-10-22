@@ -205,3 +205,7 @@ data, API keys, `Open Router.docx` and similar local notes (listed in `.gitignor
 * `Rowad Alfa_AI Agent/` is an unrelated subtree and is never modified by this project's work.
 * Generated output (`dist/`, `node_modules/`, `coverage/`) is not tracked; it is rebuilt.
 * Stale path references in older handoffs (for example the former `C:\Websites\WhatsApp AI Agent`) are history; the current canonical checkout is named at the top of `AGENTS.md`.
+
+## The local window and AI provider tests
+`npm run dev` shows production data read-only; production's provider keys are never revealed to it and a production test would spend production's quota and write its database, so the proxy does **not** forward `POST .../providers/:id/test`. It answers it locally (`scripts/local-ai-test.cjs`): one real, tiny request from this PC, straight to the provider, with **this PC's own key** (`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `OMNIROUTE_API_KEY`, or `AI_TEST_KEY_<VENDOR>` in `.env`). Nothing is written to production; paid or private/internal addresses are refused; a missing key says which variable to set. Saving or changing providers still happens on production only, and the window now says so in words. The OmniRoute model list is read from this PC's gateway the same way. See `docs/MEDIA_SECURITY.md` for the media tools and `docs/SKILLS.md` for skills.
+

@@ -11,7 +11,7 @@ import { specFor } from '../../../src/dashboard/authorize';
  */
 const DIR = path.join(__dirname, '..', '..', '..', 'dashboard');
 const read = (name: string) => fs.readFileSync(path.join(DIR, name), 'utf-8');
-const SCRIPTS = ['theme-init.js', 'shell.js', 'branding.js', 'app.js', 'pages-automation.js', 'inbox-core.js', 'pages-inbox.js', 'pages-accounts.js', 'pages-setup.js', 'pages-users.js', 'pages-home.js', 'pages-customers.js', 'pages-realestate.js', 'i18n.js', 'i18n-ar.js', 'i18n-ar-2.js', 'i18n-ar-3.js', 'i18n-ar-4.js', 'i18n-ar-5.js', 'i18n-ar-6.js'];
+const SCRIPTS = ['theme-init.js', 'shell.js', 'branding.js', 'app.js', 'pages-automation.js', 'inbox-core.js', 'pages-inbox.js', 'pages-accounts.js', 'pages-setup.js', 'pages-users.js', 'pages-home.js', 'pages-customers.js', 'pages-realestate.js', 'pages-skills.js', 'i18n.js', 'i18n-ar.js', 'i18n-ar-2.js', 'i18n-ar-3.js', 'i18n-ar-4.js', 'i18n-ar-5.js', 'i18n-ar-6.js'];
 
 /** The sidebar exactly as it was before the redesign: [group, [route, label]...]. */
 const ORIGINAL_SIDEBAR: Array<[string, Array<[string, string]>]> = [
@@ -40,13 +40,15 @@ describe('dashboard shell', () => {
     const realEstate = all.filter(([group]) => group === 'REAL ESTATE');
     expect(realEstate).toEqual([['REAL ESTATE', [['#/re-overview', 'Real Estate Overview'], ['#/re-leads', 'Real Estate Leads'], ['#/re-projects', 'Projects & Properties'], ['#/re-followups', 'Consultations & Follow-ups'], ['#/re-documents', 'Real Estate Documents']]]]);
     const current = all.filter(([group]) => group !== 'REAL ESTATE');
-    const added = new Set(['#/users', '#/customer-reports']);
+    const added = new Set(['#/users', '#/customer-reports', '#/skills']);
     const withoutUsers = current.map(([group, items]) => [group, items.filter(([route]) => !added.has(route))] as [string, Array<[string, string]>]);
     expect(withoutUsers).toEqual(ORIGINAL_SIDEBAR);
     const users = current.flatMap(([, items]) => items).filter(([route]) => route === '#/users');
     expect(users).toEqual([['#/users', 'Users & Permissions']]);
     const reports = current.flatMap(([, items]) => items).filter(([route]) => route === '#/customer-reports');
     expect(reports).toEqual([['#/customer-reports', 'Customer Reports']]);
+    const skills = current.flatMap(([, items]) => items).filter(([route]) => route === '#/skills');
+    expect(skills).toEqual([['#/skills', 'Skills']]); // business skills: under KNOWLEDGE & AI, behind the same permission as the AI settings
     // the account switcher and the "Add WhatsApp account" link are still there
     const html = read('index.html');
     expect(html).toContain('id="account-list"');

@@ -7,13 +7,21 @@ import type { DocumentTextResult, DocumentTextFailure } from '../media/textExtra
 export const DOCUMENT_TEXT_TOOL = 'document_text';
 export const MEDIA_NOTE_TOOL = 'media_note';
 
+/** The markers this application itself writes in front of media-derived text (see audio.ts, vision.ts, scannedPdf.ts and this file). Each is followed by a dash or a closing bracket. */
+export const INTERNAL_MARKER_NAMES = ['VOICE NOTE TRANSCRIPT', 'VOICE NOTE NOT TRANSCRIBED', 'DOCUMENT TEXT', 'DOCUMENT NOT READ', 'SCANNED DOCUMENT', 'VIDEO ANALYSIS', 'VIDEO NOT ANALYSED', 'IMAGE ANALYSIS', 'IMAGE NOT ANALYSED'] as const;
+const INTERNAL_MARKER_OPENING = new RegExp(`\\[(${INTERNAL_MARKER_NAMES.join('|')})(?=[\\s\\u2014\\u2013:\\]-])`, 'gi');
+
 /**
  * Text that came out of a customer's file, picture or recording is DATA. Anything in it that imitates one of our own markers or a chat role
  * ("[SYSTEM …]", "system: …", "<|im_start|>") is neutralised so it cannot pass for an instruction; the framing line around it says the same in words.
  */
 export function defangUntrusted(text: string): string {
   return text
-    .replace(/\[(?:DOCUMENT|VOICE NOTE|VIDEO|IMAGE|PICTURE|SYSTEM|ASSISTANT|DEVELOPER|INSTRUCTIONS?)[^\]\n]{0,200}\]/gi, '(marker removed)')
+    // Only a bracket that OPENS one of our own markers (the exact names this application writes, see INTERNAL_MARKER_NAMES) or a chat-role header is neutralised, and the words
+    // are kept: the bracket becomes "(quoted) ", so the text can no longer pass for a marker yet nothing the customer wrote is deleted. Ordinary text in brackets
+    // — "[IMAGE 1]", "[Document attached]", "[Video]" — is not a marker of ours and is left exactly as written.
+    .replace(INTERNAL_MARKER_OPENING, '(quoted) $1')
+    .replace(/\[(?=(?:SYSTEM|ASSISTANT|DEVELOPER|INSTRUCTIONS?)\b)/gi, '(quoted) ')
     .replace(/<\|[^|>\n]{0,40}\|>/g, '')
     .replace(/^[ \t]*(system|assistant|developer)[ \t]*:/gim, (m) => `(quoted) ${m.trim()}`);
 }

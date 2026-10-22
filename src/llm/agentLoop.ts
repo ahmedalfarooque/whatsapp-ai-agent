@@ -76,6 +76,11 @@ export interface RunAgentLoopParams {
   maxToolRounds?: number;
   /** Total time allowed for the whole loop, in ms (default AI_LOOP_TIMEOUT_MS). */
   timeBudgetMs?: number;
+  /**
+   * While a skill is active: the ONLY tool names this answer may use. Any other tool is neither offered to the model nor run if the model asks for it anyway (the
+   * "not offered" check below refuses it). null / undefined = the business's normal tools.
+   */
+  allowedTools?: ReadonlySet<string> | null;
 }
 
 /**
@@ -103,7 +108,9 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentLoo
       logger.warn({ round, account: currentAccountId() }, 'agent loop ran out of its time budget');
       throw new AiResponseError('time_budget_exceeded', null, null);
     }
-    const accountTools = toolSchemasForAccount(currentAccountId());
+    const businessTools = toolSchemasForAccount(currentAccountId());
+    const allowed = params.allowedTools;
+    const accountTools = allowed ? businessTools.filter((schema) => allowed.has(String((schema.function as { name?: string }).name))) : businessTools;
     let response: Awaited<ReturnType<typeof chatCompletion>>;
     try {
       response = await chatCompletion({ task: 'chat', messages, tools: accountTools.length ? accountTools : undefined, deadline });

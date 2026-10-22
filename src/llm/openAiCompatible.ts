@@ -238,6 +238,7 @@ export async function completeOnce(request: EndpointRequest): Promise<ChatComple
       url,
       {
         method: 'POST',
+        redirect: 'error', // a provider address never bounces the API key to another host
         headers: {
           ...(request.apiKey ? { Authorization: `Bearer ${request.apiKey}` } : {}),
           'Content-Type': 'application/json',

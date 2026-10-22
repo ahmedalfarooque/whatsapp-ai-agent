@@ -186,6 +186,7 @@ export const geminiAdapter: ProviderAdapter = {
     try {
       response = await fetchWithTimeout(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST',
+        redirect: 'error', // a provider address never bounces the API key to another host
         headers: { 'Content-Type': 'application/json', ...(request.apiKey ? { 'x-goog-api-key': request.apiKey } : {}) },
         body: JSON.stringify(toGeminiRequest(request)),
       }, Math.max(1000, request.timeoutMs));

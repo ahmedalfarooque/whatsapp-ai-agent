@@ -10,6 +10,28 @@ import { extractVideo, MAX_VIDEO_BYTES, type VideoExtraction } from './videoFram
  */
 export const VIDEO_MIME_TYPES: ReadonlySet<string> = new Set(['video/mp4', 'video/3gpp', 'video/quicktime', 'video/webm']);
 
+/**
+ * The frames and the speech are independent of each other, so they are examined AT THE SAME TIME instead of one after another. Parallelism is bounded: at most this many
+ * frames are with the vision model at once, plus the one transcription — so a video costs at most VIDEO_FRAME_CONCURRENCY + 1 provider calls in flight (free tiers answer
+ * HTTP 429 when flooded, so this is deliberately small). The results are put back in the video's own order, whatever finished first.
+ */
+export const VIDEO_FRAME_CONCURRENCY = 2;
+
+/** Runs `fn` over `items` with at most `limit` in flight; the results keep the order of `items`. `fn` must not throw (callers catch inside it). */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]!, index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export interface VideoAnalysisInput {
   mimeType: string;
   fileLength?: number | null;
@@ -55,21 +77,35 @@ export async function analyseVideo(input: VideoAnalysisInput, deps: VideoAnalysi
     return notAnalysed(extracted.reason, extracted.reason === 'too_large' ? 'the video is too large to examine' : 'no frames or audio could be taken from this video');
   }
   const findings: VideoFindings = { transcript: null, frames: [], notExamined: [] };
-  for (const frame of extracted.frames) {
-    if (input.deadline && Date.now() > input.deadline) { findings.notExamined.push(`the frame at ${frame.atSeconds}s (time ran out)`); continue; }
-    const result = await deps.analyze({ mimeType: 'image/jpeg', fileLength: frame.bytes.length, download: async () => frame.bytes, caption: input.caption ?? null, deadline: input.deadline });
-    if (result.ok) findings.frames.push({ atSeconds: frame.atSeconds, report: result.report });
-    else findings.notExamined.push(`the frame at ${frame.atSeconds}s (${result.reason})`);
-  }
-  if (extracted.audio) {
-    if (!input.transcribeSpeech) findings.notExamined.push('the spoken audio (no audio model is configured for this business)');
-    else {
-      const audio = extracted.audio;
-      const heard = await deps.transcribe({ mimeType: 'audio/wav', fileLength: audio.length, download: async () => audio, deadline: input.deadline });
-      if (heard.ok) findings.transcript = { text: heard.text, language: heard.language };
-      else findings.notExamined.push(`the spoken audio (${heard.reason})`);
+  type FrameOutcome = { ok: true; atSeconds: number; report: string } | { ok: false; note: string };
+  type SpeechOutcome = { ok: true; text: string; language: string | null } | { ok: false; note: string };
+  const examineFrame = async (frame: { atSeconds: number; bytes: Buffer }): Promise<FrameOutcome> => {
+    if (input.deadline && Date.now() > input.deadline) return { ok: false, note: `the frame at ${frame.atSeconds}s (time ran out)` };
+    try {
+      const result = await deps.analyze({ mimeType: 'image/jpeg', fileLength: frame.bytes.length, download: async () => frame.bytes, caption: input.caption ?? null, deadline: input.deadline });
+      return result.ok ? { ok: true, atSeconds: frame.atSeconds, report: result.report } : { ok: false, note: `the frame at ${frame.atSeconds}s (${result.reason})` };
+    } catch {
+      return { ok: false, note: `the frame at ${frame.atSeconds}s (analysis failed)` }; // one failing part never aborts the others or the whole answer
     }
-  } else findings.notExamined.push('the spoken audio (the video has no readable audio track)');
+  };
+  const examineSpeech = async (): Promise<SpeechOutcome | null> => {
+    const audio = extracted.audio;
+    if (!audio) return { ok: false, note: 'the spoken audio (the video has no readable audio track)' };
+    if (!input.transcribeSpeech) return { ok: false, note: 'the spoken audio (no audio model is configured for this business)' };
+    try {
+      const heard = await deps.transcribe({ mimeType: 'audio/wav', fileLength: audio.length, download: async () => audio, deadline: input.deadline });
+      return heard.ok ? { ok: true, text: heard.text, language: heard.language } : { ok: false, note: `the spoken audio (${heard.reason})` };
+    } catch {
+      return { ok: false, note: 'the spoken audio (transcription failed)' };
+    }
+  };
+  const [frameOutcomes, speech] = await Promise.all([mapLimit(extracted.frames, VIDEO_FRAME_CONCURRENCY, examineFrame), examineSpeech()]);
+  for (const outcome of frameOutcomes) { // the video's own order, whichever call finished first
+    if (outcome.ok) findings.frames.push({ atSeconds: outcome.atSeconds, report: outcome.report });
+    else findings.notExamined.push(outcome.note);
+  }
+  if (speech?.ok) findings.transcript = { text: speech.text, language: speech.language };
+  else if (speech) findings.notExamined.push(speech.note);
   const examined = findings.frames.length > 0 || findings.transcript !== null;
   if (!examined) return { ...notAnalysed('nothing_examined', `nothing in it could be examined: ${findings.notExamined.join('; ')}`), reason: 'nothing_examined' };
   return {

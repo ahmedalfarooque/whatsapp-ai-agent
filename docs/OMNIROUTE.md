@@ -17,3 +17,10 @@ Needs Node ≥ 20 (server has 24), ~1 GB RAM. Outline, run as a dedicated user, 
 2. systemd unit `omniroute.service`: `User=omniroute`, `WorkingDirectory=/home/omniroute`, `Environment=PORT=20128`, `ExecStart=$(command -v omniroute)`, `Restart=on-failure`; bind to loopback (`OMNIROUTE_SERVER_HOST=127.0.0.1` in its own `.env`); do not open the port in the firewall.
 3. Connect a free provider in its dashboard through an SSH tunnel (`ssh -L 20128:127.0.0.1:20128 …`), create the client key, then add the provider on the live dashboard as above.
 4. Verify a real `auto/best-free` answer from the server before relying on it.
+
+## Configuration (this server or this PC)
+* `OMNIROUTE_BASE_URL` (optional, loopback only; default `http://127.0.0.1:20128/v1`) and `OMNIROUTE_API_KEY` (or, on Windows, `~/.omniroute/client-api-key.dpapi`). Names only in `.env.example`; never commit a value.
+* OmniRoute is used **only when chosen explicitly** under More options (a name containing "omni" or an unknown key never selects it, and an unknown key is never tried on the local port).
+* **Load models from the gateway** (More options) lists the gateway's models as suggestions. A listed model is not proof it works: saving tests the chosen model with a real request, never saves one that does not answer, and records a provider that answers nothing as failed and unverified. `auto/best-free` is only a name: the route counts as free after an administrator confirms it.
+* A real `auto/best-free` answer additionally needs a working free provider **inside OmniRoute** (add its credential in OmniRoute's own dashboard). On 2026-10-22 the gateway answered HTTP 502 for the whole free pool (an OpenCode key required, deprecated models); that is a missing credential inside the gateway, not an agent fault.
+

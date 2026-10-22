@@ -12,10 +12,10 @@ import { AiCredentialError } from '../llm/aiCredentialError';
 import { AiResponseError } from '../llm/aiResponseError';
 import { getModelInfo } from '../llm/modelCatalog';
 import { createProvider, csv, deleteProvider, getProvider, listProvidersForAccount, listSharedProviders, PROVIDER_KINDS, providerApiKey, ProviderValidationError, recordProviderTest, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider, type AiProviderInput, type AiProviderRow, type ProviderKind } from '../llm/providerRepo';
-import { PROVIDER_PRESETS, detectPresetId, presetsPayload, resolveSimpleProvider, SimpleProviderError } from '../llm/providerPresets';
+import { PROVIDER_PRESETS, presetsPayload, resolveSimpleProvider, SimpleProviderError } from '../llm/providerPresets';
 import { getAccountRouting, RoutingOrderError, saveAccountRouting } from '../llm/routingOrder';
 import { endpointMatchesVendor, vendorById } from '../llm/adapters';
-import { OMNIROUTE_FREE_MODEL, discoverLocalOmniRouteKey, isOmniRouteKey, omniRouteReachable } from '../llm/omniRoute';
+import { discoverLocalOmniRouteKey, isPlausibleOmniRouteKey, listOmniRouteModels, omniRouteBaseUrl, omniRouteReachable } from '../llm/omniRoute';
 import { autoSelectModel, type ProbeAttempt } from '../llm/autoSetup';
 import { validationBudget } from '../llm/validationBudget';
 import { listRouteLog, routeStats } from '../llm/routeLog';
@@ -88,8 +88,9 @@ export function inputFrom(body: unknown): AiProviderInput {
  */
 export function forCreate(input: AiProviderInput, body: unknown): AiProviderInput {
   const asked = (body as { freeConfirmed?: unknown } | null)?.freeConfirmed === true;
-  // OmniRoute's own free-only combo counts as free; it is also tried FIRST (priority 5, ahead of OpenRouter 10 / Gemini 100 / Groq 110), the others stay as they are.
-  if (input.vendor === 'omniroute') return { ...input, priority: input.priority ?? 5, freeConfirmed: asked || (input.models.length > 0 && input.models.every((m) => m === OMNIROUTE_FREE_MODEL)) };
+  // OmniRoute is tried FIRST (priority 5, ahead of OpenRouter 10 / Gemini 100 / Groq 110). A model id such as `auto/best-free` is only a NAME: it does not prove the price, so the
+  // route counts as free under strict free-only mode only after an administrator confirms it (the same rule as every other non-OpenRouter endpoint).
+  if (input.vendor === 'omniroute') return { ...input, priority: input.priority ?? 5, freeConfirmed: asked };
   return { ...input, freeConfirmed: input.kind === 'openrouter' ? true : asked };
 }
 
@@ -119,18 +120,19 @@ export async function prepareCreateInput(body: unknown): Promise<PreparedCreate>
   const b = (body ?? {}) as Record<string, unknown>;
   const num = Number(b.timeoutMs);
   let config = str(b.config);
-  let provider = str(b.provider);
-  const wantsOmniRoute = provider === 'omniroute' || (!provider || provider === 'auto') && !config && /omni/i.test(str(b.name));
+  const provider = str(b.provider);
+  // OmniRoute is used ONLY when the administrator chose it explicitly: a provider NAME containing "omni", or a key no vendor prefix explains, never selects it, and an
+  // unknown credential is never tried on the local gateway port (that would hand the key to whatever listens there).
+  const wantsOmniRoute = provider === 'omniroute';
   // OmniRoute on this machine: no key typed means "use the one OmniRoute already has here"; it must be running, and a key is never invented.
   if (wantsOmniRoute && !config) {
     const local = (await omniRouteReachable()) ? await discoverLocalOmniRouteKey() : null;
     if (!local) return { ok: false, status: 422, json: { error: 'OmniRoute was not found on this server, or its client key could not be read. Start it (omniroute) or paste its client key; nothing was saved.', code: 'omniroute_unavailable', fields: ['config'] } };
     config = local;
-    provider = 'omniroute';
-  } else if ((!provider || provider === 'auto') && config && !detectPresetId(config) && !/^https?:\/\//i.test(config) && (await isOmniRouteKey(config))) {
-    provider = 'omniroute'; // a key no vendor prefix explains, accepted by the OmniRoute gateway on loopback
+  } else if (wantsOmniRoute && !isPlausibleOmniRouteKey(config)) {
+    return { ok: false, status: 422, json: { error: 'That does not look like an OmniRoute client key (it starts with sk- and has no spaces); nothing was saved and nothing was sent anywhere.', code: 'invalid_omniroute_key', fields: ['config'] } };
   }
-  const resolved = resolveSimpleProvider({ name: str(b.name), config, provider, models: str(b.models), baseUrl: str(b.baseUrl), timeoutMs: Number.isFinite(num) && num > 0 ? num : undefined }, { autoModel: true });
+  const resolved = resolveSimpleProvider({ name: str(b.name), config, provider, models: str(b.models), baseUrl: str(b.baseUrl) || (provider === 'omniroute' ? omniRouteBaseUrl() : ''), timeoutMs: Number.isFinite(num) && num > 0 ? num : undefined }, { autoModel: true });
   const vendor = vendorById(resolved.vendor);
   if (!vendor) throw new SimpleProviderError('provider_required', ['provider']);
   // The name is optional: an empty one becomes the detected provider's name, numbered when that provider was already added.
@@ -294,6 +296,16 @@ export function buildEntries(accountId: number): Array<Record<string, unknown>> 
 }
 
 export function registerAiRoutingRoutes(router: Router): void {
+  // The models the local OmniRoute gateway offers (read with this server's own key; the key is never returned). A listed model is a suggestion only: saving tests it with a real request.
+  router.get('/api/dashboard/ai-routing/omniroute/models', async (_req, res) => {
+    try {
+      const list = await listOmniRouteModels();
+      res.json(list.ok ? { reachable: true, keyFound: true, baseUrl: list.baseUrl, models: list.models, truncated: list.truncated } : { reachable: list.reason !== 'not_running', keyFound: list.reason !== 'no_key' && list.reason !== 'not_running', baseUrl: list.baseUrl, models: [], reason: list.reason });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   router.get('/api/dashboard/ai-routing', async (req, res) => {
     try {
       const accountId = currentAccountId();

@@ -1,5 +1,6 @@
 import { extractPdfText } from '../setup/pdfText';
 import { listZipEntries, readZipEntry } from './zipRead';
+import { rtfToPlainText } from './rtfText';
 
 /**
  * Text extraction for the files customers send: what the assistant may READ before answering. Every extractor is pure (bytes in, text
@@ -62,13 +63,23 @@ export function documentKindOf(mimeType: string | null | undefined, fileName: st
 
 export const isExtractableDocument = (mimeType: string | null | undefined, fileName: string | null | undefined): boolean => documentKindOf(mimeType, fileName) !== null;
 
+/** The character of a numeric entity (&#NNN; / &#xHHH;), or U+FFFD when the number is not a Unicode scalar value (out of range, a surrogate, NUL or a control character) — never an exception. */
+function entityChar(code: number): string {
+  if (!Number.isInteger(code) || code <= 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) || (code < 32 && code !== 9 && code !== 10 && code !== 13)) return '\uFFFD';
+  return String.fromCodePoint(code);
+}
+const numericEntities = (s: string): string => s
+  .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => entityChar(h.length > 8 ? Number.NaN : parseInt(h, 16)))
+  .replace(/&#(\d+);/g, (_, d: string) => entityChar(d.length > 10 ? Number.NaN : Number(d)));
+
 function xmlText(xml: string): string {
-  return xml
+  const stripped = xml
     .replace(/<w:tab\/>/g, '\t')
     .replace(/<\/(w:p|a:p|p)>/g, '\n')
     .replace(/<w:br[^>]*\/>|<a:br[^>]*\/>/g, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n))).replace(/&amp;/g, '&');
+    .replace(/<[^>]+>/g, '');
+  return numericEntities(stripped) // after the tags are gone, so an escaped "&#60;b&#62;" stays text
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 }
 
 function tidy(text: string): string {
@@ -136,7 +147,7 @@ function pptxText(bytes: Buffer): DocumentTextResult {
   return finish('pptx', out.join('\n'), slides.length);
 }
 
-const decodeEntities = (s: string): string => s.replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;|&#39;/g, "'").replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n))).replace(/&amp;/g, '&');
+const decodeEntities = (s: string): string => numericEntities(s).replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 
 /** OpenDocument text, spreadsheet and presentation: the text of content.xml (rows become lines, cells are separated by " | ", slides get a header). Read as XML only; nothing is executed. */
 function odfText(bytes: Buffer, kind: 'odt' | 'ods' | 'odp'): DocumentTextResult {
@@ -156,17 +167,12 @@ function odfText(bytes: Buffer, kind: 'odt' | 'ods' | 'odp'): DocumentTextResult
   return finish(kind, xmlText(text).replace(/( \| )+\n/g, '\n'), units);
 }
 
-/** RTF: control words and groups are dropped, \par becomes a line break, hex and unicode escapes are decoded. Not a full RTF reader — plain text content only. */
+/** RTF: read by a real single-pass reader (rtfText.ts) — Unicode and code-page text decoded correctly, metadata / picture / object groups dropped whole, tables and paragraphs kept as line breaks. */
 function rtfText(raw: string): DocumentTextResult {
   if (!/^\s*\{\\rtf/.test(raw)) return { ok: false, kind: 'rtf', reason: 'corrupt', detail: 'not an RTF file' };
-  const text = raw
-    .replace(/\{\\\*[^{}]{0,2000}\}/g, '')
-    .replace(/\{\\(fonttbl|colortbl|stylesheet|info|pict)[\s\S]{0,20000}?\}\s*\}?/g, '')
-    .replace(/\\'([0-9a-f]{2})/gi, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
-    .replace(/\\u(-?\d+)\??/g, (_, n: string) => String.fromCodePoint(Number(n) < 0 ? Number(n) + 65536 : Number(n)))
-    .replace(/\\(par|line)\b ?/g, '\n').replace(/\\tab\b ?/g, '\t')
-    .replace(/\\[a-z]+-?\d* ?/gi, '').replace(/[{}]/g, '').replace(/\\(.)/g, '$1');
-  return finish('rtf', text);
+  const parsed = rtfToPlainText(raw);
+  if (!parsed.ok) return { ok: false, kind: 'rtf', reason: 'corrupt', detail: parsed.detail };
+  return finish('rtf', parsed.text);
 }
 
 /** HTML: scripts, styles and comments are removed first; block ends become line breaks and table cells are separated by " | ". */

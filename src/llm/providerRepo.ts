@@ -3,7 +3,9 @@ import { getDb } from '../memory/db';
 import { decryptWithKey, encryptWithKey, maskSecret } from '../config/secretStore';
 import { getSecretEncryptionKey } from '../config/masterKey';
 import { isUsableApiKey } from '../config/effectiveConfig';
+import { env } from '../config/env';
 import { logger } from '../logger';
+import { checkProviderEndpoint } from './endpointPolicy';
 import { ensureAccountRouting, forgetProviderEntry } from './routingOrder';
 import { endpointMatchesVendor, isAdapterId, vendorById, vendorForUrl } from './adapters';
 
@@ -99,8 +101,8 @@ export interface AiProviderInput {
 export const PROVIDER_KINDS: readonly ProviderKind[] = ['openrouter', 'openai_compatible'];
 // A model id is never an address: :// is refused (a pasted console / key-page URL is not a model).
 const MODEL_ID = /^(?!.*:\/\/)[A-Za-z0-9._:/@-]{1,120}$/;
-// Every provider is reached over HTTPS: an API key is never sent in clear text. The one exception is a gateway on this machine's own loopback address (OmniRoute),
-// where nothing leaves the host.
+// SYNTAX only (this source is also shipped to the dashboard form). Whether the address is ACCEPTABLE is decided by checkProviderEndpoint (endpointPolicy.ts): HTTPS for every
+// remote provider, no private / link-local hosts, and plain HTTP only to this machine's loopback address where local providers are allowed (env.allowLocalHttpProviders).
 const URL_RE = /^(https:\/\/[^\s"'<>]{3,200}|http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{2,5})?(\/[^\s"'<>]{0,150})?)$/;
 
 /** The one definition of a valid endpoint and model id: the server checks with it and the dashboard form receives its source, so both always agree. */
@@ -125,11 +127,13 @@ export function providerModelsFor(row: Pick<AiProviderRow, 'models' | 'vision_mo
   return vendorById(row.vendor)?.media?.[task] ? csv(row.models) : [];
 }
 
-function validate(input: AiProviderInput): void {
+/** Throws ProviderValidationError (with the offending field names) when a provider as typed in the dashboard may not be saved. Exported for the tests. */
+export function validateProviderInput(input: AiProviderInput): void {
   const fields: string[] = [];
   if (!input.name || input.name.trim().length < 1 || input.name.length > 80) fields.push('name');
   if (!PROVIDER_KINDS.includes(input.kind)) fields.push('kind');
   if (!URL_RE.test(input.baseUrl ?? '')) fields.push('baseUrl');
+  else if (checkProviderEndpoint(input.baseUrl, env.allowLocalHttpProviders) !== null) fields.push('baseUrl'); // HTTPS only, no private / metadata hosts; loopback only where local providers are allowed (endpointPolicy.ts)
   else if (input.vendor && !endpointMatchesVendor(input.vendor, input.baseUrl)) fields.push('baseUrl'); // a known vendor must use its official API host
   if (input.adapter !== undefined && !isAdapterId(input.adapter)) fields.push('adapter');
   for (const list of [input.models, input.visionModels ?? [], input.audioModels ?? []]) for (const m of list) if (!MODEL_ID.test(m)) fields.push('models');
@@ -210,7 +214,7 @@ function nextSharedPriority(db: Database.Database, accountId: number | null): nu
 }
 
 export function createProvider(input: AiProviderInput, scope: { accountId: number | null; updatedBy: number }, db: Database.Database = getDb()): AiProviderRow {
-  validate(input);
+  validateProviderInput(input);
   const ciphertext = input.apiKey ? encryptWithKey(input.apiKey, getSecretEncryptionKey()) : null;
   const result = db
     .prepare(`INSERT INTO ai_providers (whatsapp_account_id, name, kind, base_url, key_ciphertext, models, vision_models, audio_models, free_tier, free_confirmed, supports_tools, enabled, priority, timeout_ms, notes, updated_by, adapter, vendor)
@@ -225,7 +229,7 @@ export function createProvider(input: AiProviderInput, scope: { accountId: numbe
 export function updateProvider(id: number, accountId: number, input: AiProviderInput, updatedBy: number, db: Database.Database = getDb()): AiProviderRow {
   const existing = getProvider(id, accountId, db);
   if (!existing) throw new ProviderValidationError('not_found', []);
-  validate(input);
+  validateProviderInput(input);
   undecryptableWarned.delete(id);
   const keyClause = input.apiKey === undefined ? '' : ', key_ciphertext = @key';
   const params: Record<string, unknown> = {

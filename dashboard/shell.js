@@ -86,6 +86,7 @@ const ROUTE_ACCESS = {
   '#/location': 'business',
   '#/knowledge': 'ai',
   '#/ai': 'ai',
+  '#/skills': 'ai',
   '#/integrations': { cap: 'configuration' },
   '#/analytics': 'dashboard',
   '#/security': { cap: 'configuration' },
@@ -148,6 +149,7 @@ const ICONS = {
   '#/location': 'M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0zM12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6',
   '#/knowledge': 'M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z',
   '#/ai': 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z',
+  '#/skills': 'M13 2L3 14h8l-1 8 10-12h-8z',
   '#/integrations': 'M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4',
   '#/analytics': 'M12 20V10M18 20V4M6 20v-4',
   '#/security': 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
@@ -315,7 +317,7 @@ async function renderBuildInfo() {
   if (banner) {
     if (env === 'production') { banner.hidden = true; return; }
     const parts = [`${label}`, `UI from commit ${info.commit}${info.branch ? ` (${info.branch})` : ''}${info.uncommittedChanges ? ' + uncommitted changes' : ''}`];
-    if (env === 'local-ui') parts.push(info.mode === 'business-data' ? 'Data: PRODUCTION (live), business content editable' : 'Data: PRODUCTION (live), read-only');
+    if (env === 'local-ui') parts.push(info.mode === 'business-data' ? 'Data: PRODUCTION (live), business content editable' : 'Data: PRODUCTION (live), read-only', 'AI provider tests run on this PC with its own keys (production untouched)');
     else parts.push('Own local database, NOT production data', info.supportedCommand ? `The supported application is "${info.supportedCommand}" (production's accounts, live)` : '');
     banner.className = `env-banner ${env === 'local-ui' ? (info.mode === 'business-data' ? 'write' : 'read') : 'isolated'}`;
     banner.textContent = parts.filter(Boolean).join(' · ');

@@ -43,6 +43,13 @@ export const META_CLOUD_API_REQUIRED_KEYS = [
  */
 const PRODUCTION_REQUIRED_KEYS = ['OPENROUTER_API_KEY'] as const;
 
+/** An optional executable path: empty, a bare command name or a path — never quotes, control characters, command separators or redirections. */
+const FORBIDDEN_PATH_CHARS = '"\'`$;&|<>*?';
+const toolPath = z.preprocess(
+  (value) => (typeof value === 'string' ? value.trim() : value),
+  z.string().max(300).refine((v) => [...v].every((ch) => ch.charCodeAt(0) >= 32 && !FORBIDDEN_PATH_CHARS.includes(ch)), 'must be a plain file path').optional().default(''),
+);
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -102,6 +109,29 @@ const envSchema = z
     AUDIO_MAX_BYTES: z.coerce.number().int().positive().default(16 * 1024 * 1024),
     OPENROUTER_SITE_URL: z.string().optional().default(''),
     OPENROUTER_APP_NAME: z.string().optional().default('WhatsApp AI Agent'),
+
+    /** Optional paths of the media tools (FFmpeg for videos, poppler's pdftoppm for scanned PDFs). Empty = the tool is looked up on PATH. The value is
+     *  passed as ONE argv entry (no shell), but is still restricted to a plain path: no quotes, control characters, redirections or command separators. */
+    FFMPEG_PATH: toolPath,
+    PDFTOPPM_PATH: toolPath,
+    /** The ONE trusted directory business skills are read from (Markdown files, docs/SKILLS.md). Empty = the application's own `skills/` directory. */
+    SKILLS_DIR: toolPath,
+    /** Where the local OmniRoute gateway listens (default http://127.0.0.1:20128/v1). Loopback only: the gateway runs on the same machine as the application. */
+    OMNIROUTE_BASE_URL: z.string().optional().default('').refine((v) => {
+      if (!v) return true;
+      try {
+        const u = new URL(v);
+        return (u.protocol === 'http:' || u.protocol === 'https:') && ['127.0.0.1', 'localhost'].includes(u.hostname) && !u.username && !u.password && !u.search && !u.hash;
+      } catch { return false; }
+    }, 'must be the loopback gateway address, for example http://127.0.0.1:20128/v1'),
+    /** The OmniRoute client key of THIS machine (the local AI gateway). Used only when an administrator explicitly picks the OmniRoute provider. */
+    OMNIROUTE_API_KEY: z.string().optional().default(''),
+    /** Whether an AI provider may use plain HTTP on this machine's own loopback address (a local gateway such as OmniRoute or Ollama). Remote providers are
+     *  HTTPS-only regardless. Unset = allowed in development/test and refused in production; set it to true in production only on a host that really runs one. */
+    AI_ALLOW_LOCAL_HTTP_PROVIDERS: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim() !== '' ? ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase()) : undefined),
+      z.boolean().optional(),
+    ),
 
     GOOGLE_CLIENT_EMAIL: z.string().optional().default(''),
     GOOGLE_PRIVATE_KEY: z.string().optional().default(''),
@@ -249,6 +279,8 @@ export const env = {
   // googleapis expects real newlines in the PEM key, but .env files commonly
   // store it with literal \n escape sequences.
   GOOGLE_PRIVATE_KEY: raw.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  /** See AI_ALLOW_LOCAL_HTTP_PROVIDERS: an explicit setting wins; otherwise loopback HTTP providers are allowed everywhere except production. */
+  allowLocalHttpProviders: raw.AI_ALLOW_LOCAL_HTTP_PROVIDERS ?? raw.NODE_ENV !== 'production',
   isProduction: raw.NODE_ENV === 'production',
   isDevelopment: raw.NODE_ENV === 'development',
   isTest: raw.NODE_ENV === 'test',

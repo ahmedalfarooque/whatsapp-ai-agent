@@ -50,28 +50,57 @@ describe('OmniRoute: discovery and saving through the simplified form', () => {
     const id = (getDb().prepare('SELECT id FROM admin_users WHERE username = ?').get('omni-owner') as { id: number }).id;
     owner = request.agent(app).set('Cookie', `${SESSION_COOKIE_NAME}=${createSession(id).token}`);
   });
-  beforeEach(() => { getDb().prepare('DELETE FROM ai_providers').run(); delete process.env.OMNIROUTE_API_KEY; });
-  afterEach(() => { vi.stubGlobal('fetch', originalFetch); delete process.env.OMNIROUTE_API_KEY; });
+  beforeEach(() => { getDb().prepare('DELETE FROM ai_providers').run(); mutableEnv.OMNIROUTE_API_KEY = ''; });
+  afterEach(() => { vi.stubGlobal('fetch', originalFetch); mutableEnv.OMNIROUTE_API_KEY = ''; });
 
   const healthy = () => json(200, { status: 'healthy', setupComplete: true });
 
-  it('a key no vendor prefix explains is recognised as OmniRoute only because the loopback gateway accepts it; endpoint, model, priority and free combo are filled in', async () => {
+  it('OmniRoute chosen EXPLICITLY with its key: endpoint, model and priority are filled in, a real test request answers, and the free combo is NOT assumed free from its name', async () => {
     network({ health: healthy, models: () => json(200, { data: [{ id: 'auto/best-free' }] }), omni: () => chat('ok') });
-    const res = await shared({ config: OMNI_KEY });
+    const res = await shared({ config: OMNI_KEY, provider: 'omniroute' });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body.provider).toMatchObject({ name: 'OmniRoute', vendor: 'omniroute', baseUrl: 'http://127.0.0.1:20128/v1', models: ['auto/best-free'], priority: 5, freeConfirmed: true, lastTestOk: true });
+    // `auto/best-free` is only a name: until an administrator confirms the route is free, strict free-only mode would not use it
+    expect(res.body.provider).toMatchObject({ name: 'OmniRoute', vendor: 'omniroute', baseUrl: 'http://127.0.0.1:20128/v1', models: ['auto/best-free'], priority: 5, freeConfirmed: false, lastTestOk: true });
+    expect(res.body.setup).toMatchObject({ verified: true, freeConfirmationRequired: true });
     expect(res.body.setup).toMatchObject({ verified: true });
     expect(JSON.stringify(res.body)).not.toContain(OMNI_KEY);
     const row = getDb().prepare('SELECT key_ciphertext FROM ai_providers WHERE id = ?').get(res.body.provider.id) as { key_ciphertext: string };
     expect(row.key_ciphertext).not.toContain(OMNI_KEY);
   });
 
-  it('with OmniRoute not running, an unknown key is NOT guessed to be anything: a concise "provider not recognised" and nothing saved', async () => {
-    network({ health: () => { throw new TypeError('connect ECONNREFUSED'); } });
+  it('the administrator confirming the free combo is what makes it count as free', async () => {
+    network({ health: healthy, models: () => json(200, { data: [] }), omni: () => chat('ok') });
+    const res = await shared({ config: OMNI_KEY, provider: 'omniroute', freeConfirmed: true });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.provider).toMatchObject({ vendor: 'omniroute', freeConfirmed: true });
+  });
+
+  it('an unknown key is NEVER tried on the local gateway port, and never guessed to be OmniRoute: no request at all, a concise "provider not recognised", nothing saved', async () => {
+    network({ health: healthy, models: () => json(200, { data: [] }), omni: () => chat('ok') });
     const res = await shared({ config: OMNI_KEY });
     expect(res.status).toBe(400);
     expect(res.body.fields).toEqual(['provider']);
+    expect(counts).toEqual({}); // not even a health probe: the key stayed on this server
     expect((getDb().prepare('SELECT COUNT(*) AS n FROM ai_providers').get() as { n: number }).n).toBe(0);
+  });
+
+  it('a provider NAME containing "omni" does not select OmniRoute or adopt the local key', async () => {
+    mutableEnv.OMNIROUTE_API_KEY = OMNI_KEY;
+    network({ health: healthy, models: () => json(200, { data: [] }), omni: () => chat('ok') });
+    const res = await shared({ name: 'OmniRoute', config: '' });
+    expect(res.status).toBe(400);
+    expect(counts).toEqual({});
+    expect((getDb().prepare('SELECT COUNT(*) AS n FROM ai_providers').get() as { n: number }).n).toBe(0);
+  });
+
+  it('a malformed key is refused for OmniRoute before anything is sent anywhere', async () => {
+    network({ health: healthy, models: () => json(200, { data: [] }), omni: () => chat('ok') });
+    for (const bad of ['sk-has a space-0123456789', 'AIzaSyNotAnOmniRouteKey0123456789', 'sk-', 'sk-short']) {
+      const res = await shared({ config: bad, provider: 'omniroute' });
+      expect(res.status, bad).toBeGreaterThanOrEqual(400);
+      expect(res.status, bad).toBeLessThan(500);
+    }
+    expect(counts).toEqual({});
   });
 
   it('a gateway that rejects the key is not OmniRoute for that key', async () => {
@@ -81,8 +110,8 @@ describe('OmniRoute: discovery and saving through the simplified form', () => {
     expect(await omniRouteReachable()).toBe(false);
   });
 
-  it('no key typed + name "OmniRoute": the key OmniRoute already has on this machine is used (never echoed); when there is none, the save is refused with the reason', async () => {
-    process.env.OMNIROUTE_API_KEY = OMNI_KEY;
+  it('OmniRoute chosen explicitly and no key typed: the key OmniRoute already has on this machine is used (never echoed); when there is none, the save is refused with the reason', async () => {
+    mutableEnv.OMNIROUTE_API_KEY = OMNI_KEY;
     expect(await discoverLocalOmniRouteKey()).toBe(OMNI_KEY);
     network({ health: healthy, omni: () => chat('ok') });
     const res = await shared({ name: 'My AI', config: '', provider: 'omniroute' });
@@ -90,9 +119,9 @@ describe('OmniRoute: discovery and saving through the simplified form', () => {
     expect(res.body.provider).toMatchObject({ name: 'My AI', vendor: 'omniroute', hasKey: true });
     expect(JSON.stringify(res.body)).not.toContain(OMNI_KEY);
 
-    delete process.env.OMNIROUTE_API_KEY;
+    mutableEnv.OMNIROUTE_API_KEY = '';
     network({ health: () => { throw new TypeError('connect ECONNREFUSED'); } });
-    const none = await shared({ name: 'OmniRoute', config: '' });
+    const none = await shared({ name: 'OmniRoute', config: '', provider: 'omniroute' });
     expect(none.status).toBe(422);
     expect(none.body.code).toBe('omniroute_unavailable');
   });
@@ -106,7 +135,7 @@ describe('OmniRoute: discovery and saving through the simplified form', () => {
 
   it('edit, test, disable and remove work for it like for any provider', async () => {
     network({ health: healthy, models: () => json(200, { data: [] }), omni: () => chat('ok') });
-    const created = await shared({ config: OMNI_KEY });
+    const created = await shared({ config: OMNI_KEY, provider: 'omniroute' });
     const id = created.body.provider.id as number;
     const edited = await owner.put(`/api/dashboard/super-admin/ai/providers/${id}`).send({ name: 'Backup AI', config: '' });
     expect(edited.status, JSON.stringify(edited.body)).toBe(200);

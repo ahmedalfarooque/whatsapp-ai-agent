@@ -104,6 +104,8 @@ const RULES: readonly Rule[] = [
   { test: /^\/offers(\/|$)/, spec: F('offers') },
   { test: /^\/documents(\/|$)/, spec: F('documents') },
   { test: /^\/business-profile$/, spec: F('business') },
+  // business skills: reading the list needs view of "AI knowledge & settings", switching one on or off needs edit (the server checks again; the UI only hides the buttons)
+  { test: /^\/skills(\/|$)/, spec: F('ai') },
   { test: /^\/(knowledge|services)(\/|$)/, spec: F('ai') },
   { test: /^\/ai$/, spec: F('ai') },
 ];

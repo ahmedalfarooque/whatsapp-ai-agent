@@ -140,6 +140,8 @@ export async function deleteAccount(accountId: number, confirm: unknown, deps: D
     del('drafts', 'DELETE FROM setup_drafts WHERE whatsapp_account_id = ?', accountId);
     del('menus', 'DELETE FROM account_menus WHERE whatsapp_account_id = ?', accountId);
     del('aiRouting', 'DELETE FROM ai_account_routing WHERE whatsapp_account_id = ?', accountId);
+    del('skills', 'DELETE FROM account_skills WHERE whatsapp_account_id = ?', accountId);
+    del('skillRuns', 'DELETE FROM skill_runs WHERE whatsapp_account_id = ?', accountId);
     del('aiProviders', 'DELETE FROM ai_providers WHERE whatsapp_account_id = ?', accountId); // the business's OWN providers and keys; shared ones are untouched
     del('features', 'DELETE FROM account_features WHERE whatsapp_account_id = ?', accountId);
     del('adminPermissions', 'DELETE FROM admin_account_permissions WHERE whatsapp_account_id = ?', accountId);
