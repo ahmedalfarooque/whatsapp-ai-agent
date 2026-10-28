@@ -42,11 +42,11 @@ const FIELD_HELP: Record<string, string> = {
   config: 'Paste the API key (not an address).',
   name: 'Enter a name.',
 };
-const fieldMessage = (fields: string[]): string => fields.map((f) => FIELD_HELP[f] ?? `Check ${f}.`).join(' ');
+const fieldMessage = (fields: string[], reasons: Record<string, string> = {}): string => fields.map((f) => reasons[f] ?? FIELD_HELP[f] ?? `Check ${f}.`).join(' ');
 
 export function fail(res: Response, error: unknown): void {
   if (error instanceof ProviderValidationError) {
-    res.status(error.message === 'not_found' ? 404 : 400).json({ error: error.message, fields: error.fields, message: fieldMessage(error.fields) });
+    res.status(error.message === 'not_found' ? 404 : 400).json({ error: error.message, fields: error.fields, reasons: error.reasons, message: fieldMessage(error.fields, error.reasons) });
     return;
   }
   if (error instanceof SimpleProviderError) {

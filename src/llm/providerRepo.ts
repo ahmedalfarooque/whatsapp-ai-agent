@@ -5,7 +5,7 @@ import { getSecretEncryptionKey } from '../config/masterKey';
 import { isUsableApiKey } from '../config/effectiveConfig';
 import { env } from '../config/env';
 import { logger } from '../logger';
-import { checkProviderEndpoint } from './endpointPolicy';
+import { checkProviderEndpoint, describeEndpointRefusal, normalizeProviderBaseUrl } from './endpointPolicy';
 import { ensureAccountRouting, forgetProviderEntry } from './routingOrder';
 import { endpointMatchesVendor, isAdapterId, vendorById, vendorForUrl } from './adapters';
 
@@ -109,7 +109,8 @@ const URL_RE = /^(https:\/\/[^\s"'<>]{3,200}|http:\/\/(127\.0\.0\.1|localhost|\[
 export const PROVIDER_RULES = { baseUrl: URL_RE, model: MODEL_ID } as const;
 
 export class ProviderValidationError extends Error {
-  constructor(message: string, public readonly fields: string[]) {
+  /** `reasons` names WHY a field was refused where that is known (e.g. the endpoint policy), so the form can say more than "Check baseUrl". */
+  constructor(message: string, public readonly fields: string[], public readonly reasons: Record<string, string> = {}) {
     super(message);
     this.name = 'ProviderValidationError';
   }
@@ -130,18 +131,21 @@ export function providerModelsFor(row: Pick<AiProviderRow, 'models' | 'vision_mo
 /** Throws ProviderValidationError (with the offending field names) when a provider as typed in the dashboard may not be saved. Exported for the tests. */
 export function validateProviderInput(input: AiProviderInput): void {
   const fields: string[] = [];
+  const reasons: Record<string, string> = {};
   if (!input.name || input.name.trim().length < 1 || input.name.length > 80) fields.push('name');
   if (!PROVIDER_KINDS.includes(input.kind)) fields.push('kind');
-  if (!URL_RE.test(input.baseUrl ?? '')) fields.push('baseUrl');
-  else if (checkProviderEndpoint(input.baseUrl, env.allowLocalHttpProviders) !== null) fields.push('baseUrl'); // HTTPS only, no private / metadata hosts; loopback only where local providers are allowed (endpointPolicy.ts)
-  else if (input.vendor && !endpointMatchesVendor(input.vendor, input.baseUrl)) fields.push('baseUrl'); // a known vendor must use its official API host
+  const syntaxOk = URL_RE.test(input.baseUrl ?? '');
+  const refusal = syntaxOk ? checkProviderEndpoint(input.baseUrl, env.allowLocalHttpProviders) : null;
+  if (!syntaxOk) { fields.push('baseUrl'); reasons.baseUrl = describeEndpointRefusal(/^\s*http:\/\//i.test(input.baseUrl ?? '') ? 'insecure_http' : 'invalid_url'); }
+  else if (refusal !== null) { fields.push('baseUrl'); reasons.baseUrl = describeEndpointRefusal(refusal); } // HTTPS only, no private / metadata hosts; loopback only where local providers are allowed (endpointPolicy.ts)
+  else if (input.vendor && !endpointMatchesVendor(input.vendor, input.baseUrl)) { fields.push('baseUrl'); reasons.baseUrl = 'A known provider must use its official API address.'; }
   if (input.adapter !== undefined && !isAdapterId(input.adapter)) fields.push('adapter');
   for (const list of [input.models, input.visionModels ?? [], input.audioModels ?? []]) for (const m of list) if (!MODEL_ID.test(m)) fields.push('models');
   if (input.models.length === 0 && (input.visionModels ?? []).length === 0 && (input.audioModels ?? []).length === 0) fields.push('models');
   if (input.apiKey !== undefined && input.apiKey !== '' && !isUsableApiKey(input.apiKey)) fields.push('apiKey');
   if (input.priority !== undefined && !(Number.isInteger(input.priority) && input.priority >= 1 && input.priority <= 1000)) fields.push('priority');
   if (input.timeoutMs !== undefined && !(Number.isInteger(input.timeoutMs) && input.timeoutMs >= 2000 && input.timeoutMs <= 120000)) fields.push('timeoutMs');
-  if (fields.length) throw new ProviderValidationError('validation_failed', [...new Set(fields)]);
+  if (fields.length) throw new ProviderValidationError('validation_failed', [...new Set(fields)], reasons);
 }
 
 export function toView(row: AiProviderRow): AiProviderView {
@@ -213,7 +217,8 @@ function nextSharedPriority(db: Database.Database, accountId: number | null): nu
   return top === null ? 100 : Math.min(1000, Math.max(100, top + 10));
 }
 
-export function createProvider(input: AiProviderInput, scope: { accountId: number | null; updatedBy: number }, db: Database.Database = getDb()): AiProviderRow {
+export function createProvider(rawInput: AiProviderInput, scope: { accountId: number | null; updatedBy: number }, db: Database.Database = getDb()): AiProviderRow {
+  const input = { ...rawInput, baseUrl: normalizeProviderBaseUrl(rawInput.baseUrl ?? '') }; // one spelling of the address from here on (save, test, inference)
   validateProviderInput(input);
   const ciphertext = input.apiKey ? encryptWithKey(input.apiKey, getSecretEncryptionKey()) : null;
   const result = db
@@ -226,9 +231,10 @@ export function createProvider(input: AiProviderInput, scope: { accountId: numbe
   return db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(result.lastInsertRowid) as AiProviderRow;
 }
 
-export function updateProvider(id: number, accountId: number, input: AiProviderInput, updatedBy: number, db: Database.Database = getDb()): AiProviderRow {
+export function updateProvider(id: number, accountId: number, rawInput: AiProviderInput, updatedBy: number, db: Database.Database = getDb()): AiProviderRow {
   const existing = getProvider(id, accountId, db);
   if (!existing) throw new ProviderValidationError('not_found', []);
+  const input = { ...rawInput, baseUrl: normalizeProviderBaseUrl(rawInput.baseUrl ?? '') };
   validateProviderInput(input);
   undecryptableWarned.delete(id);
   const keyClause = input.apiKey === undefined ? '' : ', key_ciphertext = @key';

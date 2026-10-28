@@ -1,5 +1,5 @@
 import { env } from '../config/env';
-import { checkProviderEndpoint } from './endpointPolicy';
+import { checkProviderEndpoint, describeEndpointRefusal, normalizeProviderBaseUrl } from './endpointPolicy';
 import { describeNetworkFailure } from './openAiCompatible';
 import { ANTHROPIC_VERSION } from './adapters/anthropicAdapter';
 import { vendorById, endpointMatchesVendor } from './adapters';
@@ -23,7 +23,7 @@ const TIMEOUT_MS = 10_000;
 
 const FAILURE_TEXT: Record<DiscoveryFailure, string> = {
   unsupported_vendor: 'This provider is not recognised.',
-  endpoint_refused: 'This address is not allowed for a provider (use the provider\'s official https:// address).',
+  endpoint_refused: 'This address is not allowed for a provider.',
   missing_key: 'Enter the API key first; the model list is read with it.',
   rejected: 'The provider refused this key, so no model list could be read. Check the key.',
   rate_limited: 'The provider is rate limiting requests right now. Try again later, or type a model id by hand (it is tested with a real request when you save).',
@@ -61,8 +61,10 @@ export async function discoverModels(
     const models = cleanIds(list.models.map((id) => ({ id, price: id.startsWith('auto/') ? 'gateway_combo' as const : 'paid_or_unknown' as const })));
     return { ok: true, models, truncated: list.truncated, note: 'Read from the gateway. A combo (auto/…) is only as free as the accounts connected inside OmniRoute; any other model may be billed. Pick one and it is tested with a real request.' };
   }
-  const baseUrl = (input.baseUrl?.trim() || vendor.baseUrl).replace(/\/+$/, '');
-  if (!baseUrl || checkProviderEndpoint(baseUrl, deps.allowLocal ?? env.allowLocalHttpProviders) || (vendor.hosts.length > 0 && !endpointMatchesVendor(vendor.id, baseUrl))) return failure('endpoint_refused');
+  const baseUrl = normalizeProviderBaseUrl(input.baseUrl?.trim() || vendor.baseUrl); // the same spelling that is saved and used for inference
+  const refusal = baseUrl ? checkProviderEndpoint(baseUrl, deps.allowLocal ?? env.allowLocalHttpProviders) : 'invalid_url';
+  if (refusal) return failure('endpoint_refused', ` ${describeEndpointRefusal(refusal)}`);
+  if (vendor.hosts.length > 0 && !endpointMatchesVendor(vendor.id, baseUrl)) return failure('endpoint_refused', ' A known provider must use its official API address.');
   const key = (input.apiKey ?? '').trim();
   if (!key) return failure('missing_key');
 

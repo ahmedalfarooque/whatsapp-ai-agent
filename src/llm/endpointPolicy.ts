@@ -62,6 +62,25 @@ export function checkProviderEndpoint(baseUrl: string, allowLocal: boolean): End
   return url.protocol === 'https:' ? null : 'insecure_http';
 }
 
+/** Why an address was refused, in words an administrator can act on (the dashboard shows it instead of a bare "Check baseUrl"). */
+const REFUSAL_TEXT: Record<EndpointRefusal, string> = {
+  invalid_url: 'The address is not a valid URL. Use a full address such as https://api.example.com/v1.',
+  credentials_in_url: 'Do not put a user name or password in the address; the key is entered separately.',
+  unsupported_scheme: 'Only https:// addresses are allowed (http:// only for 127.0.0.1 on this server).',
+  insecure_http: 'A remote provider must use https://; plain http:// would send the key unencrypted.',
+  private_address: 'Private, internal and link-local addresses are not allowed for a provider.',
+  local_providers_disabled: 'This address is on this server (127.0.0.1) and local providers are switched off here. The server administrator must set AI_ALLOW_LOCAL_HTTP_PROVIDERS=true in the server configuration (loopback addresses only).',
+};
+export const describeEndpointRefusal = (code: EndpointRefusal): string => REFUSAL_TEXT[code];
+
+/**
+ * The one spelling of a provider address used for saving, listing models, testing and inference: surrounding spaces and trailing slashes removed, nothing else
+ * changed (the host the administrator typed, `localhost` included, is kept; the model list and the request add their own path).
+ */
+export function normalizeProviderBaseUrl(raw: string): string {
+  return (raw ?? '').trim().replace(/\/+$/, '');
+}
+
 /** True only for the loopback gateway address (127.0.0.1 / localhost / ::1) — used where a request must NEVER leave this machine. */
 export function isLoopbackUrl(value: string): boolean {
   try { return classifyHost(new URL(value).hostname) === 'loopback'; } catch { return false; }

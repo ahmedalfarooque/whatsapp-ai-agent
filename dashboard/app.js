@@ -73,6 +73,7 @@ async function api(url, options) {
     const error = new Error(message);
     error.status = response.status;
     if (body && body.fields) error.fields = body.fields;
+    if (body && body.reasons) error.reasons = body.reasons; // why a field was refused, where the server knows (e.g. the endpoint policy)
     throw error;
   }
   return body;
@@ -1478,8 +1479,9 @@ function bindAiForm(host, { endpoint, itemUrl, extraPayload, onDone }) {
       toast(hit ? `Saved. ${hit.model} answered a real test request in ${(hit.latencyMs / 1000).toFixed(1)} s.${setup.testFailure ? ' ' + setup.testFailure : ''}${setup.freeConfirmationRequired ? ' Confirm the free tier before it is used.' : ''}` : 'Saved', 'success');
       onDone(true);
     } catch (error) {
-      result.textContent = error.fields && error.fields.length && error.message === 'validation_failed' ? `Check ${error.fields.join(', ')}.` : error.message;
-      if (error.fields) error.fields.forEach((n) => { const p = form.querySelector(`.ai-err[data-err="${n}"]`); if (p) { p.textContent = `Check ${n === 'baseUrl' ? 'the endpoint address' : n}.`; p.hidden = false; } });
+      const why = (n) => (error.reasons && error.reasons[n]) || '';
+      result.textContent = error.fields && error.fields.length && error.message === 'validation_failed' ? error.fields.map((n) => why(n) || `Check ${n}.`).join(' ') : error.message;
+      if (error.fields) error.fields.forEach((n) => { const p = form.querySelector(`.ai-err[data-err="${n}"]`); if (p) { p.textContent = why(n) || `Check ${n === 'baseUrl' ? 'the endpoint address' : n}.`; p.hidden = false; } });
       result.style.color = '#c0453f';
     } finally {
       if (submit) submit.disabled = false;
