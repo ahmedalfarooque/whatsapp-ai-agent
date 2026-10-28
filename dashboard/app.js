@@ -1286,7 +1286,7 @@ function aiProviderFormHtml(meta, entry) {
         ${isNew ? `<div class="field"><label for="wa-field-provider">Provider</label><select id="wa-field-provider" name="provider"><option value="auto">Detect from the key</option>${presetOptions}</select><p class="field-help ai-provider-hint"></p><p class="field-help ai-err" data-err="provider" style="color:#c0453f" hidden></p></div>` : ''}
         ${textField('models', 'Models (optional, comma-separated, best first)', isNew ? 'Leave empty: when you save, the key is tested with a real request and a model that answered is chosen automatically. Type model ids only to test those instead. Required for a custom endpoint, xAI and Cerebras. A provider is never used until its free tier is confirmed.' : 'The models this provider may use, best first. A provider is never used until its free tier is confirmed.', entry && entry.models ? entry.models.join(', ') : '')}
         <p class="field-help ai-err" data-err="models" style="color:#c0453f" hidden></p>
-        ${isNew ? '<div class="ai-omni-models field" hidden><button type="button" class="btn small" data-act="omni-models">Load models from the gateway</button> <span class="muted small ai-omni-status" role="status"></span><datalist id="ai-omni-model-list"></datalist></div>' : ''}
+        ${isNew ? '<div class="ai-omni-models field" hidden><button type="button" class="btn small" data-act="load-models">Load models</button> <span class="muted small ai-omni-status" role="status"></span><datalist id="ai-omni-model-list"></datalist></div>' : ''}
         ${isNew ? textField('baseUrl', 'Endpoint address', 'Filled in for known providers. Required for a custom endpoint: a full https:// address.', '') : ''}
         <p class="field-help ai-err" data-err="baseUrl" style="color:#c0453f" hidden></p>
       </details>
@@ -1361,39 +1361,38 @@ function aiFormApplyPreset(form, meta) {
   const hint = form.querySelector('.ai-provider-hint');
   if (hint) hint.textContent = preset ? (custom ? 'Custom endpoint: Endpoint address and Models are required.' : preset.hint) : '';
   if (custom) form.querySelector('.ai-more').open = true;
-  aiFormOmniModels(form, Boolean(preset && preset.id === 'omniroute'));
+  aiFormModelDiscovery(form, preset || null);
 }
 
 /**
- * OmniRoute only: lists the models the gateway offers (read by the server with its own key; no key is typed or shown here) as SUGGESTIONS for the Models box.
- * A listed model is not proof that it works, so nothing is chosen for the person: saving tests the model they pick with a real request.
+ * "Load models" for every provider: the server reads the model list of the provider's OWN API with the key typed above (OmniRoute: with its own gateway key) and the
+ * results are only SUGGESTIONS for the Models box. A listed model is not proof that it works or that it is free: nothing is chosen for the person and saving tests the
+ * model they pick with a real request. Typing a model id by hand stays possible when a provider offers no list.
  */
-function aiFormOmniModels(form, isOmni) {
+function aiFormModelDiscovery(form, preset) {
   const box = form.querySelector('.ai-omni-models');
   if (!box) return;
-  box.hidden = !isOmni;
-  if (isOmni) form.elements.models.setAttribute('list', 'ai-omni-model-list'); else form.elements.models.removeAttribute('list');
-  if (!isOmni) return;
-  form.querySelector('.ai-more').open = true;
+  const known = Boolean(preset);
+  box.hidden = !known;
+  if (known) form.elements.models.setAttribute('list', 'ai-omni-model-list'); else form.elements.models.removeAttribute('list');
+  if (!known) return;
   const button = box.querySelector('button');
   const status = box.querySelector('.ai-omni-status');
   const list = box.querySelector('datalist');
-  const REASONS = {
-    not_running: 'OmniRoute is not running at its address. Start it (omniroute, from its own folder), then try again.',
-    no_key: 'OmniRoute is running, but no OmniRoute key was found on this machine (set OMNIROUTE_API_KEY and restart).',
-    rejected: 'OmniRoute rejected the key it was given.',
-    unreadable: 'OmniRoute answered, but its model list could not be read.',
-  };
   button.onclick = async () => {
     button.disabled = true;
     status.textContent = 'Loading models…';
     try {
-      const r = await api('/api/dashboard/ai-routing/omniroute/models');
+      const key = String(form.elements.config.value || '').trim();
+      const r = await api('/api/dashboard/ai-routing/discover-models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vendor: preset.id, baseUrl: form.elements.baseUrl ? String(form.elements.baseUrl.value || '').trim() : '', apiKey: key }) });
       list.innerHTML = '';
-      for (const id of r.models || []) { const o = document.createElement('option'); o.value = id; list.appendChild(o); }
-      status.textContent = (r.models || []).length
-        ? `${r.models.length} models listed. A listed model is not proof that it works: the one you choose is tested with a real request when you save.`
-        : (REASONS[r.reason] || 'No models were listed.');
+      if (r.ok) {
+        for (const m of r.models) { const o = document.createElement('option'); o.value = m.id; o.label = m.price === 'free' ? m.id + ' (free in the provider catalog)' : m.price === 'gateway_combo' ? m.id + ' (gateway combo: free only if the accounts inside are)' : m.id + ' (cost not known)'; list.appendChild(o); }
+        const free = r.models.filter((m) => m.price === 'free').length;
+        status.textContent = r.models.length + ' models listed' + (free ? ', ' + free + ' marked free by the provider catalog' : '') + '. ' + r.note;
+      } else {
+        status.textContent = r.message || 'No models were listed.';
+      }
     } catch (error) { status.textContent = error.message; }
     button.disabled = false;
   };
@@ -1547,12 +1546,17 @@ async function renderAiRouting(host) {
       <p class="muted">Providers are tried from the top. If one fails, times out or runs out of its free usage, the next one is used at once. Only free usage is ever allowed.</p>
       <ul class="ai-list">${entries.map((e, i) => aiEntryRowHtml(e, i, entries.length, { reorder: true })).join('')}</ul>
       ${entries.filter((e) => e.needsFreeConfirm).map((e) => `<p class="muted" style="font-size:12px"><b>${esc(e.name)}</b> — <span>Not confirmed as free: this provider is never used until you confirm its free tier.</span> <button type="button" class="btn small" data-confirm-free="${e.id}">Confirm free tier</button></p>`).join('')}
-      <div class="toolbar" style="margin-top:8px"><button type="button" class="btn primary" id="ai-add">Add provider</button></div>
+      <div class="toolbar" style="margin-top:8px"><button type="button" class="btn primary" id="ai-add">Add provider</button> <button type="button" class="btn" id="ai-reset-order">Reset routing order</button></div>
       <div class="ai-status-line muted" style="font-size:12px;margin-top:6px" role="status" aria-live="polite"></div>
       <div id="ai-form-host" style="margin-top:10px">${editing === 'new' ? aiProviderFormHtml(data, null) : editingEntry ? aiProviderFormHtml(data, editingEntry) : ''}</div>
       ${routingDiagnosticsHtml(data)}`;
 
     host.querySelector('#ai-add').addEventListener('click', () => { editing = 'new'; draw(); });
+    host.querySelector('#ai-reset-order').addEventListener('click', async () => {
+      if (!window.confirm('Reset the routing order and on/off switches of this business to the defaults? Providers and keys are kept.')) return;
+      try { await api('/api/dashboard/ai-routing/order/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); toast('Routing order reset to the defaults', 'success'); } catch (error) { toast(error.message, 'error'); }
+      await draw();
+    });
     host.querySelectorAll('[data-confirm-free]').forEach((btn) => btn.addEventListener('click', async () => {
       btn.disabled = true;
       try {

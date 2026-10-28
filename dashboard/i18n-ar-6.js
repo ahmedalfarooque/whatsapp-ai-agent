@@ -460,6 +460,10 @@ Object.assign(window.I18N_AR, {
   'This business does not have the add-on this skill needs.': 'لا يملك هذا النشاط الإضافة التي تحتاجها هذه المهارة.',
   'This business does not have the add-on this skill needs, so it cannot be switched on.': 'لا يملك هذا النشاط الإضافة التي تحتاجها هذه المهارة، لذا لا يمكن تفعيلها.',
   // ---- OmniRoute model list in the Add Provider form
+  'Load models': 'تحميل النماذج',
+  'Reset routing order': 'إعادة ضبط ترتيب التوجيه',
+  'Reset the routing order and on/off switches of this business to the defaults? Providers and keys are kept.': 'إعادة ترتيب التوجيه ومفاتيح التشغيل لهذا النشاط إلى الإعدادات الافتراضية؟ يتم الاحتفاظ بالمزودين والمفاتيح.',
+  'Routing order reset to the defaults': 'تمت إعادة ترتيب التوجيه إلى الإعدادات الافتراضية',
   'Load models from the gateway': 'تحميل النماذج من البوابة',
   'Loading models…': 'جارٍ تحميل النماذج…',
   'OmniRoute is not running at its address. Start it (omniroute, from its own folder), then try again.': 'OmniRoute لا يعمل على عنوانه. شغّله (omniroute من مجلده الخاص) ثم حاول مرة أخرى.',

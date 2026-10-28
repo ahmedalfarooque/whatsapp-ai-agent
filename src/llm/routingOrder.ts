@@ -91,3 +91,9 @@ export function forgetProviderEntry(providerId: number, db: Database.Database = 
 export function deleteAccountRouting(accountId: number, db: Database.Database = getDb()): void {
   db.prepare('DELETE FROM ai_account_routing WHERE whatsapp_account_id = ?').run(accountId);
 }
+
+/** Forgets this business's saved order and on/off switches: the order is then rebuilt from the defaults (the shared Default entry first, then its own providers in the order they were added). Providers, keys and the shared pool are untouched. */
+export function resetAccountRouting(accountId: number, db: Database.Database = getDb()): RoutingEntry[] {
+  db.prepare('DELETE FROM ai_account_routing WHERE whatsapp_account_id = ?').run(accountId);
+  return ensureAccountRouting(accountId, db);
+}

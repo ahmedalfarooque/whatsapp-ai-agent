@@ -13,7 +13,8 @@ import { AiResponseError } from '../llm/aiResponseError';
 import { getModelInfo } from '../llm/modelCatalog';
 import { createProvider, csv, deleteProvider, getProvider, listProvidersForAccount, listSharedProviders, PROVIDER_KINDS, providerApiKey, ProviderValidationError, recordProviderTest, setProviderEnabled, setProviderFreeConfirmed, toView, updateProvider, type AiProviderInput, type AiProviderRow, type ProviderKind } from '../llm/providerRepo';
 import { PROVIDER_PRESETS, presetsPayload, resolveSimpleProvider, SimpleProviderError } from '../llm/providerPresets';
-import { getAccountRouting, RoutingOrderError, saveAccountRouting } from '../llm/routingOrder';
+import { getAccountRouting, resetAccountRouting, RoutingOrderError, saveAccountRouting } from '../llm/routingOrder';
+import { discoverModels } from '../llm/modelDiscovery';
 import { endpointMatchesVendor, vendorById } from '../llm/adapters';
 import { discoverLocalOmniRouteKey, isPlausibleOmniRouteKey, listOmniRouteModels, omniRouteBaseUrl, omniRouteReachable } from '../llm/omniRoute';
 import { autoSelectModel, type ProbeAttempt } from '../llm/autoSetup';
@@ -297,6 +298,37 @@ export function buildEntries(accountId: number): Array<Record<string, unknown>> 
 
 export function registerAiRoutingRoutes(router: Router): void {
   // The models the local OmniRoute gateway offers (read with this server's own key; the key is never returned). A listed model is a suggestion only: saving tests it with a real request.
+  // "Load models" for any provider: reads the model list of the provider's OWN API with the typed key (or, for a saved provider of this business, its stored key, which is never returned).
+  router.post('/api/dashboard/ai-routing/discover-models', async (req, res) => {
+    try {
+      const b = (req.body ?? {}) as { vendor?: unknown; baseUrl?: unknown; apiKey?: unknown; providerId?: unknown };
+      let vendor = typeof b.vendor === 'string' ? b.vendor : '';
+      let baseUrl = typeof b.baseUrl === 'string' ? b.baseUrl : '';
+      let apiKey = typeof b.apiKey === 'string' ? b.apiKey : '';
+      if (b.providerId !== undefined && b.providerId !== null) {
+        const row = getProvider(Number(b.providerId), currentAccountId());
+        if (!row) { res.status(404).json({ error: 'not_found' }); return; }
+        if (row.whatsapp_account_id === null && !mayManageShared(req)) { res.status(403).json({ error: 'Only a super administrator can read the models of a provider shared by every business' }); return; }
+        vendor = row.vendor ?? vendor; baseUrl = baseUrl || row.base_url; apiKey = apiKey || providerApiKey(row) || '';
+      }
+      const result = await discoverModels({ vendor, baseUrl, apiKey });
+      res.json(result);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /** Back to the default routing order for this business (the shared Default entry first, then its own providers); nothing else changes. */
+  router.post('/api/dashboard/ai-routing/order/reset', (req, res) => {
+    try {
+      const entries = resetAccountRouting(currentAccountId());
+      logger.info({ account: currentAccountId(), adminUserId: req.adminUserId }, 'AI routing order reset to defaults');
+      res.json({ ok: true, entries: buildEntries(currentAccountId()), count: entries.length });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   router.get('/api/dashboard/ai-routing/omniroute/models', async (_req, res) => {
     try {
       const list = await listOmniRouteModels();

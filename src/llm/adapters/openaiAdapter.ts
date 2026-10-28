@@ -1,7 +1,10 @@
 import { completeOnce, openRouterHeaders } from '../openAiCompatible';
 import type { AdapterId, ProviderAdapter } from './types';
 
-const isGroq = (baseUrl: string): boolean => { try { return /(^|\.)groq\.com$/i.test(new URL(baseUrl).hostname); } catch { return false; } };
+const hostOf = (baseUrl: string): string => { try { return new URL(baseUrl).hostname.toLowerCase(); } catch { return ''; } };
+const isGroq = (baseUrl: string): boolean => /(^|\.)groq\.com$/.test(hostOf(baseUrl));
+/** OpenAI itself documents `max_completion_tokens` and accepts only the default temperature on its current models. */
+const isOpenAi = (baseUrl: string): boolean => hostOf(baseUrl) === 'api.openai.com';
 
 /**
  * The OpenAI chat-completions protocol (POST {base}/chat/completions, `Authorization: Bearer`). It is the real, documented contract of OpenRouter,
@@ -12,7 +15,7 @@ function createOpenAiProtocolAdapter(id: AdapterId, openRouter: boolean): Provid
   return {
     id,
     authentication: 'Authorization: Bearer <key>',
-    complete: (request) => completeOnce({ ...request, headers: openRouter ? openRouterHeaders() : undefined, tokenParam: isGroq(request.baseUrl) ? 'max_completion_tokens' : undefined }),
+    complete: (request) => completeOnce({ ...request, headers: openRouter ? openRouterHeaders() : undefined, tokenParam: isGroq(request.baseUrl) || isOpenAi(request.baseUrl) ? 'max_completion_tokens' : undefined, omitTemperature: isOpenAi(request.baseUrl) }),
   };
 }
 

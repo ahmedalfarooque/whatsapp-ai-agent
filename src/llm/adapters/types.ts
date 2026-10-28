@@ -9,7 +9,7 @@ import type { ChatCompletionResponse, ChatMessage } from '../types';
  * Every adapter reports failures as the SAME normalised errors (AiCredentialError for a rejected key or missing permission; AiResponseError
  * with a reason for everything else) so failover, cooldowns and retries behave identically whatever the vendor.
  */
-export type AdapterId = 'openrouter' | 'openai' | 'gemini';
+export type AdapterId = 'openrouter' | 'openai' | 'gemini' | 'anthropic';
 
 export interface AdapterCompleteRequest {
   baseUrl: string;

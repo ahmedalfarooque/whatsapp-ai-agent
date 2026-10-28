@@ -62,6 +62,15 @@ export const VENDORS: Vendor[] = [
   { id: 'cerebras', name: 'Cerebras', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'https://api.cerebras.ai/v1', hosts: ['api.cerebras.ai'], docs: 'https://inference-docs.cerebras.ai', keyPrefix: /^csk-/, verifiedDefault: '', probeModels: [],
     free: { mode: 'admin_confirmation', note: 'Cerebras has a free tier with limits; confirm it yourself.' },
     hint: 'API address https://api.cerebras.ai/v1. Type a model id under More options; it is tested with a real request when you save.' },
+  { id: 'openai', name: 'OpenAI', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'https://api.openai.com/v1', hosts: ['api.openai.com'], docs: 'https://platform.openai.com/docs/api-reference', keyPrefix: /^sk-(proj|svcacct)-/, verifiedDefault: '', probeModels: [], validationTokens: 256, chatTokens: 1000,
+    free: { mode: 'admin_confirmation', note: 'OpenAI API usage is billed; it has no free API tier. Confirm only if you have verified that your key is not billed.' },
+    hint: 'OpenAI API address https://api.openai.com/v1. Use "Load models" to list the models your key can use, pick one, then save: it is tested with a real request.' },
+  { id: 'anthropic', name: 'Anthropic (Claude)', adapter: 'anthropic', kind: 'openai_compatible', baseUrl: 'https://api.anthropic.com/v1', hosts: ['api.anthropic.com'], docs: 'https://docs.anthropic.com/en/api', keyPrefix: /^sk-ant-/, verifiedDefault: '', probeModels: [], validationTokens: 64, chatTokens: 1000,
+    free: { mode: 'admin_confirmation', note: 'Anthropic API usage is billed; it has no free API tier. Confirm only if you have verified that your key is not billed.' },
+    hint: 'Native Anthropic Messages API (not the OpenAI format). Use "Load models" to list the models your key can use, pick one, then save: it is tested with a real request. Not verified against a live key until you save one.' },
+  { id: 'deepseek', name: 'DeepSeek', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'https://api.deepseek.com', hosts: ['api.deepseek.com'], docs: 'https://api-docs.deepseek.com', verifiedDefault: '', probeModels: ['deepseek-chat'], validationTokens: 64, chatTokens: 1000,
+    free: { mode: 'admin_confirmation', note: 'DeepSeek bills API usage by tokens; confirm only if you have verified that your key is not billed.' },
+    hint: 'API address https://api.deepseek.com (OpenAI-compatible). deepseek-chat is the documented alias; use "Load models" to see the rest. It is tested with a real request when you save.' },
   // OmniRoute: a local gateway (npm "omniroute") with an OpenAI-compatible API on loopback. Its keys are plain `sk-…` (no prefix to recognise), so it is detected by asking the
   // gateway itself (src/llm/omniRoute.ts). `auto/best-free` is its own free-only combo; any other model it offers can be paid by the account behind it.
   { id: 'omniroute', name: 'OmniRoute', adapter: 'openai', kind: 'openai_compatible', baseUrl: 'http://127.0.0.1:20128/v1', hosts: ['127.0.0.1', 'localhost'], docs: 'https://github.com/diegosouzapw/OmniRoute', verifiedDefault: 'auto/best-free', verifiedOn: '2026-10-22', probeModels: ['auto/best-free'],

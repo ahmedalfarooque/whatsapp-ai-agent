@@ -280,18 +280,21 @@ describe('automatic model selection when a key is saved (scripted providers)', (
     });
   });
 
-  it('the preset list tells the form which vendors choose their model automatically, and offers no model-list feature', () => {
+  it('the preset list tells the form which vendors choose their model automatically, and its text never mentions a retired fetch feature', () => {
     const payload = presetsPayload();
-    expect(Object.fromEntries(payload.presets.map((p) => [p.id, p.autoSelect]))).toEqual({ openrouter: true, groq: true, google: true, xai: false, mistral: true, cerebras: false, omniroute: true, custom: false });
+    expect(Object.fromEntries(payload.presets.map((p) => [p.id, p.autoSelect]))).toEqual({ openrouter: true, groq: true, google: true, xai: false, mistral: true, cerebras: false, openai: false, anthropic: false, deepseek: true, omniroute: true, custom: false });
     expect(JSON.stringify(payload)).not.toMatch(/discovery|fetch/i);
     expect(VENDORS.every((v) => Array.isArray(v.probeModels))).toBe(true);
   });
 
-  it('the "Fetch available models" feature is gone: no endpoint, no button, no handler, no wording', async () => {
+  it('the old "Fetch available models" feature stays gone (no super-admin endpoint, button or wording); its successor is the explicit "Load models" suggestion list, which never chooses or enables a model', async () => {
     expect((await owner.post('/api/dashboard/super-admin/ai/discover-models').send({ provider: 'groq', config: GROQ_KEY })).status).toBe(404);
-    expect((await owner.post('/api/dashboard/ai-routing/discover-models').set('X-Whatsapp-Account', String(acc)).send({ provider: 'groq', config: GROQ_KEY })).status).toBe(404);
+    // "Load models" (2026-10-28, requested by the owner): a key-less request is answered with a plain refusal, never a list and never a saved provider
+    const load = await owner.post('/api/dashboard/ai-routing/discover-models').set('X-Whatsapp-Account', String(acc)).send({ vendor: 'groq' });
+    expect(load.status).toBe(200);
+    expect(load.body).toMatchObject({ ok: false, reason: 'missing_key' });
     const app_js = fs.readFileSync(path.join(__dirname, '..', '..', 'dashboard', 'app.js'), 'utf8');
-    expect(app_js).not.toMatch(/Fetch available models|ai-fetch-models|discover-models|discoverUrl/);
+    expect(app_js).not.toMatch(/Fetch available models|ai-fetch-models|discoverUrl|super-admin\/ai\/discover-models/);
     const ar = fs.readFileSync(path.join(__dirname, '..', '..', 'dashboard', 'i18n-ar-6.js'), 'utf8');
     expect(ar).not.toMatch(/Fetch available models|Asking the provider/);
   });

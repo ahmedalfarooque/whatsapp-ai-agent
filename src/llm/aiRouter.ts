@@ -197,7 +197,8 @@ function cooldownCore(category: FailureCategory, error: AiResponseError | null, 
     case 'invalid_request': return { ms: backoffMs(5 * MINUTE, HOUR, strikes), scope: 'route', resetKnown: false };
     case 'model_unavailable': return { ms: RETIRED.test(message) ? HOUR : backoffMs(5 * MINUTE, HOUR, strikes), scope: 'route', resetKnown: false };
     case 'timeout': return { ms: backoffMs(MINUTE, 15 * MINUTE, strikes), scope: 'route', resetKnown: false };
-    case 'network': return { ms: backoffMs(MINUTE, 15 * MINUTE, strikes), scope: 'provider', resetKnown: false };
+    // A refused connection means nothing is listening (a gateway that is not running, a wrong address): it will not appear within a minute, so it rests far longer than a blip.
+    case 'network': return { ms: /connection refused|could not be resolved/i.test(message) ? backoffMs(5 * MINUTE, 6 * HOUR, strikes) : backoffMs(MINUTE, 15 * MINUTE, strikes), scope: 'provider', resetKnown: false };
     case 'provider_error': return { ms: backoffMs(MINUTE, 15 * MINUTE, strikes), scope: 'route', resetKnown: false };
     // One empty or malformed answer says nothing about the next one: no cooldown (the failure is still logged and counted).
     case 'empty':

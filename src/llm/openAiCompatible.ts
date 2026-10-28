@@ -21,9 +21,24 @@ export interface EndpointRequest {
   maxTokens?: number;
   /** The name of the completion-limit field: Groq documents `max_completion_tokens` (`max_tokens` is deprecated there); everyone else uses `max_tokens`. */
   tokenParam?: 'max_tokens' | 'max_completion_tokens';
+  /** OpenAI's current models accept only the default temperature; sending one is a 400. True = leave the field out. */
+  omitTemperature?: boolean;
   timeoutMs: number;
   /** Extra headers (OpenRouter's app attribution). */
   headers?: Record<string, string>;
+}
+
+export function describeNetworkFailure(error: unknown): string {
+  const name = (error as Error)?.name;
+  if (name === 'AbortError' || name === 'TimeoutError') return 'timeout';
+  const code = String(((error as { cause?: { code?: unknown } })?.cause?.code ?? (error as { code?: unknown })?.code ?? '')).toUpperCase();
+  const text = `${(error as Error)?.message ?? ''} ${(error as { cause?: { message?: unknown } })?.cause?.message ?? ''}`;
+  if (code === 'ECONNREFUSED' || /ECONNREFUSED/i.test(text)) return 'connection refused (nothing is listening at the provider address)';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'the provider address could not be resolved (DNS)';
+  if (code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT') return 'timeout';
+  if (code === 'ECONNRESET' || code === 'UND_ERR_SOCKET') return 'connection reset by the provider';
+  if (/CERT|SSL|TLS/.test(code)) return 'TLS error while connecting to the provider';
+  return 'network error (no answer from the provider)';
 }
 
 export function messageText(content: unknown): string {
@@ -248,7 +263,7 @@ export async function completeOnce(request: EndpointRequest): Promise<ChatComple
           model: request.model,
           messages: request.messages,
           ...(request.tools && request.tools.length ? { tools: request.tools } : {}),
-          temperature: request.temperature ?? 0.4,
+          ...(request.omitTemperature ? {} : { temperature: request.temperature ?? 0.4 }),
           [request.tokenParam ?? 'max_tokens']: request.maxTokens ?? 600,
         }),
       },
@@ -256,8 +271,7 @@ export async function completeOnce(request: EndpointRequest): Promise<ChatComple
     );
   } catch (error) {
     // No answer at all (refused connection, DNS, abort/timeout): the provider or the network, never this model's fault — the error says so.
-    const name = (error as Error)?.name ?? 'network error';
-    const failure = new AiResponseError('provider_error', null, request.model, name === 'AbortError' ? 'timeout' : name);
+    const failure = new AiResponseError('provider_error', null, request.model, describeNetworkFailure(error));
     failure.network = true;
     throw failure;
   }
