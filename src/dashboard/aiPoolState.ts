@@ -6,6 +6,7 @@ import { csv, listProvidersForAccount, listSharedProviders, providerApiKey, type
 import { DEFAULT_ENTRY, getAccountRouting, providerEntryKey } from '../llm/routingOrder';
 import { getCachedProviderHealth } from '../llm/aiProviderHealth';
 import { coolingUntil } from '../llm/aiRouter';
+import { GATEWAY_SUMMARY_PREFIX } from '../llm/openAiCompatible';
 import type { AiState } from './overview';
 
 /**
@@ -153,7 +154,10 @@ export function describeRouteFailure(f: Pick<Latest, 'category' | 'http_status' 
       return /web page/.test(reason)
         ? { label: 'AI provider address is not an API', detail: `${f.provider_name}${http}: ${reason}. Check the endpoint address` }
         : { label: 'AI model unavailable', detail: `${where}${http}${tail}` };
-    case 'timeout': case 'network': case 'provider_error': return { label: 'AI provider temporarily unavailable', detail: `${where}${http}${tail || ': no answer in time'}` };
+    case 'timeout': case 'network': case 'provider_error':
+      // A gateway that is reachable and authenticated but whose own upstreams all failed is a different problem from an unreachable provider: the fix is inside the gateway.
+      if (reason.startsWith(GATEWAY_SUMMARY_PREFIX)) return { label: 'AI gateway has no working upstream', detail: `${where}${http}: the gateway answered, but none of its upstream providers did (${reason.slice(GATEWAY_SUMMARY_PREFIX.length + 2)}). Connect or fix an upstream provider inside the gateway; this route is retried later and nothing is purchased` };
+      return { label: 'AI provider temporarily unavailable', detail: `${where}${http}${tail || ': no answer in time'}` };
     case 'empty': case 'malformed': return { label: 'AI returned an unusable response', detail: `${where}: ${f.category === 'empty' ? 'an empty answer' : 'an unreadable answer'}${http}` };
     default: return { label: 'AI replies failing', detail: `${where}${http}${tail}` };
   }

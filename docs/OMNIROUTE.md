@@ -11,12 +11,18 @@ OmniRoute (npm `omniroute`, tested with 3.8.50) is a local gateway with an OpenA
 ## Adding it to the agent (localhost or live)
 Dashboard → Super Admin → Providers & Legacy API → add: name `OmniRoute`, key empty (the local OmniRoute key is read: `OMNIROUTE_API_KEY`, or on Windows `~/.omniroute/client-api-key.dpapi`) or paste the client key. Endpoint, model and priority are filled in; the key is tested with a real request and stored encrypted.
 
-## Production server (not installed at the time of writing)
+## Production server (installed 2026-10-28: 3.8.50, `omniroute.service`, loopback only; NO upstream provider connected yet)
 Needs Node ≥ 20 (server has 24), ~1 GB RAM. Outline, run as a dedicated user, never as the agent's user, never on port 3000/3005:
 1. `sudo useradd -m -s /usr/sbin/nologin omniroute && sudo npm i -g omniroute`
 2. systemd unit `omniroute.service`: `User=omniroute`, `WorkingDirectory=/home/omniroute`, `Environment=PORT=20128`, `ExecStart=$(command -v omniroute)`, `Restart=on-failure`; bind to loopback (`OMNIROUTE_SERVER_HOST=127.0.0.1` in its own `.env`); do not open the port in the firewall.
 3. Connect a free provider in its dashboard through an SSH tunnel (`ssh -L 20128:127.0.0.1:20128 …`), create the client key, then add the provider on the live dashboard as above.
 4. Verify a real `auto/best-free` answer from the server before relying on it.
+
+**Operating notes (verified on 3.8.50):**
+* The "v16.3.1" in the startup banner is Next.js, not OmniRoute. The live credential is the bcrypt hash in the gateway's settings store; `INITIAL_PASSWORD` only bootstraps one and is ignored once a hash exists.
+* The login lockout is in memory only: 5 failures per client IP, then 15 minutes (through an SSH tunnel every browser is `127.0.0.1`, so a mistyped password locks the tunnel). It expires by itself; a service restart also clears it. Nothing needs resetting.
+* Change the dashboard password from the dashboard, or with the same `PATCH /api/settings` `{currentPassword,newPassword}` call it uses, or (last resort, needs a restart) `omniroute reset-password`. Never edit the database by hand.
+* A fresh gateway has zero provider connections: its catalog is keyless built-ins (some flagged `tos: avoid` by the gateway itself) and `auto/best-free` returns 502. Connect your own free-tier account (Groq, Gemini, OpenRouter, Cerebras, …) in its dashboard; do not point the customer agent at anonymous or scraped endpoints.
 
 ## Configuration (this server or this PC)
 * `OMNIROUTE_BASE_URL` (optional, loopback only; default `http://127.0.0.1:20128/v1`) and `OMNIROUTE_API_KEY` (or, on Windows, `~/.omniroute/client-api-key.dpapi`). Names only in `.env.example`; never commit a value.

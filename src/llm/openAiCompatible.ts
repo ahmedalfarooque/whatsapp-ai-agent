@@ -52,13 +52,40 @@ export function messageText(content: unknown): string {
   return '';
 }
 
+/**
+ * A gateway (OmniRoute and similar) that tried several upstreams answers ONE 502 listing them all:
+ * "<model>: <kind> — [<status>]: <text> (HTTP <status>); … (+N more)". The first upstream's wording alone reads as the whole story, so the list is summarised
+ * by CAUSE instead (never the provider's text, so nothing from it can leak). null when the message is not such a list.
+ */
+export const GATEWAY_SUMMARY_PREFIX = 'gateway up, no upstream answered';
+export function summarizeGatewayFailure(message: string): string | null {
+  const segments = [...message.matchAll(/—\s*\[(\d{3})\]:?\s*([^;]*)/g)];
+  if (segments.length === 0) return null;
+  const counts = { quota: 0, key: 0, model: 0, timeout: 0, other: 0 };
+  for (const segment of segments) {
+    const code = Number(segment[1] ?? 0);
+    const text = segment[2] ?? '';
+    if (code === 429) counts.quota++;
+    else if (code === 401 || code === 402 || code === 403) counts.key++;
+    else if (/unavailable|not found|no such model|does not exist/i.test(text)) counts.model++;
+    else if (code === 408 || code === 504 || /timeout|timed out/i.test(text)) counts.timeout++;
+    else counts.other++;
+  }
+  const more = /\(\+(\d+) more\)/.exec(message);
+  const parts = [
+    counts.quota ? `quota/rate-limit ×${counts.quota}` : '', counts.key ? `needs key ×${counts.key}` : '', counts.model ? `model unavailable ×${counts.model}` : '',
+    counts.timeout ? `timed out ×${counts.timeout}` : '', counts.other ? `other ×${counts.other}` : '',
+  ].filter(Boolean);
+  return `${GATEWAY_SUMMARY_PREFIX}: ${parts.join(', ')}${more ? ` (+${more[1]} more)` : ''}`;
+}
+
 /** The provider's own short explanation of an error (never the request), flattened and truncated for logs and the activity list. */
 export function providerMessageOf(body: string | undefined): string | null {
   if (!body) return null;
   try {
     const parsed = JSON.parse(body) as { error?: { message?: unknown } | string; message?: unknown };
     const message = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message ?? parsed.message;
-    return typeof message === 'string' ? message.replace(/\s+/g, ' ').slice(0, 160) : null;
+    return typeof message === 'string' ? (summarizeGatewayFailure(message) ?? message.replace(/\s+/g, ' ').slice(0, 160)) : null;
   } catch {
     return body.replace(/\s+/g, ' ').slice(0, 120) || null;
   }
