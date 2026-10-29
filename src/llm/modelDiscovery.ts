@@ -1,5 +1,5 @@
 import { env } from '../config/env';
-import { checkProviderEndpoint, describeEndpointRefusal, normalizeProviderBaseUrl } from './endpointPolicy';
+import { checkProviderEndpoint, describeEndpointRefusal, isLoopbackUrl, normalizeProviderBaseUrl } from './endpointPolicy';
 import { describeNetworkFailure } from './openAiCompatible';
 import { ANTHROPIC_VERSION } from './adapters/anthropicAdapter';
 import { vendorById, endpointMatchesVendor } from './adapters';
@@ -56,7 +56,14 @@ export async function discoverModels(
   const vendor = vendorById(input.vendor);
   if (!vendor) return failure('unsupported_vendor');
   if (vendor.id === 'omniroute') {
-    const list = await listOmniRouteModels();
+    // The address and key the administrator is saving, under the same endpoint policy as every other provider; the gateway must also be on THIS machine.
+    const gatewayUrl = normalizeProviderBaseUrl(input.baseUrl?.trim() || '');
+    if (gatewayUrl) {
+      const refused = checkProviderEndpoint(gatewayUrl, deps.allowLocal ?? env.allowLocalHttpProviders);
+      if (refused) return failure('endpoint_refused', ` ${describeEndpointRefusal(refused)}`);
+      if (!isLoopbackUrl(gatewayUrl)) return failure('endpoint_refused', ' The OmniRoute gateway must run on this server (127.0.0.1).');
+    }
+    const list = await listOmniRouteModels({ baseUrl: gatewayUrl || undefined, apiKey: input.apiKey });
     if (!list.ok) return list.reason === 'not_running' ? failure('gateway_not_running') : list.reason === 'no_key' ? failure('gateway_key_missing') : list.reason === 'rejected' ? failure('rejected') : failure('unreadable');
     const models = cleanIds(list.models.map((id) => ({ id, price: id.startsWith('auto/') ? 'gateway_combo' as const : 'paid_or_unknown' as const })));
     return { ok: true, models, truncated: list.truncated, note: 'Read from the gateway. A combo (auto/…) is only as free as the accounts connected inside OmniRoute; any other model may be billed. Pick one and it is tested with a real request.' };

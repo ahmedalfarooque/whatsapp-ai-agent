@@ -16,7 +16,8 @@ import { PROVIDER_PRESETS, presetsPayload, resolveSimpleProvider, SimpleProvider
 import { getAccountRouting, resetAccountRouting, RoutingOrderError, saveAccountRouting } from '../llm/routingOrder';
 import { discoverModels } from '../llm/modelDiscovery';
 import { endpointMatchesVendor, vendorById } from '../llm/adapters';
-import { discoverLocalOmniRouteKey, isPlausibleOmniRouteKey, listOmniRouteModels, omniRouteBaseUrl, omniRouteReachable } from '../llm/omniRoute';
+import { checkOmniRouteGateway, discoverLocalOmniRouteKey, isPlausibleOmniRouteKey, listOmniRouteModels, omniRouteBaseUrl, omniRouteReachable, type GatewayInferenceAttempt } from '../llm/omniRoute';
+import { checkProviderEndpoint, describeEndpointRefusal, isLoopbackUrl, normalizeProviderBaseUrl } from '../llm/endpointPolicy';
 import { autoSelectModel, type ProbeAttempt } from '../llm/autoSetup';
 import { validationBudget } from '../llm/validationBudget';
 import { listRouteLog, routeStats } from '../llm/routeLog';
@@ -313,6 +314,47 @@ export function registerAiRoutingRoutes(router: Router): void {
       }
       const result = await discoverModels({ vendor, baseUrl, apiKey });
       res.json(result);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * The layered OmniRoute check (reachable → key accepted → models listed → real inference). Inference only runs when `probe` is true, because it spends a little free
+   * allowance; it uses ONE tiny request through the normal adapter, never a customer message, and the gateway key (typed, or the saved provider's, or this server's) is never returned.
+   */
+  router.post('/api/dashboard/ai-routing/omniroute-check', async (req, res) => {
+    try {
+      const b = (req.body ?? {}) as { baseUrl?: unknown; apiKey?: unknown; providerId?: unknown; model?: unknown; probe?: unknown };
+      let baseUrl = typeof b.baseUrl === 'string' ? normalizeProviderBaseUrl(b.baseUrl) : '';
+      let apiKey = typeof b.apiKey === 'string' ? b.apiKey.trim() : '';
+      let model = typeof b.model === 'string' ? b.model.split(',')[0]!.trim() : '';
+      if (b.providerId !== undefined && b.providerId !== null) {
+        const row = getProvider(Number(b.providerId), currentAccountId());
+        if (!row) { res.status(404).json({ error: 'not_found' }); return; }
+        if (row.whatsapp_account_id === null && !mayManageShared(req)) { res.status(403).json({ error: 'Only a super administrator can check a provider shared by every business' }); return; }
+        baseUrl = baseUrl || row.base_url; apiKey = apiKey || providerApiKey(row) || ''; model = model || csv(row.models)[0] || '';
+      }
+      const refused = baseUrl ? checkProviderEndpoint(baseUrl, env.allowLocalHttpProviders) : null;
+      if (refused || (baseUrl && !isLoopbackUrl(baseUrl))) {
+        res.json({ state: 'unreachable', baseUrl, layers: { reachable: false, keyAccepted: null, modelCount: null, inference: 'not_run' }, message: refused ? describeEndpointRefusal(refused) : 'The OmniRoute gateway must run on this server (127.0.0.1).', refused: true });
+        return;
+      }
+      const useKey = apiKey || (await discoverLocalOmniRouteKey()) || '';
+      const gatewayUrl = baseUrl || omniRouteBaseUrl();
+      const infer = b.probe === true && model && useKey
+        ? async (): Promise<{ ok: true } | { ok: false; attempt: GatewayInferenceAttempt }> => {
+          const candidate: RouteCandidate = { key: `omni-check:${model}`, providerKey: 'provider:omni-check', providerId: null, providerName: 'OmniRoute (gateway check)', kind: 'openai_compatible', adapter: 'openai', baseUrl: gatewayUrl, apiKey: useKey, model, free: true, image: null, audio: null, tools: false, timeoutMs: 25_000, builtin: false };
+          try {
+            await routeCompletion({ task: 'chat', messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxTokens: 24, temperature: 0, deadline: Date.now() + 28_000, candidatesOverride: [candidate], singleAttempt: true });
+            return { ok: true };
+          } catch (error) {
+            const first = error instanceof AiResponseError ? error.attempts[0] : undefined;
+            return { ok: false, attempt: { reason: first?.reason ?? (error instanceof AiCredentialError ? 'credential' : 'provider_error'), httpStatus: first?.httpStatus ?? null, providerMessage: first?.providerMessage ?? (error instanceof AiResponseError ? error.providerMessage : null) } };
+          }
+        }
+        : undefined;
+      res.json(await checkOmniRouteGateway({ baseUrl: gatewayUrl, apiKey: useKey, infer }));
     } catch (error) {
       fail(res, error);
     }

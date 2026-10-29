@@ -5,6 +5,7 @@ import path from 'node:path';
 import { env } from '../config/env';
 import { logger } from '../logger';
 import { isLoopbackUrl } from './endpointPolicy';
+import { GATEWAY_SUMMARY_PREFIX } from './openAiCompatible';
 
 /**
  * OmniRoute (npm "omniroute") is a local AI gateway: an OpenAI-compatible API at http://localhost:20128/v1 (Bearer client key), a health endpoint at
@@ -89,11 +90,17 @@ export type OmniRouteModelList =
   | { ok: true; baseUrl: string; models: string[]; truncated: boolean }
   | { ok: false; baseUrl: string; reason: 'not_running' | 'no_key' | 'rejected' | 'unreadable' };
 
-/** Asks the local gateway for its model ids with THIS server's own key (OMNIROUTE_API_KEY, or the key file on this Windows PC). The key never leaves this function. */
-export async function listOmniRouteModels(): Promise<OmniRouteModelList> {
-  const baseUrl = omniRouteBaseUrl();
+/**
+ * Asks the loopback gateway for its model ids. The address and key are the ones the administrator is saving (so Load models, Test and inference all talk to the same
+ * gateway with the same credential); with none given it falls back to THIS server's own (OMNIROUTE_BASE_URL / OMNIROUTE_API_KEY, or the key file on this Windows PC).
+ * A typed key that is not shaped like an OmniRoute key is refused before any request. The key never leaves this function.
+ */
+export async function listOmniRouteModels(opts: { baseUrl?: string; apiKey?: string | null } = {}): Promise<OmniRouteModelList> {
+  const baseUrl = (opts.baseUrl?.trim() || omniRouteBaseUrl()).replace(/\/+$/, '');
   if (!(await omniRouteReachable(baseUrl))) return { ok: false, baseUrl, reason: 'not_running' };
-  const key = await discoverLocalOmniRouteKey();
+  const typed = (opts.apiKey ?? '').trim();
+  if (typed && !isPlausibleOmniRouteKey(typed)) return { ok: false, baseUrl, reason: 'rejected' };
+  const key = typed || await discoverLocalOmniRouteKey();
   if (!key) return { ok: false, baseUrl, reason: 'no_key' };
   try {
     const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, { redirect: 'error', headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10_000) });
@@ -108,4 +115,68 @@ export async function listOmniRouteModels(): Promise<OmniRouteModelList> {
   } catch {
     return { ok: false, baseUrl, reason: 'unreadable' };
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// The layered gateway check shown in Super Admin: each layer is proven separately, because a running gateway, an accepted key and a model list are NOT inference.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+export type GatewayState =
+  | 'unreachable' | 'invalid_key' | 'no_key' | 'no_models' | 'models_listed'
+  | 'no_upstream' | 'rate_limited' | 'model_unavailable' | 'timeout' | 'inference_failed' | 'inference_ok';
+
+export const GATEWAY_STATE_TEXT: Record<GatewayState, string> = {
+  unreachable: 'The gateway is not reachable at this address (not running, wrong port, or not on this server).',
+  invalid_key: 'The gateway is running but rejected this gateway key. This is the gateway key, not an upstream provider key.',
+  no_key: 'The gateway is running, but no gateway key was entered and none is configured on this server.',
+  no_models: 'The gateway accepted the key but lists no models.',
+  models_listed: 'The gateway is reachable, the key is accepted and models are listed. Nothing has been generated yet, so this is not proof that it answers: run the check with a test request.',
+  no_upstream: 'The gateway answered, but none of its upstream provider accounts did (none is connected, or each is out of quota, unavailable or needs a key). Connect or fix an upstream account inside the gateway.',
+  rate_limited: 'The gateway reached an upstream, but its free quota or rate limit is used up for now. It is retried later and nothing is purchased.',
+  model_unavailable: 'The gateway does not offer, or cannot serve, this model. Pick another from the list.',
+  timeout: 'The gateway did not answer in time.',
+  inference_failed: 'The gateway answered with an error that could not be classified more precisely.',
+  inference_ok: 'Real inference succeeded: the gateway generated text through a connected upstream.',
+};
+
+export interface GatewayInferenceAttempt { reason: string; httpStatus: number | null; providerMessage: string | null }
+export interface GatewayCheck {
+  state: GatewayState;
+  baseUrl: string;
+  layers: { reachable: boolean; keyAccepted: boolean | null; modelCount: number | null; inference: 'ok' | 'failed' | 'not_run' };
+  message: string;
+  models?: string[];
+}
+
+/** Maps a failed inference attempt to the gateway state it means (never from the provider's own text beyond the fixed markers). */
+export function gatewayStateOfAttempt(a: GatewayInferenceAttempt): GatewayState {
+  const message = (a.providerMessage ?? '').toLowerCase();
+  if (a.reason === 'credential' || a.httpStatus === 401 || a.httpStatus === 403) return 'invalid_key';
+  if (message.startsWith(GATEWAY_SUMMARY_PREFIX)) return 'no_upstream';
+  if (a.reason === 'rate_limited' || a.reason === 'payment_required' || a.httpStatus === 429) return 'rate_limited';
+  if (a.reason === 'model_unavailable') return 'model_unavailable';
+  if (message === 'timeout') return 'timeout';
+  if (/connection refused|could not be resolved|network error|connection reset/.test(message)) return 'unreachable';
+  return 'inference_failed';
+}
+
+/**
+ * Proves the gateway layer by layer: reachable, key accepted (authenticated model list), models listed and, only when `infer` is given (an explicit request, never
+ * automatic: it spends a little free allowance), a real generation. `infer` is supplied by the caller so this file does not depend on the router.
+ */
+export async function checkOmniRouteGateway(opts: { baseUrl?: string; apiKey?: string | null; infer?: () => Promise<{ ok: true } | { ok: false; attempt: GatewayInferenceAttempt }> } = {}): Promise<GatewayCheck> {
+  const list = await listOmniRouteModels({ baseUrl: opts.baseUrl, apiKey: opts.apiKey });
+  const baseUrl = list.baseUrl;
+  const done = (state: GatewayState, layers: GatewayCheck['layers'], models?: string[]): GatewayCheck => ({ state, baseUrl, layers, message: GATEWAY_STATE_TEXT[state], ...(models ? { models: models.slice(0, 50) } : {}) });
+  if (!list.ok) {
+    if (list.reason === 'not_running') return done('unreachable', { reachable: false, keyAccepted: null, modelCount: null, inference: 'not_run' });
+    if (list.reason === 'no_key') return done('no_key', { reachable: true, keyAccepted: null, modelCount: null, inference: 'not_run' });
+    if (list.reason === 'rejected') return done('invalid_key', { reachable: true, keyAccepted: false, modelCount: null, inference: 'not_run' });
+    return done('inference_failed', { reachable: true, keyAccepted: null, modelCount: null, inference: 'not_run' }); // answered, but the model list was unreadable
+  }
+  if (list.models.length === 0) return done('no_models', { reachable: true, keyAccepted: true, modelCount: 0, inference: 'not_run' });
+  const listed = { reachable: true, keyAccepted: true, modelCount: list.models.length } as const;
+  if (!opts.infer) return done('models_listed', { ...listed, inference: 'not_run' }, list.models);
+  const result = await opts.infer();
+  if (result.ok) return done('inference_ok', { ...listed, inference: 'ok' }, list.models);
+  return done(gatewayStateOfAttempt(result.attempt), { ...listed, inference: 'failed' }, list.models);
 }

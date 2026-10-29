@@ -1287,7 +1287,7 @@ function aiProviderFormHtml(meta, entry) {
         ${isNew ? `<div class="field"><label for="wa-field-provider">Provider</label><select id="wa-field-provider" name="provider"><option value="auto">Detect from the key</option>${presetOptions}</select><p class="field-help ai-provider-hint"></p><p class="field-help ai-err" data-err="provider" style="color:#c0453f" hidden></p></div>` : ''}
         ${textField('models', 'Models (optional, comma-separated, best first)', isNew ? 'Leave empty: when you save, the key is tested with a real request and a model that answered is chosen automatically. Type model ids only to test those instead. Required for a custom endpoint, xAI and Cerebras. A provider is never used until its free tier is confirmed.' : 'The models this provider may use, best first. A provider is never used until its free tier is confirmed.', entry && entry.models ? entry.models.join(', ') : '')}
         <p class="field-help ai-err" data-err="models" style="color:#c0453f" hidden></p>
-        ${isNew ? '<div class="ai-omni-models field" hidden><button type="button" class="btn small" data-act="load-models">Load models</button> <span class="muted small ai-omni-status" role="status"></span><datalist id="ai-omni-model-list"></datalist></div>' : ''}
+        ${isNew ? '<div class="ai-omni-models field" hidden><button type="button" class="btn small" data-act="load-models">Load models</button> <button type="button" class="btn small" data-act="check-gateway" hidden>Check gateway</button> <button type="button" class="btn small" data-act="check-gateway-probe" hidden>Check with a test request</button> <span class="muted small ai-omni-status" role="status"></span><datalist id="ai-omni-model-list"></datalist></div>' : ''}
         ${isNew ? textField('baseUrl', 'Endpoint address', 'Filled in for known providers. Required for a custom endpoint: a full https:// address.', '') : ''}
         <p class="field-help ai-err" data-err="baseUrl" style="color:#c0453f" hidden></p>
       </details>
@@ -1397,6 +1397,28 @@ function aiFormModelDiscovery(form, preset) {
     } catch (error) { status.textContent = error.message; }
     button.disabled = false;
   };
+  // OmniRoute only: the layered check. A running gateway, an accepted key and a model list are shown as separate facts, and none of them is "AI works": only a real
+  // test request (the second button, which spends a little free allowance) can say that. Nothing here saves anything: Save is its own action.
+  const checks = box.querySelectorAll('[data-act="check-gateway"],[data-act="check-gateway-probe"]');
+  checks.forEach((c) => { c.hidden = preset.id !== 'omniroute'; });
+  if (preset.id !== 'omniroute') return;
+  checks.forEach((c) => {
+    c.onclick = async () => {
+      const probe = c.dataset.act === 'check-gateway-probe';
+      checks.forEach((x) => { x.disabled = true; });
+      status.textContent = probe ? 'Checking the gateway with a test request…' : 'Checking the gateway…';
+      try {
+        const key = String(form.elements.config.value || '').trim();
+        const model = form.elements.models ? String(form.elements.models.value || '').trim() : '';
+        const r = await api('/api/dashboard/ai-routing/omniroute-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseUrl: form.elements.baseUrl ? String(form.elements.baseUrl.value || '').trim() : '', apiKey: key, model, probe }) });
+        const yn = (v) => (v === true ? 'yes' : v === false ? 'no' : 'not checked');
+        const l = r.layers || {};
+        status.textContent = `Gateway reachable: ${yn(l.reachable)} · gateway key accepted: ${yn(l.keyAccepted)} · models listed: ${l.modelCount == null ? 'not checked' : l.modelCount} · real inference: ${l.inference === 'ok' ? 'succeeded' : l.inference === 'failed' ? 'failed' : 'not run'}. ${r.message} (Nothing is saved by this check.)`;
+        status.style.color = r.state === 'inference_ok' ? '' : (r.state === 'models_listed' ? '' : '#c0453f');
+      } catch (error) { status.textContent = error.message; }
+      checks.forEach((x) => { x.disabled = false; });
+    };
+  });
 }
 
 /** Inline checks before Save, using the server's own rules: returns false when something is missing or invalid. */

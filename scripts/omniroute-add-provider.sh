@@ -36,17 +36,18 @@ safe() { node -e '
 const BAD=/key|secret|token|password|cookie|credential/i;
 try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
  const s=(v,d=0)=>Array.isArray(v)?v.slice(0,5).map(x=>s(x,d+1)):(v&&typeof v==="object")?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,BAD.test(k)?"[hidden]":(d>3?"…":s(x,d+1))])):(typeof v==="string"&&v.length>160?v.slice(0,160)+"…":v);
- console.log(JSON.stringify(s(j)).slice(0,700))}catch(e){console.log("(non-JSON answer)")}' "$1"; }
+ let out=JSON.stringify(s(j)).slice(0,700);const k=process.env.K||"";if(k.length>=6)out=out.split(k).join("[hidden]"); /* never echo the key even if a provider message repeats it */
+ console.log(out)}catch(e){console.log("(non-JSON answer)")}' "$1"; }
 
 echo "1/4 Checking the key with the provider (nothing is saved yet)..."
 code=$(K="$KEYVAL" P="$PROVIDER" node -e 'process.stdout.write(JSON.stringify({provider:process.env.P,apiKey:process.env.K}))' | curl -s -m 60 -o "$TMP" -w '%{http_code}' -b "$JAR" -H 'Content-Type: application/json' --data-binary @- $BASE/api/providers/validate)
-echo "    validate: HTTP $code  $(safe "$TMP")"
+echo "    validate: HTTP $code  $(K="$KEYVAL" safe "$TMP")"
 VALID=$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).valid===true?"yes":"no")}catch(e){console.log("no")}' "$TMP")
 [ "$VALID" = yes ] || { echo "The provider did not accept this key (see the message above). Nothing was saved."; exit 2; }
 
 echo "2/4 Saving the connection..."
 code=$(K="$KEYVAL" P="$PROVIDER" N="$NAME" node -e 'process.stdout.write(JSON.stringify({provider:process.env.P,name:process.env.N,apiKey:process.env.K}))' | curl -s -m 60 -o "$TMP" -w '%{http_code}' -b "$JAR" -H 'Content-Type: application/json' --data-binary @- $BASE/api/providers)
-echo "    create: HTTP $code  $(safe "$TMP")"
+echo "    create: HTTP $code  $(K="$KEYVAL" safe "$TMP")"
 [ "$code" = 201 ] || { echo "The gateway did not save it. Nothing was persisted."; exit 3; }
 ID=$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).connection.id||"")}catch(e){console.log("")}' "$TMP")
 unset KEYVAL
